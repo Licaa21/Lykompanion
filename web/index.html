@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lykompanion</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <button id="new-chat-btn" class="sidebar-btn new-chat-btn">
+        <span class="sidebar-icon">+</span> New Chat
+      </button>
+      <div id="chat-list" class="chat-list"></div>
+      <div class="sidebar-footer">
+        <button id="instructions-btn" class="sidebar-btn">
+          <span class="sidebar-icon">📝</span> Personal Instructions
+        </button>
+        <button id="memory-btn" class="sidebar-btn">
+          <span class="sidebar-icon">🧠</span> Memory
+        </button>
+        <button id="usage-btn" class="sidebar-btn">
+          <span class="sidebar-icon">📊</span> Consumption
+        </button>
+        <button id="settings-btn" class="sidebar-btn">
+          <span class="sidebar-icon">⚙️</span> Settings
+        </button>
+      </div>
+    </aside>
+
+    <main class="chat-panel">
+      <div id="chat-log" class="chat-log"></div>
+      <div class="composer">
+        <div id="voice-status" class="voice-status"></div>
+        <div id="screenshot-indicator" class="screenshot-indicator" hidden>
+          📷 Screenshot will be included with your next message
+        </div>
+        <form id="chat-form" class="chat-form">
+          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off">📷</button>
+          <button
+            type="button"
+            id="live-mic-toggle"
+            class="icon-btn"
+            title="Hands-free: auto-record and send when you speak"
+          >
+            🎙️
+          </button>
+          <button type="button" id="mic-btn" class="icon-btn" title="Voice input">🎤</button>
+          <input id="chat-input" type="text" placeholder="Message Lykompanion..." autocomplete="off" />
+          <button type="submit" class="send-btn">Send</button>
+          <button type="button" id="stop-narration-btn" class="icon-btn" title="Stop narration" hidden>⏹️</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <div id="settings-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button type="button" class="modal-close" data-close="settings-modal">&times;</button>
+      </div>
+      <div class="modal-tabs">
+        <button type="button" class="tab-btn active" data-tab="general">General</button>
+        <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
+        <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
+        <button type="button" class="tab-btn" data-tab="third-party">Third-Party APIs</button>
+      </div>
+      <div class="modal-body">
+        <section class="tab-panel" data-tab="general">
+          <label>
+            OpenRouter API Key
+            <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
+          </label>
+          <label>
+            LLM Model
+            <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <select id="cfg-model"></select>
+          </label>
+          <label>
+            Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
+            <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
+          </label>
+        </section>
+
+        <section class="tab-panel" data-tab="voice" hidden>
+          <label>
+            TTS Provider
+            <select id="cfg-tts-provider">
+              <option value="kokoro">Kokoro (local)</option>
+              <option value="openrouter">OpenRouter</option>
+            </select>
+          </label>
+          <label>
+            Kokoro Voice
+            <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices..." />
+            <select id="cfg-kokoro-voice"></select>
+          </label>
+          <label>
+            OpenRouter TTS Model
+            <input
+              id="cfg-openrouter-tts-model-search"
+              type="text"
+              class="model-search"
+              placeholder="Search models..."
+            />
+            <select id="cfg-openrouter-tts-model"></select>
+          </label>
+          <label>
+            OpenRouter Voice
+            <select id="cfg-openrouter-voice"></select>
+          </label>
+          <label>
+            Narration Speed (<span id="cfg-narration-speed-value">1.0</span>x)
+            <input id="cfg-narration-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
+          </label>
+          <label>
+            Narration Volume (<span id="cfg-narration-volume-value">100</span>%)
+            <input id="cfg-narration-volume" type="range" min="0" max="100" step="5" value="100" />
+          </label>
+          <label class="checkbox">
+            <input id="cfg-narrate" type="checkbox" checked />
+            Narrate replies (TTS)
+          </label>
+          <h3>Voice Input</h3>
+          <p class="modal-hint">
+            Speech is always sent directly to an audio-capable LLM (no local transcription).
+          </p>
+          <label>
+            OpenRouter Voice Model
+            <input
+              id="cfg-openrouter-voice-model-search"
+              type="text"
+              class="model-search"
+              placeholder="Search models..."
+            />
+            <select id="cfg-openrouter-voice-model"></select>
+          </label>
+        </section>
+
+        <section class="tab-panel" data-tab="live-mic" hidden>
+          <p class="modal-hint">
+            Tune how the hands-free mic (🎙️) decides when you're speaking. Stored locally in this browser.
+          </p>
+          <label>
+            Voice Activation Threshold (<span id="cfg-vad-threshold-value">8</span>)
+            <input id="cfg-vad-threshold" type="range" min="1" max="40" step="1" value="8" />
+          </label>
+          <label>
+            Silence Before Sending (<span id="cfg-vad-silence-value">1200</span> ms)
+            <input id="cfg-vad-silence" type="range" min="300" max="3000" step="100" value="1200" />
+          </label>
+          <label>
+            Minimum Speech Duration (<span id="cfg-vad-min-speech-value">300</span> ms)
+            <input id="cfg-vad-min-speech" type="range" min="100" max="1500" step="100" value="300" />
+          </label>
+        </section>
+
+        <section class="tab-panel" data-tab="third-party" hidden>
+          <h3>IGDB</h3>
+          <p class="modal-hint">
+            Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
+            Twitch - create a free app at
+            <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
+            to get a Client ID and Secret.
+          </p>
+          <label>
+            Twitch Client ID
+            <input id="cfg-igdb-client-id" type="text" placeholder="Not set" autocomplete="off" />
+          </label>
+          <label>
+            Twitch Client Secret
+            <input id="cfg-igdb-client-secret" type="password" placeholder="Not set" autocomplete="off" />
+          </label>
+
+          <h3>Steam</h3>
+          <p class="modal-hint">
+            Store/app info works with no setup. To let the agent check your owned games and playtime, add a
+            free API key from
+            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>
+            plus your numeric SteamID64.
+          </p>
+          <label>
+            Steam API Key
+            <input id="cfg-steam-api-key" type="password" placeholder="Not set" autocomplete="off" />
+          </label>
+          <label>
+            SteamID64
+            <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
+          </label>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="cfg-refresh-models" class="secondary-btn">Refresh Model Lists</button>
+        <button type="button" id="cfg-save" class="primary-btn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="instructions-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Personal Instructions</h2>
+        <button type="button" class="modal-close" data-close="instructions-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">
+          Tell your companion anything it should always know or do — tone, how to address you, things to avoid, etc.
+          This is added to every conversation.
+        </p>
+        <textarea
+          id="instructions-text"
+          rows="12"
+          placeholder="e.g. Call me Andrei. Keep jokes to a minimum. Always warn before spoilers."
+        ></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="instructions-save" class="primary-btn">Save Instructions</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="memory-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Memory</h2>
+        <button type="button" class="modal-close" data-close="memory-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">
+          Facts your companion has saved about you. It can add or remove these itself during conversation, or you
+          can manage them directly here.
+        </p>
+        <div id="memory-list" class="memory-list"></div>
+        <form id="memory-add-form" class="memory-add-form">
+          <input id="memory-add-input" type="text" placeholder="Add a memory..." autocomplete="off" />
+          <button type="submit" class="secondary-btn">Add</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="usage-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Consumption</h2>
+        <button type="button" class="modal-close" data-close="usage-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Cumulative usage across all conversations, tracked since you started using the app.</p>
+        <div class="usage-stats">
+          <div class="usage-stat">
+            <span class="usage-stat-value" id="usage-requests">-</span>
+            <span class="usage-stat-label">Requests</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-value" id="usage-prompt-tokens">-</span>
+            <span class="usage-stat-label">Prompt tokens</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-value" id="usage-completion-tokens">-</span>
+            <span class="usage-stat-label">Completion tokens</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-value" id="usage-cost">-</span>
+            <span class="usage-stat-label">Total cost</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="narration-audio" hidden></audio>
+  <script src="js/app.js"></script>
+</body>
+</html>

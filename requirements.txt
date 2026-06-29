@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+openai
+httpx
+mss
+psutil
+Pillow
+python-multipart
+websockets
