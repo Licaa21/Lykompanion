@@ -27,6 +27,18 @@ body {
   gap: 0.5rem;
 }
 
+.sidebar-brand {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0 0.75rem;
+}
+
+.sidebar-logo {
+  width: 140px;
+  height: auto;
+  object-fit: contain;
+}
+
 .sidebar-btn {
   display: flex;
   align-items: center;
