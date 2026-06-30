@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     # Max number of most-recent chat messages sent to the LLM as context. 0 = no limit.
     context_window_messages: int = 20
 
+    # Dedicated model for background memory extraction. Falls back to openrouter_model if empty.
+    memory_extraction_model: str = ""
+
+    # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
+    game_state_ocr_enabled: bool = False
+    game_state_poll_interval_seconds: int = 90
+    # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
+    game_state_model: str = ""
+    # Full path to tesseract.exe, only needed if it's not on PATH after installing Tesseract OCR.
+    tesseract_cmd: str = ""
+
+    google_tts_api_key: str = ""
+    google_tts_voice: str = "en-US-Chirp3-HD-Aoede"
+
     igdb_client_id: str = ""
     igdb_client_secret: str = ""
     steam_api_key: str = ""

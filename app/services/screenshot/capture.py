@@ -43,8 +43,8 @@ def get_active_monitor_index() -> int:
     return 1
 
 
-def capture_monitor_b64(monitor_index: int | None = None, max_width: int = 1280) -> str:
-    """Capture one monitor (1-based index) and return a base64-encoded JPEG, downscaled for LLM context."""
+def capture_monitor_image(monitor_index: int | None = None) -> Image.Image:
+    """Capture one monitor (1-based index) and return the raw, full-resolution PIL image."""
     if monitor_index is None or monitor_index < 1:
         monitor_index = get_active_monitor_index()
 
@@ -54,7 +54,12 @@ def capture_monitor_b64(monitor_index: int | None = None, max_width: int = 1280)
             monitor_index = 1
         raw = sct.grab(monitors[monitor_index - 1])
 
-    image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+    return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+
+
+def capture_monitor_b64(monitor_index: int | None = None, max_width: int = 1280) -> str:
+    """Capture one monitor (1-based index) and return a base64-encoded JPEG, downscaled for LLM context."""
+    image = capture_monitor_image(monitor_index)
     if image.width > max_width:
         ratio = max_width / image.width
         image = image.resize((max_width, int(image.height * ratio)))

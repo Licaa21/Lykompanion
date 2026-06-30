@@ -15,10 +15,14 @@ const instructionsBtn = document.getElementById("instructions-btn");
 const memoryBtn = document.getElementById("memory-btn");
 const usageBtn = document.getElementById("usage-btn");
 const settingsBtn = document.getElementById("settings-btn");
+const gameStateBtn = document.getElementById("game-state-btn");
+const gameStateDot = document.getElementById("game-state-dot");
+const gameStateFields = document.getElementById("game-state-fields");
 const settingsModal = document.getElementById("settings-modal");
 const instructionsModal = document.getElementById("instructions-modal");
 const memoryModal = document.getElementById("memory-modal");
 const usageModal = document.getElementById("usage-modal");
+const gameStateModal = document.getElementById("game-state-modal");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
@@ -827,7 +831,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, instructionsModal, memoryModal, usageModal].forEach((modal) => {
+[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -873,6 +877,7 @@ const modelOptionsCache = {
   kokoroVoice: [],
   openrouterTts: [],
   voiceInput: [],
+  chirp3Voice: [],
 };
 
 // Each OpenRouter Speech model has its own voice catalog (e.g. Gemini uses
@@ -908,7 +913,16 @@ function setupModelSearch(searchInputId, selectId, cacheKey, pinnedOption) {
 }
 
 setupModelSearch("cfg-model-search", "cfg-model", "llm");
+setupModelSearch("cfg-memory-model-search", "cfg-memory-model", "llm", {
+  value: "",
+  label: "(use main chat model)",
+});
+setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "llm", {
+  value: "",
+  label: "(use main chat model)",
+});
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
+setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
 setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", "openrouterTts");
 setupModelSearch("cfg-openrouter-voice-model-search", "cfg-openrouter-voice-model", "voiceInput", {
   value: "",
@@ -920,7 +934,10 @@ async function loadModels(
   selectedKokoroVoice,
   selectedOpenrouterTts,
   selectedVoiceInputModel,
-  selectedOpenrouterVoice
+  selectedOpenrouterVoice,
+  selectedMemoryModel,
+  selectedChirp3Voice,
+  selectedGameStateModel
 ) {
   const [llmModels, ttsModels, voiceInputModels] = await Promise.all([
     fetch("/api/models/llm").then((r) => r.json()),
@@ -940,9 +957,21 @@ async function loadModels(
   );
   modelOptionsCache.openrouterTts = sortByLabel(speechModels.map((m) => ({ value: m.id, label: m.name })));
   modelOptionsCache.voiceInput = sortByLabel(voiceInputModels.map((m) => ({ value: m.id, label: m.name })));
+  modelOptionsCache.chirp3Voice = sortByLabel((ttsModels.chirp3_voices || []).map((v) => ({ value: v.id, label: v.name })));
 
   populateSelect(document.getElementById("cfg-model"), modelOptionsCache.llm, selectedLlm);
+  populateSelect(
+    document.getElementById("cfg-memory-model"),
+    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llm],
+    selectedMemoryModel
+  );
+  populateSelect(
+    document.getElementById("cfg-game-state-model"),
+    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llm],
+    selectedGameStateModel
+  );
   populateSelect(document.getElementById("cfg-kokoro-voice"), modelOptionsCache.kokoroVoice, selectedKokoroVoice);
+  populateSelect(document.getElementById("cfg-chirp3-voice"), modelOptionsCache.chirp3Voice, selectedChirp3Voice);
   populateSelect(
     document.getElementById("cfg-openrouter-tts-model"),
     modelOptionsCache.openrouterTts,
@@ -990,6 +1019,13 @@ contextWindowInput.addEventListener("input", () => {
   contextWindowValue.textContent = contextWindowInput.value === "0" ? "all" : contextWindowInput.value;
 });
 
+const gameStateIntervalInput = document.getElementById("cfg-game-state-interval");
+const gameStateIntervalValue = document.getElementById("cfg-game-state-interval-value");
+
+gameStateIntervalInput.addEventListener("input", () => {
+  gameStateIntervalValue.textContent = gameStateIntervalInput.value;
+});
+
 const vadThresholdInput = document.getElementById("cfg-vad-threshold");
 const vadThresholdValue = document.getElementById("cfg-vad-threshold-value");
 const vadSilenceInput = document.getElementById("cfg-vad-silence");
@@ -1022,10 +1058,20 @@ vadMinSpeechInput.addEventListener("input", () => {
   localStorage.setItem("vadMinSpeechMs", vadMinSpeechMs);
 });
 
+function updateTtsProviderVisibility() {
+  const provider = document.getElementById("cfg-tts-provider").value;
+  document.querySelectorAll("[data-tts-provider]").forEach((el) => {
+    el.hidden = el.dataset.ttsProvider !== provider;
+  });
+}
+
+document.getElementById("cfg-tts-provider").addEventListener("change", updateTtsProviderVisibility);
+
 async function loadConfig() {
   const response = await fetch("/api/config");
   const cfg = await response.json();
   document.getElementById("cfg-tts-provider").value = cfg.tts_provider;
+  updateTtsProviderVisibility();
   document.getElementById("cfg-api-key").placeholder = cfg.openrouter_api_key_set
     ? "•••••••• (set)"
     : "Not set";
@@ -1039,6 +1085,13 @@ async function loadConfig() {
   contextWindowInput.value = cfg.context_window_messages;
   contextWindowValue.textContent = cfg.context_window_messages === 0 ? "all" : cfg.context_window_messages;
 
+  document.getElementById("cfg-game-state-enabled").checked = cfg.game_state_ocr_enabled;
+  gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
+  gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
+
+  document.getElementById("cfg-google-tts-api-key").placeholder = cfg.google_tts_api_key_set
+    ? "•••••••• (set)"
+    : "Not set (uses Application Default Credentials)";
   document.getElementById("cfg-igdb-client-id").value = cfg.igdb_client_id || "";
   document.getElementById("cfg-igdb-client-secret").placeholder = cfg.igdb_client_secret_set
     ? "•••••••• (set)"
@@ -1051,7 +1104,10 @@ async function loadConfig() {
     cfg.kokoro_voice,
     cfg.openrouter_tts_model,
     cfg.openrouter_voice_model,
-    cfg.openrouter_voice
+    cfg.openrouter_voice,
+    cfg.memory_extraction_model,
+    cfg.google_tts_voice,
+    cfg.game_state_model
   );
 }
 
@@ -1061,7 +1117,10 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-kokoro-voice").value,
     document.getElementById("cfg-openrouter-tts-model").value,
     document.getElementById("cfg-openrouter-voice-model").value,
-    document.getElementById("cfg-openrouter-voice").value
+    document.getElementById("cfg-openrouter-voice").value,
+    document.getElementById("cfg-memory-model").value,
+    document.getElementById("cfg-chirp3-voice").value,
+    document.getElementById("cfg-game-state-model").value
   );
 });
 
@@ -1071,7 +1130,10 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
   const steamApiKeyInput = document.getElementById("cfg-steam-api-key");
   const body = {
     openrouter_model: document.getElementById("cfg-model").value,
+    memory_extraction_model: document.getElementById("cfg-memory-model").value,
     tts_provider: document.getElementById("cfg-tts-provider").value,
+    google_tts_api_key: document.getElementById("cfg-google-tts-api-key").value || null,
+    google_tts_voice: document.getElementById("cfg-chirp3-voice").value,
     kokoro_voice: document.getElementById("cfg-kokoro-voice").value,
     openrouter_tts_model: document.getElementById("cfg-openrouter-tts-model").value,
     openrouter_voice: document.getElementById("cfg-openrouter-voice").value,
@@ -1084,6 +1146,9 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     igdb_client_secret: igdbSecretInput.value || null,
     steam_api_key: steamApiKeyInput.value || null,
     steam_id: document.getElementById("cfg-steam-id").value,
+    game_state_ocr_enabled: document.getElementById("cfg-game-state-enabled").checked,
+    game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
+    game_state_model: document.getElementById("cfg-game-state-model").value,
   };
   await fetch("/api/config", {
     method: "PUT",
@@ -1206,6 +1271,82 @@ memoryAddForm.addEventListener("submit", async (event) => {
 });
 
 // --- Consumption modal ---
+
+// --- Game State modal ---
+// Ephemeral, background-OCR-derived snapshot of what's happening in-game right now. Distinct
+// from Memory: this never gets written to disk, it just reflects the current session.
+
+function updateGameStateDot(data) {
+  gameStateDot.classList.remove("active", "idle");
+  if (!data.enabled) {
+    gameStateDot.title = "Game-state awareness disabled (enable in Settings > Behavior)";
+  } else if (data.tracking) {
+    gameStateDot.classList.add("active");
+    gameStateDot.title = `Tracking: ${data.process}`;
+  } else {
+    gameStateDot.classList.add("idle");
+    gameStateDot.title = "Enabled, not currently tracking a game";
+  }
+}
+
+function renderGameStateFields(data) {
+  gameStateFields.innerHTML = "";
+
+  if (!data.enabled) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "OCR awareness is disabled. Enable it in Settings > Behavior to turn this on.";
+    gameStateFields.appendChild(hint);
+    return;
+  }
+
+  if (!data.tracking) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "Enabled, but not currently tracking anything — focus a game window and wait for the next poll.";
+    gameStateFields.appendChild(hint);
+    return;
+  }
+
+  const rows = [
+    ["Process", data.process],
+    ["Currently", data.activity],
+    ["Location", data.location],
+    ["Quest", data.quest],
+    ["Character", data.character],
+    ["Recent choice", data.notable_choice],
+  ];
+  for (const [label, value] of rows) {
+    const row = document.createElement("div");
+    row.className = "game-state-row";
+    const labelEl = document.createElement("span");
+    labelEl.className = "game-state-row-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("span");
+    valueEl.className = "game-state-row-value";
+    valueEl.textContent = value || "(not seen yet)";
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    gameStateFields.appendChild(row);
+  }
+}
+
+async function fetchGameState() {
+  const response = await fetch("/api/game-state");
+  return response.json();
+}
+
+gameStateBtn.addEventListener("click", async () => {
+  openModal(gameStateModal);
+  const data = await fetchGameState();
+  updateGameStateDot(data);
+  renderGameStateFields(data);
+});
+
+fetchGameState().then(updateGameStateDot);
+setInterval(() => {
+  fetchGameState().then(updateGameStateDot);
+}, 20000);
 
 usageBtn.addEventListener("click", async () => {
   openModal(usageModal);

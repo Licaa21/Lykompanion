@@ -16,20 +16,6 @@
         <span class="sidebar-icon">+</span> New Chat
       </button>
       <div id="chat-list" class="chat-list"></div>
-      <div class="sidebar-footer">
-        <button id="instructions-btn" class="sidebar-btn">
-          <span class="sidebar-icon">📝</span> Personal Instructions
-        </button>
-        <button id="memory-btn" class="sidebar-btn">
-          <span class="sidebar-icon">🧠</span> Memory
-        </button>
-        <button id="usage-btn" class="sidebar-btn">
-          <span class="sidebar-icon">📊</span> Consumption
-        </button>
-        <button id="settings-btn" class="sidebar-btn">
-          <span class="sidebar-icon">⚙️</span> Settings
-        </button>
-      </div>
     </aside>
 
     <main class="chat-panel">
@@ -56,6 +42,26 @@
         </form>
       </div>
     </main>
+
+    <aside class="sidebar action-sidebar">
+      <button id="instructions-btn" class="sidebar-btn">
+        <span class="sidebar-icon">📝</span> Personal Instructions
+      </button>
+      <button id="memory-btn" class="sidebar-btn">
+        <span class="sidebar-icon">🧠</span> Memory
+      </button>
+      <button id="game-state-btn" class="sidebar-btn">
+        <span class="sidebar-icon">🎮</span>
+        <span class="sidebar-btn-label">Game State</span>
+        <span id="game-state-dot" class="status-dot" title="Game-state awareness disabled"></span>
+      </button>
+      <button id="usage-btn" class="sidebar-btn">
+        <span class="sidebar-icon">📊</span> Consumption
+      </button>
+      <button id="settings-btn" class="sidebar-btn">
+        <span class="sidebar-icon">⚙️</span> Settings
+      </button>
+    </aside>
   </div>
 
   <div id="settings-modal" class="modal-overlay" hidden>
@@ -82,8 +88,27 @@
             <select id="cfg-model"></select>
           </label>
           <label>
+            Memory Extraction Model
+            <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <select id="cfg-memory-model"></select>
+          </label>
+          <label>
             Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
             <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
+          </label>
+          <h3>Passive Game-State Awareness</h3>
+          <label class="checkbox">
+            <input id="cfg-game-state-enabled" type="checkbox" />
+            Background OCR awareness (Windows only) — track quest/location/character automatically
+          </label>
+          <label>
+            Poll Interval: <span id="cfg-game-state-interval-value">90</span>s
+            <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
+          </label>
+          <label>
+            Game-State Model
+            <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <select id="cfg-game-state-model"></select>
           </label>
         </section>
 
@@ -93,27 +118,43 @@
             <select id="cfg-tts-provider">
               <option value="kokoro">Kokoro (local)</option>
               <option value="openrouter">OpenRouter</option>
+              <option value="chirp3">Chirp 3 HD (Google)</option>
             </select>
           </label>
-          <label>
-            Kokoro Voice
-            <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices..." />
-            <select id="cfg-kokoro-voice"></select>
-          </label>
-          <label>
-            OpenRouter TTS Model
-            <input
-              id="cfg-openrouter-tts-model-search"
-              type="text"
-              class="model-search"
-              placeholder="Search models..."
-            />
-            <select id="cfg-openrouter-tts-model"></select>
-          </label>
-          <label>
-            OpenRouter Voice
-            <select id="cfg-openrouter-voice"></select>
-          </label>
+          <div data-tts-provider="kokoro">
+            <label>
+              Kokoro Voice
+              <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices..." />
+              <select id="cfg-kokoro-voice"></select>
+            </label>
+          </div>
+          <div data-tts-provider="openrouter">
+            <label>
+              OpenRouter TTS Model
+              <input
+                id="cfg-openrouter-tts-model-search"
+                type="text"
+                class="model-search"
+                placeholder="Search models..."
+              />
+              <select id="cfg-openrouter-tts-model"></select>
+            </label>
+            <label>
+              OpenRouter Voice
+              <select id="cfg-openrouter-voice"></select>
+            </label>
+          </div>
+          <div data-tts-provider="chirp3">
+            <label>
+              Google API Key
+              <input id="cfg-google-tts-api-key" type="password" placeholder="Not set (uses Application Default Credentials)" autocomplete="off" />
+            </label>
+            <label>
+              Chirp 3 HD Voice
+              <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices..." />
+              <select id="cfg-chirp3-voice"></select>
+            </label>
+          </div>
           <label>
             Narration Speed (<span id="cfg-narration-speed-value">1.0</span>x)
             <input id="cfg-narration-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
@@ -240,6 +281,23 @@
           <input id="memory-add-input" type="text" placeholder="Add a memory..." autocomplete="off" />
           <button type="submit" class="secondary-btn">Add</button>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-state-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Game State</h2>
+        <button type="button" class="modal-close" data-close="game-state-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">
+          What the companion has picked up automatically from on-screen text via background OCR, refreshed
+          periodically while a game is focused. This is separate from Memory — only facts the companion explicitly
+          decides are worth remembering long-term get saved there.
+        </p>
+        <div id="game-state-fields" class="game-state-fields"></div>
       </div>
     </div>
   </div>
