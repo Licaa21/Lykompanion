@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     wake_word_phrase: str = "Hey Buddy"
 
     vad_threshold: int = 8
-    vad_silence_ms: int = 1200
+    vad_silence_ms: int = 3000
     vad_min_speech_ms: int = 300
 
     # Screenshot downscaling before sending to the LLM - lower values cut image token cost.

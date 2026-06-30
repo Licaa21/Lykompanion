@@ -41,14 +41,16 @@ def _start_server() -> None:
     uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, log_level="info")
 
 
-def _wait_for_server(timeout: float = 30.0) -> bool:
+def _wait_for_server(timeout: float = 90.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection(("localhost", PORT), timeout=0.5):
+            with socket.create_connection(("localhost", PORT), timeout=1.0):
                 return True
+        except KeyboardInterrupt:
+            raise  # propagate Ctrl+C cleanly — don't swallow it as OSError
         except OSError:
-            time.sleep(0.2)
+            time.sleep(0.3)
     return False
 
 
@@ -148,7 +150,7 @@ def main() -> None:
     thread.start()
 
     if not _wait_for_server():
-        print("ERROR: server did not start within 20 seconds", file=sys.stderr)
+        print("ERROR: server did not start within 90 seconds", file=sys.stderr)
         sys.exit(1)
 
     profile_dir = ROOT / "data" / "webview_profile"

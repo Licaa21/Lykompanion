@@ -921,7 +921,7 @@ const PRE_ROLL_MS = 1500;
 // user-configurable vadSilenceMs threshold - same idea as PRE_ROLL_MS but for the tail end, so a
 // trailing word/breath right at the silence cutoff doesn't get clipped.
 const POST_ROLL_MS = 500;
-const MAX_UTTERANCE_MS = 15000;
+const MAX_UTTERANCE_MS = 60000;
 // Must comfortably exceed the worst case: PRE_ROLL_MS + MAX_UTTERANCE_MS + (max configurable
 // vadSilenceMs + POST_ROLL_MS), or extractFromRing silently truncates the start of long utterances.
 const RING_BUFFER_SECONDS = 24;
@@ -1047,6 +1047,12 @@ async function startLiveMic() {
 async function finalizeLiveUtterance() {
   if (!liveRecording) return;
   liveRecording = false;
+  // Block new recordings immediately — without this, the gap between here and
+  // sendDirectVoice setting awaitingReply (after the async isLikelySpeech call)
+  // is wide enough that ambient noise starts a second utterance. WebView2 makes
+  // this worse because WASM module caching is weaker than Chrome, so isLikelySpeech
+  // takes longer on first call.
+  awaitingReply = true;
   micBtn.classList.remove("recording");
   beep(440, 0.1);
 
@@ -1054,15 +1060,19 @@ async function finalizeLiveUtterance() {
   const durationMs = (samples.length / ringSampleRate) * 1000;
 
   if (durationMs < vadMinSpeechMs) {
+    awaitingReply = false;
     setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     return;
   }
 
+  setVoiceStatus("Processing...");
   if (!(await isLikelySpeech(samples, ringSampleRate))) {
+    awaitingReply = false;
     setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     return;
   }
 
+  // awaitingReply stays true — sendDirectVoice owns it from here
   sendDirectVoice(encodeWav(samples, ringSampleRate));
 }
 
