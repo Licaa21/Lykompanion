@@ -24,20 +24,111 @@ const memoryModal = document.getElementById("memory-modal");
 const usageModal = document.getElementById("usage-modal");
 const gameStateModal = document.getElementById("game-state-modal");
 const debugModal = document.getElementById("debug-modal");
+const notifModal = document.getElementById("notif-modal");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
 let includeScreenshot = false;
 
-// Live-mic voice activity detection tuning, persisted in localStorage (client-side only).
-let vadThreshold = Number(localStorage.getItem("vadThreshold")) || 8;
-let vadSilenceMs = Number(localStorage.getItem("vadSilenceMs")) || 1200;
-let vadMinSpeechMs = Number(localStorage.getItem("vadMinSpeechMs")) || 300;
+// Live-mic voice activity detection tuning, persisted server-side via /api/config.
+let vadThreshold = 8;
+let vadSilenceMs = 1200;
+let vadMinSpeechMs = 300;
 
 // Wake word - re-enables hands-free listening by voice after it's been turned off, since
-// touching the keyboard/mouse defeats the point of hands-free. Persisted client-side only.
-let wakeWordEnabled = localStorage.getItem("wakeWordEnabled") === "true";
-let wakeWordPhrase = localStorage.getItem("wakeWordPhrase") || "Hey Buddy";
+// touching the keyboard/mouse defeats the point of hands-free. Persisted server-side via /api/config.
+let wakeWordEnabled = false;
+let wakeWordPhrase = "Hey Buddy";
+
+// Toast manager — max 3 visible, queues the rest as "+N more", deduplicates by id.
+const _toasts = (() => {
+  const MAX = 3;
+  let container = null;
+  const active = []; // { id, el, timer }
+  const queue  = []; // { id, opts }
+  let overflowEl = null;
+
+  function _box() {
+    if (!container) {
+      container = document.createElement("div");
+      container.className = "toast-container";
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function _updateOverflow() {
+    const n = queue.length;
+    if (n > 0) {
+      if (!overflowEl) {
+        overflowEl = document.createElement("div");
+        overflowEl.className = "toast-overflow";
+        _box().prepend(overflowEl);
+      }
+      overflowEl.textContent = `+${n} more notification${n === 1 ? "" : "s"}`;
+    } else if (overflowEl) {
+      overflowEl.remove();
+      overflowEl = null;
+    }
+  }
+
+  function _dismiss(id) {
+    const idx = active.findIndex(t => t.id === id);
+    if (idx === -1) return;
+    const { el, timer } = active.splice(idx, 1)[0];
+    clearTimeout(timer);
+    el.classList.remove("toast-in");
+    el.addEventListener("transitionend", () => el.remove(), { once: true });
+    if (queue.length) _render(queue.shift());
+    _updateOverflow();
+  }
+
+  function _render({ id, opts }) {
+    const { title = "", body = "", duration = 4000, actions = [] } = opts;
+    const el = document.createElement("div");
+    el.className = "toast";
+
+    let inner = "";
+    if (title) inner += `<div class="toast-title">${title}</div>`;
+    if (body)  inner += `<div class="toast-body-text">${body}</div>`;
+    if (actions.length) {
+      inner += `<div class="toast-actions">` +
+        actions.map((a, i) =>
+          `<button class="toast-btn toast-btn-${a.variant || "default"}" data-i="${i}">${a.label}</button>`
+        ).join("") +
+        `</div>`;
+    }
+
+    el.innerHTML = inner;
+    const x = document.createElement("button");
+    x.className = "toast-x";
+    x.innerHTML = "&times;";
+    x.onclick = () => _dismiss(id);
+    el.appendChild(x);
+
+    el.querySelectorAll(".toast-btn").forEach(btn => {
+      btn.onclick = () => { actions[+btn.dataset.i].onClick?.(); _dismiss(id); };
+    });
+
+    _box().appendChild(el);
+    requestAnimationFrame(() => el.classList.add("toast-in"));
+
+    const timer = duration > 0 ? setTimeout(() => _dismiss(id), duration) : null;
+    active.push({ id, el, timer });
+    _updateOverflow();
+  }
+
+  return {
+    show(id, opts) {
+      if (active.some(t => t.id === id) || queue.some(t => t.id === id)) return;
+      if (active.length < MAX) _render({ id, opts });
+      else { queue.push({ id, opts }); _updateOverflow(); }
+    },
+    dismiss(id) { _dismiss(id); },
+  };
+})();
+
+function showToast(id, opts) { _toasts.show(id, opts); }
 
 function setVoiceStatus(text, variant) {
   voiceStatus.textContent = text;
@@ -88,28 +179,31 @@ function playWakeChime() {
 }
 
 // --- Chat sessions (sidebar) ---
-// Multiple conversations, persisted client-side in localStorage. Each chat
+// Multiple conversations, persisted server-side via /api/chats (data/chats.json). Each chat
 // holds its own messages array; "active" chat functions capture a direct
 // reference to that array at call time (not a shared global) so that
 // switching chats mid-request can't make an in-flight reply get appended to
 // the wrong conversation.
 
-const CHATS_STORAGE_KEY = "lykompanion_chats";
 
 let chats = [];
 let activeChatId = null;
 
-function loadChatsFromStorage() {
+async function loadChatsFromStorage() {
   try {
-    const raw = localStorage.getItem(CHATS_STORAGE_KEY);
-    chats = raw ? JSON.parse(raw) : [];
+    const data = await fetch("/api/chats").then((r) => r.json());
+    chats = data.chats || [];
   } catch (err) {
     chats = [];
   }
 }
 
 function saveChatsToStorage() {
-  localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(chats));
+  fetch("/api/chats", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chats }),
+  }).catch(() => {});
 }
 
 function getActiveChat() {
@@ -167,61 +261,18 @@ function addMessageToChat(chat, role, content, audioId) {
   saveChatsToStorage();
 }
 
-// --- Voice message audio storage (IndexedDB) ---
-// Voice messages have no text transcript (audio goes straight to an audio-capable LLM, skipping
-// local STT), so the actual recording is what's worth keeping for replay/debugging. Stored in
-// IndexedDB rather than localStorage, which can't hold binary Blobs efficiently and has a much
-// smaller size cap. Keyed by a random id referenced from the chat message itself.
+// --- Voice message audio storage (server-side) ---
+// Voice messages are uploaded to /api/voice/{id} and served back on demand.
+// Keyed by a random UUID referenced from the chat message itself.
 
-const VOICE_DB_NAME = "lykompanion-voice";
-const VOICE_STORE_NAME = "messages";
-
-function openVoiceDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(VOICE_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(VOICE_STORE_NAME);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+function saveVoiceBlob(id, blob) {
+  const form = new FormData();
+  form.append("audio", blob, "voice.wav");
+  fetch(`/api/voice/${id}`, { method: "POST", body: form }).catch(() => {});
 }
 
-async function saveVoiceBlob(id, blob) {
-  try {
-    const db = await openVoiceDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(VOICE_STORE_NAME, "readwrite");
-      tx.objectStore(VOICE_STORE_NAME).put(blob, id);
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    // Replay is a nice-to-have - failing to persist the blob shouldn't break sending the message.
-  }
-}
-
-async function getVoiceBlob(id) {
-  try {
-    const db = await openVoiceDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(VOICE_STORE_NAME, "readonly");
-      const request = tx.objectStore(VOICE_STORE_NAME).get(id);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
-  } catch (err) {
-    return null;
-  }
-}
-
-async function deleteVoiceBlob(id) {
-  try {
-    const db = await openVoiceDb();
-    db.transaction(VOICE_STORE_NAME, "readwrite").objectStore(VOICE_STORE_NAME).delete(id);
-  } catch (err) {
-    // best-effort cleanup
-  }
+function deleteVoiceBlob(id) {
+  fetch(`/api/voice/${id}`, { method: "DELETE" }).catch(() => {});
 }
 
 // Voice messages have no real text ("🎤 (voice message)"), so the
@@ -405,12 +456,127 @@ function appendMessage(role, content, audioId) {
   el.className = `message ${role}`;
   el.textContent = content;
   if (audioId) {
-    const audioEl = document.createElement("audio");
-    audioEl.controls = true;
-    audioEl.className = "voice-message-audio";
-    el.appendChild(audioEl);
-    getVoiceBlob(audioId).then((blob) => {
-      if (blob) audioEl.src = URL.createObjectURL(blob);
+    const audio = new Audio(`/api/voice/${audioId}`);
+
+    const player = document.createElement("div");
+    player.className = "voice-player";
+
+    // Play / Pause button
+    const playBtn = document.createElement("button");
+    playBtn.className = "vp-play";
+    playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+
+    // Progress bar
+    const barWrap = document.createElement("div");
+    barWrap.className = "vp-bar-wrap";
+    const bar = document.createElement("div");
+    bar.className = "vp-bar";
+    const fill = document.createElement("div");
+    fill.className = "vp-fill";
+    bar.appendChild(fill);
+    barWrap.appendChild(bar);
+
+    // Time display
+    const timeEl = document.createElement("span");
+    timeEl.className = "vp-time";
+    timeEl.textContent = "0:00";
+
+    // Speed cycle button
+    const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
+    let speedIdx = 2;
+    const speedBtn = document.createElement("button");
+    speedBtn.className = "vp-speed";
+    speedBtn.textContent = "1×";
+
+    // Download button
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "vp-dl";
+    dlBtn.title = "Save to Downloads";
+    dlBtn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+    player.appendChild(playBtn);
+    player.appendChild(barWrap);
+    player.appendChild(timeEl);
+    player.appendChild(speedBtn);
+    player.appendChild(dlBtn);
+    el.appendChild(player);
+
+    // --- Behaviour ---
+
+    function fmt(s) {
+      if (!isFinite(s)) return "0:00";
+      const m = Math.floor(s / 60);
+      return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    }
+
+    audio.addEventListener("loadedmetadata", () => {
+      timeEl.textContent = fmt(audio.duration);
+    });
+
+    // Use rAF instead of timeupdate so the bar moves smoothly every frame,
+    // not in jumps every ~250 ms.
+    let rafId = null;
+    function tick() {
+      if (!audio.duration) return;
+      fill.style.width = `${(audio.currentTime / audio.duration) * 100}%`;
+      timeEl.textContent = fmt(audio.currentTime);
+      if (!audio.paused && !audio.ended) rafId = requestAnimationFrame(tick);
+    }
+
+    audio.addEventListener("play", () => { rafId = requestAnimationFrame(tick); });
+    audio.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
+    audio.addEventListener("ended", () => {
+      cancelAnimationFrame(rafId);
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+      fill.style.width = "0%";
+      timeEl.textContent = fmt(audio.duration);
+    });
+
+    playBtn.addEventListener("click", () => {
+      if (audio.paused) {
+        audio.play();
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+      } else {
+        audio.pause();
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+      }
+    });
+
+    bar.addEventListener("click", (e) => {
+      if (!audio.duration) return;
+      const rect = bar.getBoundingClientRect();
+      audio.currentTime = ((e.clientX - rect.left) / rect.width) * audio.duration;
+    });
+
+    speedBtn.addEventListener("click", () => {
+      speedIdx = (speedIdx + 1) % speeds.length;
+      audio.playbackRate = speeds[speedIdx];
+      speedBtn.textContent = `${speeds[speedIdx]}×`;
+    });
+
+    dlBtn.addEventListener("click", async () => {
+      if (window.pywebview?.api?.download_voice) {
+        const result = await window.pywebview.api.download_voice(audioId);
+        if (result?.ok) {
+          showToast(`dl-${audioId}`, {
+            title: result.already ? "Already in Downloads" : "Saved to Downloads",
+            body: result.name,
+            duration: 4000,
+          });
+        }
+      } else {
+        const res = await fetch(`/api/voice/${audioId}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `lykompanion-voice_${audioId.slice(0, 8)}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`dl-${audioId}`, { title: "Saved to Downloads", body: a.download, duration: 4000 });
+      }
     });
   }
   chatLog.appendChild(el);
@@ -1080,20 +1246,15 @@ function updateWakeWordListenerState() {
 if (!wakeWordSupported) {
   wakeWordUnsupportedEl.hidden = false;
   wakeWordControlsEl.hidden = true;
-} else {
-  wakeWordEnabledInput.checked = wakeWordEnabled;
-  wakeWordPhraseInput.value = wakeWordPhrase;
 }
 
 wakeWordEnabledInput.addEventListener("change", () => {
   wakeWordEnabled = wakeWordEnabledInput.checked;
-  localStorage.setItem("wakeWordEnabled", wakeWordEnabled);
   updateWakeWordListenerState();
 });
 
 wakeWordPhraseInput.addEventListener("change", () => {
   wakeWordPhrase = wakeWordPhraseInput.value.trim() || "Hey Buddy";
-  localStorage.setItem("wakeWordPhrase", wakeWordPhrase);
 });
 
 updateWakeWordListenerState();
@@ -1112,7 +1273,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal, debugModal].forEach((modal) => {
+[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal, debugModal, notifModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -1331,25 +1492,23 @@ vadThresholdInput.value = vadThreshold;
 vadThresholdValue.textContent = vadThreshold;
 vadSilenceInput.value = vadSilenceMs;
 vadSilenceValue.textContent = vadSilenceMs;
+// Slider display values are also updated in loadConfig() once server config is fetched.
 vadMinSpeechInput.value = vadMinSpeechMs;
 vadMinSpeechValue.textContent = vadMinSpeechMs;
 
 vadThresholdInput.addEventListener("input", () => {
   vadThreshold = Number(vadThresholdInput.value);
   vadThresholdValue.textContent = vadThreshold;
-  localStorage.setItem("vadThreshold", vadThreshold);
 });
 
 vadSilenceInput.addEventListener("input", () => {
   vadSilenceMs = Number(vadSilenceInput.value);
   vadSilenceValue.textContent = vadSilenceMs;
-  localStorage.setItem("vadSilenceMs", vadSilenceMs);
 });
 
 vadMinSpeechInput.addEventListener("input", () => {
   vadMinSpeechMs = Number(vadMinSpeechInput.value);
   vadMinSpeechValue.textContent = vadMinSpeechMs;
-  localStorage.setItem("vadMinSpeechMs", vadMinSpeechMs);
 });
 
 function updateTtsProviderVisibility() {
@@ -1367,6 +1526,9 @@ async function loadConfig() {
   document.getElementById("cfg-tts-provider").value = cfg.tts_provider;
   updateTtsProviderVisibility();
   document.getElementById("cfg-api-key").placeholder = cfg.openrouter_api_key_set
+    ? "•••••••• (set)"
+    : "Not set";
+  document.getElementById("cfg-management-key").placeholder = cfg.openrouter_management_key_set
     ? "•••••••• (set)"
     : "Not set";
 
@@ -1387,6 +1549,25 @@ async function loadConfig() {
   document.getElementById("cfg-game-state-enabled").checked = cfg.game_state_ocr_enabled;
   gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
   gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
+  restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
+
+  wakeWordEnabled = cfg.wake_word_enabled;
+  wakeWordPhrase = cfg.wake_word_phrase || "Hey Buddy";
+  if (wakeWordSupported) {
+    wakeWordEnabledInput.checked = wakeWordEnabled;
+    wakeWordPhraseInput.value = wakeWordPhrase;
+    updateWakeWordListenerState();
+  }
+
+  vadThreshold = cfg.vad_threshold ?? 8;
+  vadSilenceMs = cfg.vad_silence_ms ?? 1200;
+  vadMinSpeechMs = cfg.vad_min_speech_ms ?? 300;
+  vadThresholdInput.value = vadThreshold;
+  vadThresholdValue.textContent = vadThreshold;
+  vadSilenceInput.value = vadSilenceMs;
+  vadSilenceValue.textContent = vadSilenceMs;
+  vadMinSpeechInput.value = vadMinSpeechMs;
+  vadMinSpeechValue.textContent = vadMinSpeechMs;
 
   document.getElementById("cfg-google-tts-api-key").placeholder = cfg.google_tts_api_key_set
     ? "•••••••• (set)"
@@ -1437,6 +1618,7 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     openrouter_tts_model: document.getElementById("cfg-openrouter-tts-model").value,
     openrouter_voice: document.getElementById("cfg-openrouter-voice").value,
     openrouter_api_key: apiKeyInput.value || null,
+    openrouter_management_key: document.getElementById("cfg-management-key").value || null,
     narration_speed: parseFloat(narrationSpeedInput.value),
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
     openrouter_voice_model: document.getElementById("cfg-openrouter-voice-model").value,
@@ -1450,6 +1632,11 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     game_state_ocr_enabled: document.getElementById("cfg-game-state-enabled").checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
+    wake_word_enabled: wakeWordEnabledInput.checked,
+    wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
+    vad_threshold: vadThreshold,
+    vad_silence_ms: vadSilenceMs,
+    vad_min_speech_ms: vadMinSpeechMs,
   };
   await fetch("/api/config", {
     method: "PUT",
@@ -1457,6 +1644,7 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     body: JSON.stringify(body),
   });
   apiKeyInput.value = "";
+  document.getElementById("cfg-management-key").value = "";
   igdbSecretInput.value = "";
   steamApiKeyInput.value = "";
   await loadConfig();
@@ -1843,57 +2031,133 @@ gameStateBlacklistForm.addEventListener("submit", async (event) => {
 settingsBtn.addEventListener("click", loadGameStateProcessLists);
 loadGameStateProcessLists();
 
-// --- Game-state approval chip ---
-// Unfamiliar foreground processes aren't OCR'd automatically - they show up here so the user can
-// explicitly allow or blacklist them, staying visible until acted upon (no auto-dismiss).
+// --- Notification bell ---
+// Extensible notification tray in the sidebar. Currently used for game-state process approvals.
 
-const approvalChip = document.getElementById("game-state-approval-chip");
-const approvalChipProcess = document.getElementById("approval-chip-process");
-let approvalChipShownFor = null;
+const notifBellBtn = document.getElementById("notif-bell-btn");
+const notifBadge = document.getElementById("notif-badge");
+const notifList = document.getElementById("notif-list");
+const notifEmpty = document.getElementById("notif-empty");
 
-async function checkPendingApproval() {
-  const response = await fetch("/api/game-state/pending");
-  const data = await response.json();
+notifBellBtn.addEventListener("click", () => openModal(notifModal));
 
-  if (!data.process) {
-    approvalChip.hidden = true;
-    approvalChipShownFor = null;
+function renderNotifications(pendingProcesses) {
+  notifList.innerHTML = "";
+  const count = pendingProcesses.length;
+
+  notifBadge.hidden = count === 0;
+  notifBadge.textContent = count;
+
+  if (count === 0) {
+    notifEmpty.hidden = false;
     return;
   }
+  notifEmpty.hidden = true;
 
-  if (data.process === approvalChipShownFor) return;
+  for (const process of pendingProcesses) {
+    const item = document.createElement("div");
+    item.className = "notif-item";
 
-  approvalChipShownFor = data.process;
-  approvalChipProcess.textContent = data.process;
-  approvalChip.hidden = false;
+    const text = document.createElement("div");
+    text.className = "notif-item-text";
+    text.innerHTML = `<strong>${process}</strong><span class="notif-item-sub">Allow game-state OCR tracking?</span>`;
+
+    const actions = document.createElement("div");
+    actions.className = "notif-item-actions";
+
+    const allowBtn = document.createElement("button");
+    allowBtn.className = "secondary-btn notif-action-btn";
+    allowBtn.textContent = "Allow";
+    allowBtn.addEventListener("click", async () => {
+      await fetch("/api/game-state/whitelist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process }),
+      });
+      await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
+    });
+
+    const blacklistBtn = document.createElement("button");
+    blacklistBtn.className = "secondary-btn notif-action-btn";
+    blacklistBtn.textContent = "Blacklist";
+    blacklistBtn.addEventListener("click", async () => {
+      await fetch("/api/game-state/blacklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process }),
+      });
+      await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
+    });
+
+    actions.appendChild(allowBtn);
+    actions.appendChild(blacklistBtn);
+    item.appendChild(text);
+    item.appendChild(actions);
+    notifList.appendChild(item);
+  }
 }
 
-document.getElementById("approval-chip-allow").addEventListener("click", async () => {
-  if (!approvalChipShownFor) return;
-  await fetch("/api/game-state/whitelist", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ process: approvalChipShownFor }),
-  });
-  approvalChip.hidden = true;
-  approvalChipShownFor = null;
-  await loadGameStateProcessLists();
-});
+const _shownProcessToasts = new Set();
 
-document.getElementById("approval-chip-blacklist").addEventListener("click", async () => {
-  if (!approvalChipShownFor) return;
-  await fetch("/api/game-state/blacklist", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ process: approvalChipShownFor }),
-  });
-  approvalChip.hidden = true;
-  approvalChipShownFor = null;
-  await loadGameStateProcessLists();
-});
+async function checkPendingApprovals() {
+  const response = await fetch("/api/game-state/pending");
+  const data = await response.json();
+  const processes = data.processes || [];
+  renderNotifications(processes);
 
-checkPendingApproval();
-setInterval(checkPendingApproval, 20000);
+  for (const proc of processes) {
+    if (_shownProcessToasts.has(proc)) continue;
+    _shownProcessToasts.add(proc);
+    showToast(`process-${proc}`, {
+      title: "Process detected",
+      body: `Allow <strong>${proc}</strong> to use game-state OCR?`,
+      duration: 0,
+      actions: [
+        {
+          label: "Allow",
+          variant: "primary",
+          onClick: async () => {
+            await fetch("/api/game-state/whitelist", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ process: proc }),
+            });
+            _shownProcessToasts.delete(proc);
+            await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
+          },
+        },
+        {
+          label: "Blacklist",
+          variant: "danger",
+          onClick: async () => {
+            await fetch("/api/game-state/blacklist", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ process: proc }),
+            });
+            _shownProcessToasts.delete(proc);
+            await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
+          },
+        },
+      ],
+    });
+  }
+
+  // Clean up resolved processes so their toast can reappear if they come back as pending
+  for (const proc of _shownProcessToasts) {
+    if (!processes.includes(proc)) _shownProcessToasts.delete(proc);
+  }
+}
+
+let _pendingApprovalIntervalId = null;
+
+function restartPendingApprovalPolling(intervalSeconds) {
+  if (_pendingApprovalIntervalId) clearInterval(_pendingApprovalIntervalId);
+  _pendingApprovalIntervalId = setInterval(checkPendingApprovals, intervalSeconds * 1000);
+}
+
+checkPendingApprovals();
+// Interval started by loadConfig() on startup — see restartPendingApprovalPolling call there.
 
 // --- Consumption modal ---
 // Fetches the full per-call record list once per open/filter-change and aggregates client-side
@@ -2001,12 +2265,29 @@ function renderUsageStats() {
 usageRangeStartInput.addEventListener("change", renderUsageStats);
 usageRangeEndInput.addEventListener("change", renderUsageStats);
 
+const usageBalanceRow = document.getElementById("usage-balance-row");
+const usageBalanceValue = document.getElementById("usage-balance-value");
+
+async function fetchAndRenderBalance() {
+  usageBalanceRow.hidden = true;
+  const data = await fetch("/api/usage/balance").then((r) => r.json());
+  if (!data.available) return;
+  usageBalanceRow.hidden = false;
+  if (data.limit_usd !== null && data.limit_usd !== undefined) {
+    const remaining = data.remaining_usd ?? 0;
+    usageBalanceValue.textContent = `$${remaining.toFixed(4)} remaining of $${data.limit_usd.toFixed(2)} ($${data.spent_usd.toFixed(4)} spent)`;
+  } else {
+    const label = data.is_free_tier ? " (free tier)" : "";
+    usageBalanceValue.textContent = `$${data.spent_usd.toFixed(4)} spent${label} · no credit limit set`;
+  }
+}
+
 usageBtn.addEventListener("click", async () => {
   openModal(usageModal);
   renderUsageRangePills();
   usageCustomRangeEl.hidden = usageRange !== "custom";
-  const response = await fetch("/api/usage/records");
-  usageRecordsCache = await response.json();
+  const [recordsRes] = await Promise.all([fetch("/api/usage/records"), fetchAndRenderBalance()]);
+  usageRecordsCache = await recordsRes.json();
   renderUsageStats();
 });
 
@@ -2145,12 +2426,27 @@ debugBtn.addEventListener("click", async () => {
   renderDebugRequests(entries);
 });
 
+// Release the Speech Recognition DLL before pywebview cleans up its temp profile folder,
+// otherwise Windows locks the file and pywebview logs a WinError 5 access-denied warning.
+window.addEventListener("beforeunload", () => {
+  stopWakeWordRecognition();
+});
+
+// Block the browser's right-click context menu (hides Inspect, View Source, Save As, etc.).
+// We use JS rather than AreDefaultContextMenusEnabled=False in Python because that flag also
+// kills the <audio> player's 3-dot menu — contextmenu events are only right-click, not button clicks.
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
 // --- Init ---
 
-loadChatsFromStorage();
-if (chats.length === 0) {
-  createNewChat();
-} else {
-  switchChat(chats[0].id);
+async function init() {
+  await loadChatsFromStorage();
+  if (chats.length === 0) {
+    createNewChat();
+  } else {
+    switchChat(chats[0].id);
+  }
+  loadConfig();
 }
-loadConfig();
+
+init();

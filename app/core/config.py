@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     openrouter_api_key: str = ""
+    openrouter_management_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "anthropic/claude-3.5-sonnet"
     openrouter_voice_model: str = ""
@@ -38,6 +39,13 @@ class Settings(BaseSettings):
 
     # Max number of most-recent chat messages sent to the LLM as context. 0 = no limit.
     context_window_messages: int = 20
+
+    wake_word_enabled: bool = False
+    wake_word_phrase: str = "Hey Buddy"
+
+    vad_threshold: int = 8
+    vad_silence_ms: int = 1200
+    vad_min_speech_ms: int = 300
 
     # Screenshot downscaling before sending to the LLM - lower values cut image token cost.
     screenshot_max_width: int = 960

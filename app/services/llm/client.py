@@ -197,6 +197,32 @@ async def stream_chat_completion_deltas(
     )
 
 
+async def fetch_account_balance() -> "AccountBalance":
+    from app.models.schemas import AccountBalance
+
+    if not settings.openrouter_management_key:
+        return AccountBalance(available=False, reason="No management key configured")
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            response = await http.get(
+                f"{settings.openrouter_base_url}/credits",
+                headers={"Authorization": f"Bearer {settings.openrouter_management_key}"},
+            )
+            response.raise_for_status()
+            data = response.json().get("data", {})
+        total = float(data.get("total_credits") or 0)
+        used = float(data.get("total_usage") or 0)
+        remaining = total - used
+        return AccountBalance(
+            available=True,
+            spent_usd=used,
+            limit_usd=total,
+            remaining_usd=remaining,
+        )
+    except Exception as exc:
+        return AccountBalance(available=False, reason=str(exc))
+
+
 async def list_models() -> list[dict]:
     """Fetch all models available on OpenRouter, with input/output modality info.
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.core import game_state as game_state_store
 from app.core import game_state_processes
 from app.core.config import settings
-from app.models.schemas import GameStateResponse, PendingProcessResponse, ProcessEntry
+from app.models.schemas import AccountBalance, GameStateResponse, PendingProcessResponse, ProcessEntry
 
 router = APIRouter(prefix="/api/game-state", tags=["game-state"])
 
@@ -24,8 +24,8 @@ async def get_game_state() -> GameStateResponse:
 
 
 @router.get("/pending", response_model=PendingProcessResponse)
-async def get_pending_process() -> PendingProcessResponse:
-    return PendingProcessResponse(process=game_state_processes.get_pending_process())
+async def get_pending_processes() -> PendingProcessResponse:
+    return PendingProcessResponse(processes=game_state_processes.get_pending_processes())
 
 
 @router.get("/blacklist", response_model=list[str])

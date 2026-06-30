@@ -12,8 +12,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 BLACKLIST_PATH = DATA_DIR / "game_state_blacklist.json"
 WHITELIST_PATH = DATA_DIR / "game_state_whitelist.json"
-
-_pending_process: str | None = None
+PENDING_PATH = DATA_DIR / "game_state_pending.json"
 
 
 def _load(path: Path) -> list[str]:
@@ -46,6 +45,10 @@ def _remove(path: Path, process: str) -> None:
 
 def _contains(path: Path, process: str) -> bool:
     return process.lower() in {p.lower() for p in _load(path)}
+
+
+# Pending processes are persisted so they survive server restarts.
+_pending_processes: list[str] = _load(PENDING_PATH)
 
 
 def load_blacklist() -> list[str]:
@@ -82,18 +85,25 @@ def is_whitelisted(process: str) -> bool:
     return _contains(WHITELIST_PATH, process)
 
 
-def get_pending_process() -> str | None:
-    return _pending_process
+def get_pending_processes() -> list[str]:
+    return list(_pending_processes)
 
 
-def set_pending_process(process: str) -> None:
-    global _pending_process
-    _pending_process = process
+def add_pending_process(process: str) -> bool:
+    """Adds process to the pending queue if not already present. Returns True if newly added."""
+    global _pending_processes
+    if process.lower() in {p.lower() for p in _pending_processes}:
+        return False
+    _pending_processes.append(process)
+    _save(PENDING_PATH, _pending_processes)
+    return True
 
 
 def clear_pending_process(process: str | None = None) -> None:
-    """Clears the pending slot. If `process` is given, only clears when it matches (so resolving
-    one process's approval doesn't accidentally drop an unrelated pending entry)."""
-    global _pending_process
-    if process is None or (_pending_process and _pending_process.lower() == process.lower()):
-        _pending_process = None
+    """Removes a specific process from the pending queue, or clears all if process is None."""
+    global _pending_processes
+    if process is None:
+        _pending_processes = []
+    else:
+        _pending_processes = [p for p in _pending_processes if p.lower() != process.lower()]
+    _save(PENDING_PATH, _pending_processes)

@@ -10,6 +10,9 @@ Pillow
 python-multipart
 websockets
 
+# Desktop launcher (run_app.py) — native app window via OS WebView (EdgeWebView2 on Windows 11).
+pywebview
+
 # Passive game-state OCR. Also requires the Tesseract OCR engine binary installed separately
 # (https://github.com/UB-Mannheim/tesseract/wiki on Windows) - pip only installs the Python wrapper.
 pytesseract
