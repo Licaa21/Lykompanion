@@ -5,6 +5,8 @@ import sys
 import mss
 from PIL import Image
 
+from app.core.config import settings
+
 
 def list_monitors() -> list[dict]:
     """All individual monitors (mss.monitors[0] is the combined virtual screen, skipped here)."""
@@ -57,18 +59,21 @@ def capture_monitor_image(monitor_index: int | None = None) -> Image.Image:
     return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
 
 
-def capture_monitor_b64(monitor_index: int | None = None, max_width: int = 1280) -> str:
+def capture_monitor_b64(monitor_index: int | None = None, max_width: int | None = None, quality: int | None = None) -> str:
     """Capture one monitor (1-based index) and return a base64-encoded JPEG, downscaled for LLM context."""
+    max_width = max_width or settings.screenshot_max_width
+    quality = quality or settings.screenshot_jpeg_quality
+
     image = capture_monitor_image(monitor_index)
     if image.width > max_width:
         ratio = max_width / image.width
         image = image.resize((max_width, int(image.height * ratio)))
 
     buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=80)
+    image.save(buffer, format="JPEG", quality=quality)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def capture_primary_monitor_b64(max_width: int = 1280) -> str:
+def capture_primary_monitor_b64(max_width: int | None = None, quality: int | None = None) -> str:
     """Capture the user's active/focused monitor (kept for backward-compat call sites)."""
-    return capture_monitor_b64(get_active_monitor_index(), max_width)
+    return capture_monitor_b64(get_active_monitor_index(), max_width, quality)

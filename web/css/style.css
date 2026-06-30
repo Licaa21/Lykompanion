@@ -686,3 +686,133 @@ body {
   font-size: 0.78rem;
   color: #9a9aa5;
 }
+
+.usage-custom-range {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.usage-custom-range label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: #9a9aa5;
+}
+
+.usage-custom-range input {
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid #3a3b45;
+  background: #1d1e25;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+.usage-by-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.usage-source-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.4rem;
+  background: #1d1e25;
+  border: 1px solid #2a2b33;
+  font-size: 0.85rem;
+}
+
+.usage-source-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.usage-source-detail {
+  color: #9a9aa5;
+  font-size: 0.78rem;
+}
+
+.usage-clear-btn {
+  margin-top: 1rem;
+}
+
+.usage-clear-btn.confirming {
+  background: #d83a3a;
+  border-color: #d83a3a;
+  color: #fff;
+}
+
+/* --- Debug modal --- */
+
+.debug-requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.debug-request-card {
+  border-radius: 0.5rem;
+  background: #1d1e25;
+  border: 1px solid #2a2b33;
+  overflow: hidden;
+}
+
+.debug-request-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.debug-request-summary:hover {
+  background: #232430;
+}
+
+.debug-request-source {
+  font-weight: 600;
+}
+
+.debug-request-meta {
+  color: #9a9aa5;
+  flex: 1;
+}
+
+.debug-request-detail {
+  padding: 0.6rem 0.7rem;
+  border-top: 1px solid #2a2b33;
+  font-size: 0.78rem;
+}
+
+.debug-request-detail[hidden] {
+  display: none;
+}
+
+.debug-message-block {
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.4rem;
+  background: #14151a;
+}
+
+.debug-message-role {
+  color: #6fa8ff;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.debug-message-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c4c4cc;
+}

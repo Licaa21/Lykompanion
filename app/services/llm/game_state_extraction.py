@@ -60,7 +60,9 @@ async def extract_and_apply_game_state(process: str, ocr_text: str) -> None:
 
     try:
         model = settings.game_state_model or None
-        raw = await chat_completion(messages, model=model, response_format={"type": "json_object"})
+        raw = await chat_completion(
+            messages, model=model, response_format={"type": "json_object"}, source="game_state_extraction"
+        )
         data = json.loads(raw)
     except Exception:
         logger.exception("Game-state extraction failed")

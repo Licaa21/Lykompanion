@@ -34,7 +34,9 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
 
     try:
         model = settings.memory_extraction_model or None
-        raw = await chat_completion(messages, model=model, response_format={"type": "json_object"})
+        raw = await chat_completion(
+            messages, model=model, response_format={"type": "json_object"}, source="memory_extraction"
+        )
         data = json.loads(raw)
     except Exception:
         logger.exception("Memory extraction failed")

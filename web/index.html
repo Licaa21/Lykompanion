@@ -58,6 +58,9 @@
       <button id="usage-btn" class="sidebar-btn">
         <span class="sidebar-icon">📊</span> Consumption
       </button>
+      <button id="debug-btn" class="sidebar-btn">
+        <span class="sidebar-icon">🐞</span> Debug
+      </button>
       <button id="settings-btn" class="sidebar-btn">
         <span class="sidebar-icon">⚙️</span> Settings
       </button>
@@ -95,6 +98,16 @@
           <label>
             Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
             <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
+          </label>
+          <h3>Vision</h3>
+          <p class="modal-hint">Lower values cut image token cost on screenshots sent to the LLM.</p>
+          <label>
+            Screenshot Max Width: <span id="cfg-screenshot-width-value">960</span>px
+            <input id="cfg-screenshot-width" type="range" min="480" max="1920" step="80" value="960" />
+          </label>
+          <label>
+            Screenshot JPEG Quality: <span id="cfg-screenshot-quality-value">70</span>
+            <input id="cfg-screenshot-quality" type="range" min="30" max="95" step="5" value="70" />
           </label>
           <h3>Passive Game-State Awareness</h3>
           <label class="checkbox">
@@ -365,7 +378,18 @@
         <button type="button" class="modal-close" data-close="usage-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="modal-hint">Cumulative usage across all conversations, tracked since you started using the app.</p>
+        <p class="modal-hint">Usage across all conversations, broken down by feature and time range.</p>
+        <div id="usage-range-pills" class="memory-filters"></div>
+        <div id="usage-custom-range" class="usage-custom-range" hidden>
+          <label>
+            From
+            <input id="usage-range-start" type="datetime-local" />
+          </label>
+          <label>
+            To
+            <input id="usage-range-end" type="datetime-local" />
+          </label>
+        </div>
         <div class="usage-stats">
           <div class="usage-stat">
             <span class="usage-stat-value" id="usage-requests">-</span>
@@ -384,6 +408,25 @@
             <span class="usage-stat-label">Total cost</span>
           </div>
         </div>
+        <h3>By Feature</h3>
+        <div id="usage-by-source" class="usage-by-source"></div>
+        <button type="button" id="usage-clear-btn" class="secondary-btn usage-clear-btn">Clear Consumption Data</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="debug-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Debug</h2>
+        <button type="button" class="modal-close" data-close="debug-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">
+          The last 10 individual LLM requests (one per API call - a single reply can involve several if tools
+          were used), most recent first. Long fields are truncated. Not persisted - resets on server restart.
+        </p>
+        <div id="debug-requests-list" class="debug-requests-list"></div>
       </div>
     </div>
   </div>

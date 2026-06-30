@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import chat, config, game_state, instructions, memory, models, screenshot, tts, usage
+from app.api import chat, config, debug, game_state, instructions, memory, models, screenshot, tts, usage
 from app.services.llm.game_state_extraction import run_game_state_poller
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -32,6 +32,7 @@ app.include_router(instructions.router)
 app.include_router(memory.router)
 app.include_router(usage.router)
 app.include_router(game_state.router)
+app.include_router(debug.router)
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

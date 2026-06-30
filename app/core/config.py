@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Max number of most-recent chat messages sent to the LLM as context. 0 = no limit.
     context_window_messages: int = 20
 
+    # Screenshot downscaling before sending to the LLM - lower values cut image token cost.
+    screenshot_max_width: int = 960
+    screenshot_jpeg_quality: int = 70
+
     # Dedicated model for background memory extraction. Falls back to openrouter_model if empty.
     memory_extraction_model: str = ""
 

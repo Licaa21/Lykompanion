@@ -26,6 +26,8 @@ async def get_config() -> CompanionConfig:
         narration_speed=settings.tts_speed,
         narration_volume=settings.tts_volume,
         context_window_messages=settings.context_window_messages,
+        screenshot_max_width=settings.screenshot_max_width,
+        screenshot_jpeg_quality=settings.screenshot_jpeg_quality,
         igdb_client_id=settings.igdb_client_id,
         igdb_client_secret_set=bool(settings.igdb_client_secret),
         steam_api_key_set=bool(settings.steam_api_key),
@@ -85,6 +87,12 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     settings.context_window_messages = config.context_window_messages
     persist_env_value("CONTEXT_WINDOW_MESSAGES", str(config.context_window_messages))
+
+    settings.screenshot_max_width = config.screenshot_max_width
+    persist_env_value("SCREENSHOT_MAX_WIDTH", str(config.screenshot_max_width))
+
+    settings.screenshot_jpeg_quality = config.screenshot_jpeg_quality
+    persist_env_value("SCREENSHOT_JPEG_QUALITY", str(config.screenshot_jpeg_quality))
 
     if config.igdb_client_id is not None:
         settings.igdb_client_id = config.igdb_client_id

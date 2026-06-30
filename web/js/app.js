@@ -23,6 +23,7 @@ const instructionsModal = document.getElementById("instructions-modal");
 const memoryModal = document.getElementById("memory-modal");
 const usageModal = document.getElementById("usage-modal");
 const gameStateModal = document.getElementById("game-state-modal");
+const debugModal = document.getElementById("debug-modal");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
@@ -749,9 +750,15 @@ async function isLikelySpeech(samples, sampleRate) {
 // already happened. Once volume drops back below threshold for vadSilenceMs,
 // the utterance is finalized as a WAV and sent directly to the LLM.
 
-const PRE_ROLL_MS = 600;
+const PRE_ROLL_MS = 1500;
+// Extra fixed padding kept past the silence-detection point before finalizing, on top of the
+// user-configurable vadSilenceMs threshold - same idea as PRE_ROLL_MS but for the tail end, so a
+// trailing word/breath right at the silence cutoff doesn't get clipped.
+const POST_ROLL_MS = 500;
 const MAX_UTTERANCE_MS = 15000;
-const RING_BUFFER_SECONDS = 18;
+// Must comfortably exceed the worst case: PRE_ROLL_MS + MAX_UTTERANCE_MS + (max configurable
+// vadSilenceMs + POST_ROLL_MS), or extractFromRing silently truncates the start of long utterances.
+const RING_BUFFER_SECONDS = 24;
 
 let liveMicEnabled = false;
 let liveMicStream = null;
@@ -854,7 +861,7 @@ async function startLiveMic() {
       liveSilenceStart = null;
     } else {
       if (liveSilenceStart === null) liveSilenceStart = Date.now();
-      if (Date.now() - liveSilenceStart > vadSilenceMs) {
+      if (Date.now() - liveSilenceStart > vadSilenceMs + POST_ROLL_MS) {
         finalizeLiveUtterance();
       }
     }
@@ -1105,7 +1112,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal].forEach((modal) => {
+[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal, debugModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -1293,6 +1300,19 @@ contextWindowInput.addEventListener("input", () => {
   contextWindowValue.textContent = contextWindowInput.value === "0" ? "all" : contextWindowInput.value;
 });
 
+const screenshotWidthInput = document.getElementById("cfg-screenshot-width");
+const screenshotWidthValue = document.getElementById("cfg-screenshot-width-value");
+const screenshotQualityInput = document.getElementById("cfg-screenshot-quality");
+const screenshotQualityValue = document.getElementById("cfg-screenshot-quality-value");
+
+screenshotWidthInput.addEventListener("input", () => {
+  screenshotWidthValue.textContent = screenshotWidthInput.value;
+});
+
+screenshotQualityInput.addEventListener("input", () => {
+  screenshotQualityValue.textContent = screenshotQualityInput.value;
+});
+
 const gameStateIntervalInput = document.getElementById("cfg-game-state-interval");
 const gameStateIntervalValue = document.getElementById("cfg-game-state-interval-value");
 
@@ -1359,6 +1379,11 @@ async function loadConfig() {
   contextWindowInput.value = cfg.context_window_messages;
   contextWindowValue.textContent = cfg.context_window_messages === 0 ? "all" : cfg.context_window_messages;
 
+  screenshotWidthInput.value = cfg.screenshot_max_width;
+  screenshotWidthValue.textContent = cfg.screenshot_max_width;
+  screenshotQualityInput.value = cfg.screenshot_jpeg_quality;
+  screenshotQualityValue.textContent = cfg.screenshot_jpeg_quality;
+
   document.getElementById("cfg-game-state-enabled").checked = cfg.game_state_ocr_enabled;
   gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
   gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
@@ -1416,6 +1441,8 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
     openrouter_voice_model: document.getElementById("cfg-openrouter-voice-model").value,
     context_window_messages: parseInt(contextWindowInput.value, 10),
+    screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
+    screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
     igdb_client_id: document.getElementById("cfg-igdb-client-id").value,
     igdb_client_secret: igdbSecretInput.value || null,
     steam_api_key: steamApiKeyInput.value || null,
@@ -1868,14 +1895,254 @@ document.getElementById("approval-chip-blacklist").addEventListener("click", asy
 checkPendingApproval();
 setInterval(checkPendingApproval, 20000);
 
+// --- Consumption modal ---
+// Fetches the full per-call record list once per open/filter-change and aggregates client-side
+// (totals + per-feature breakdown) for the selected time range - same "fetch whole list, filter
+// in JS" pattern already used for the game-state blacklist/whitelist.
+
+const USAGE_RANGES = [
+  ["1h", "Last hour", 1 / 24],
+  ["24h", "Last 24h", 1],
+  ["7d", "Last 7d", 7],
+  ["30d", "Last 30d", 30],
+  ["all", "All time", null],
+  ["custom", "Custom", null],
+];
+
+let usageRange = "all";
+let usageRecordsCache = [];
+
+const usageRangePillsEl = document.getElementById("usage-range-pills");
+const usageCustomRangeEl = document.getElementById("usage-custom-range");
+const usageRangeStartInput = document.getElementById("usage-range-start");
+const usageRangeEndInput = document.getElementById("usage-range-end");
+const usageBySourceEl = document.getElementById("usage-by-source");
+const usageClearBtn = document.getElementById("usage-clear-btn");
+
+function renderUsageRangePills() {
+  usageRangePillsEl.innerHTML = "";
+  for (const [value, label] of USAGE_RANGES) {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "memory-filter-pill" + (usageRange === value ? " active" : "");
+    pill.textContent = label;
+    pill.addEventListener("click", () => {
+      usageRange = value;
+      renderUsageRangePills();
+      usageCustomRangeEl.hidden = usageRange !== "custom";
+      renderUsageStats();
+    });
+    usageRangePillsEl.appendChild(pill);
+  }
+}
+
+function filteredUsageRecords() {
+  if (usageRange === "all") return usageRecordsCache;
+
+  let startMs;
+  let endMs = Infinity;
+  if (usageRange === "custom") {
+    startMs = usageRangeStartInput.value ? new Date(usageRangeStartInput.value).getTime() : -Infinity;
+    endMs = usageRangeEndInput.value ? new Date(usageRangeEndInput.value).getTime() : Infinity;
+  } else {
+    const days = USAGE_RANGES.find(([value]) => value === usageRange)[2];
+    startMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  }
+
+  return usageRecordsCache.filter((r) => {
+    const ts = new Date(r.timestamp).getTime();
+    return ts >= startMs && ts <= endMs;
+  });
+}
+
+function renderUsageStats() {
+  const records = filteredUsageRecords();
+
+  const totalPromptTokens = records.reduce((sum, r) => sum + r.prompt_tokens, 0);
+  const totalCompletionTokens = records.reduce((sum, r) => sum + r.completion_tokens, 0);
+  const totalCost = records.reduce((sum, r) => sum + r.cost_usd, 0);
+
+  document.getElementById("usage-requests").textContent = records.length.toLocaleString();
+  document.getElementById("usage-prompt-tokens").textContent = totalPromptTokens.toLocaleString();
+  document.getElementById("usage-completion-tokens").textContent = totalCompletionTokens.toLocaleString();
+  document.getElementById("usage-cost").textContent = `$${totalCost.toFixed(4)}`;
+
+  const bySource = new Map();
+  for (const r of records) {
+    const entry = bySource.get(r.source) || { count: 0, promptTokens: 0, completionTokens: 0, cost: 0 };
+    entry.count += 1;
+    entry.promptTokens += r.prompt_tokens;
+    entry.completionTokens += r.completion_tokens;
+    entry.cost += r.cost_usd;
+    bySource.set(r.source, entry);
+  }
+
+  usageBySourceEl.innerHTML = "";
+  const sorted = [...bySource.entries()].sort((a, b) => b[1].cost - a[1].cost);
+  if (sorted.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "No requests in this range.";
+    usageBySourceEl.appendChild(hint);
+  }
+  for (const [source, entry] of sorted) {
+    const row = document.createElement("div");
+    row.className = "usage-source-row";
+    row.innerHTML = `
+      <span class="usage-source-name">${source}</span>
+      <span class="usage-source-detail">${entry.count} req</span>
+      <span class="usage-source-detail">${(entry.promptTokens + entry.completionTokens).toLocaleString()} tok</span>
+      <span class="usage-source-detail">$${entry.cost.toFixed(4)}</span>
+    `;
+    usageBySourceEl.appendChild(row);
+  }
+}
+
+usageRangeStartInput.addEventListener("change", renderUsageStats);
+usageRangeEndInput.addEventListener("change", renderUsageStats);
+
 usageBtn.addEventListener("click", async () => {
   openModal(usageModal);
-  const response = await fetch("/api/usage");
-  const usage = await response.json();
-  document.getElementById("usage-requests").textContent = usage.request_count.toLocaleString();
-  document.getElementById("usage-prompt-tokens").textContent = usage.total_prompt_tokens.toLocaleString();
-  document.getElementById("usage-completion-tokens").textContent = usage.total_completion_tokens.toLocaleString();
-  document.getElementById("usage-cost").textContent = `$${usage.total_cost_usd.toFixed(4)}`;
+  renderUsageRangePills();
+  usageCustomRangeEl.hidden = usageRange !== "custom";
+  const response = await fetch("/api/usage/records");
+  usageRecordsCache = await response.json();
+  renderUsageStats();
+});
+
+let usageClearConfirming = false;
+let usageClearConfirmTimeout = null;
+
+usageClearBtn.addEventListener("click", async () => {
+  if (!usageClearConfirming) {
+    usageClearConfirming = true;
+    usageClearBtn.textContent = "Click to confirm";
+    usageClearBtn.classList.add("confirming");
+    usageClearConfirmTimeout = setTimeout(() => {
+      usageClearConfirming = false;
+      usageClearBtn.textContent = "Clear Consumption Data";
+      usageClearBtn.classList.remove("confirming");
+    }, 4000);
+    return;
+  }
+
+  clearTimeout(usageClearConfirmTimeout);
+  usageClearConfirming = false;
+  usageClearBtn.textContent = "Clear Consumption Data";
+  usageClearBtn.classList.remove("confirming");
+
+  await fetch("/api/usage", { method: "DELETE" });
+  usageRecordsCache = [];
+  renderUsageStats();
+});
+
+// --- Debug modal ---
+// Last 10 individual LLM API calls (not persisted, resets on server restart) - lets the user
+// inspect exactly what was sent/received for each request, including tool round-trips.
+
+const debugBtn = document.getElementById("debug-btn");
+const debugRequestsListEl = document.getElementById("debug-requests-list");
+
+function formatDebugMessage(message) {
+  const block = document.createElement("div");
+  block.className = "debug-message-block";
+
+  const role = document.createElement("div");
+  role.className = "debug-message-role";
+  role.textContent = message.role + (message.tool_call_id ? ` (tool: ${message.tool_call_id})` : "");
+  block.appendChild(role);
+
+  const content = document.createElement("div");
+  content.className = "debug-message-content";
+  if (typeof message.content === "string") {
+    content.textContent = message.content;
+  } else if (Array.isArray(message.content)) {
+    content.textContent = message.content
+      .map((part) => (part.type === "text" ? part.text : `[${part.type}]`))
+      .join("\n");
+  } else if (message.tool_calls) {
+    content.textContent = message.tool_calls
+      .map((tc) => `→ ${tc.function?.name || tc.name}(${tc.function?.arguments || tc.arguments})`)
+      .join("\n");
+  } else {
+    content.textContent = "(empty)";
+  }
+  block.appendChild(content);
+
+  return block;
+}
+
+function renderDebugRequests(entries) {
+  debugRequestsListEl.innerHTML = "";
+
+  if (entries.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "No requests recorded yet this session.";
+    debugRequestsListEl.appendChild(hint);
+    return;
+  }
+
+  for (const entry of entries) {
+    const card = document.createElement("div");
+    card.className = "debug-request-card";
+
+    const summary = document.createElement("div");
+    summary.className = "debug-request-summary";
+    const time = new Date(entry.timestamp).toLocaleTimeString();
+    summary.innerHTML = `
+      <span class="debug-request-source">${entry.source}</span>
+      <span class="debug-request-meta">${entry.model} · ${time} · ${entry.prompt_tokens}+${entry.completion_tokens} tok
+      · $${entry.cost_usd.toFixed(4)} · ${entry.duration_ms ? Math.round(entry.duration_ms) + "ms" : "-"}</span>
+      <span>▾</span>
+    `;
+
+    const detail = document.createElement("div");
+    detail.className = "debug-request-detail";
+    detail.hidden = true;
+
+    summary.addEventListener("click", () => {
+      detail.hidden = !detail.hidden;
+    });
+
+    card.appendChild(summary);
+    card.appendChild(detail);
+    debugRequestsListEl.appendChild(card);
+
+    // Lazily build the (potentially large) detail body only when first expanded.
+    let built = false;
+    summary.addEventListener("click", () => {
+      if (built || detail.hidden) return;
+      built = true;
+      for (const message of entry.messages) {
+        detail.appendChild(formatDebugMessage(message));
+      }
+      if (entry.tools && entry.tools.length > 0) {
+        const toolsBlock = document.createElement("div");
+        toolsBlock.className = "debug-message-block";
+        toolsBlock.innerHTML = `<div class="debug-message-role">tools available</div><div class="debug-message-content">${entry.tools.join(", ")}</div>`;
+        detail.appendChild(toolsBlock);
+      }
+      if (entry.reply || entry.tool_calls) {
+        const replyBlock = document.createElement("div");
+        replyBlock.className = "debug-message-block";
+        const toolCallsText = entry.tool_calls
+          ? entry.tool_calls.map((tc) => `→ ${tc.name}(${tc.arguments})`).join("\n")
+          : "";
+        replyBlock.innerHTML = `<div class="debug-message-role">result</div><div class="debug-message-content"></div>`;
+        replyBlock.querySelector(".debug-message-content").textContent =
+          [entry.reply, toolCallsText].filter(Boolean).join("\n") || "(empty)";
+        detail.appendChild(replyBlock);
+      }
+    });
+  }
+}
+
+debugBtn.addEventListener("click", async () => {
+  openModal(debugModal);
+  const response = await fetch("/api/debug/requests");
+  const entries = await response.json();
+  renderDebugRequests(entries);
 });
 
 // --- Init ---

@@ -53,6 +53,8 @@ class CompanionConfig(BaseModel):
     narration_speed: float = 1.0
     narration_volume: float = 1.0
     context_window_messages: int = 20
+    screenshot_max_width: int = 960
+    screenshot_jpeg_quality: int = 70
 
     igdb_client_id: str | None = None
     igdb_client_secret: str | None = None
@@ -101,8 +103,24 @@ class MemoryUpdate(BaseModel):
     process: str | None = None
 
 
-class UsageStats(BaseModel):
-    request_count: int = 0
-    total_prompt_tokens: int = 0
-    total_completion_tokens: int = 0
-    total_cost_usd: float = 0.0
+class UsageRecord(BaseModel):
+    timestamp: str
+    source: str
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+class DebugRequestEntry(BaseModel):
+    id: str
+    timestamp: str
+    source: str
+    model: str
+    messages: list[dict]
+    tools: list[str] | None = None
+    reply: str | None = None
+    tool_calls: list[dict] | None = None
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+    duration_ms: float | None = None

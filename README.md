@@ -91,6 +91,8 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `KOKORO_VOICE`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_VOICE` | TTS voice selection per provider. |
 | `TTS_SPEED`, `TTS_VOLUME` | Narration speed/volume (the agent can also change these itself mid-conversation). |
 | `CONTEXT_WINDOW_MESSAGES` | How many of the most recent messages to send as context. `0` = unlimited. |
+| `SCREENSHOT_MAX_WIDTH` | Downscale width (px) for screenshots sent to the LLM. Default `960`. Lower = cheaper in image tokens. |
+| `SCREENSHOT_JPEG_QUALITY` | JPEG quality (1-95) for screenshots sent to the LLM. Default `70`. |
 | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` | Twitch Developer app credentials for the IGDB game-database tool. IGDB auth runs entirely through Twitch — register a free app at [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) (any placeholder OAuth Redirect URL like `https://localhost` works, since it's never actually used — only the client-credentials grant is used). |
 | `STEAM_API_KEY`, `STEAM_ID` | Optional. Enables the agent checking your owned games/playtime. Get a free key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey); `STEAM_ID` is your numeric SteamID64. Steam *store* lookups (price, description, etc.) work without these. |
 | `GAME_STATE_OCR_ENABLED` | `false` by default. Turns on passive game-state OCR (see [Passive game-state awareness](#passive-game-state-awareness)). Windows only, and requires the Tesseract engine to be installed separately. |
@@ -174,7 +176,8 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `GET/PUT /api/config` | Read/update all settings. |
 | `GET/POST /api/memory`, `PUT/DELETE /api/memory/{id}` | Memory CRUD. |
 | `GET/PUT /api/instructions` | Custom personal instructions, injected into every conversation. |
-| `GET /api/usage` | Cumulative token/cost stats. |
+| `GET /api/usage/records`, `DELETE /api/usage` | Per-call usage records (timestamp, source, tokens, cost) and clearing them. The Consumption view aggregates these client-side by time range and feature. |
+| `GET /api/debug/requests` | Last 10 individual LLM API calls (not persisted) - full messages, tool calls, tokens, cost, duration. Powers the Debug panel. |
 | `GET /api/models/llm` `/tts` `/voice-input` | Model lists for Settings dropdowns. |
 | `GET /api/screenshot` | One-off screenshot capture (used by the manual screenshot toggle). |
 | `POST /api/tts` | Synthesize speech for arbitrary text. |
