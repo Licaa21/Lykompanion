@@ -1,8 +1,10 @@
+import time
 from collections.abc import AsyncIterator
 
 import httpx
 from openai import AsyncOpenAI
 
+from app.core import debug_log
 from app.core.config import settings
 from app.core.usage import record_usage
 
@@ -16,67 +18,183 @@ client = AsyncOpenAI(
 _USAGE_EXTRA_BODY = {"usage": {"include": True}}
 
 
-def _track_usage(usage) -> None:
-    if not usage:
-        return
-    record_usage(usage.prompt_tokens, usage.completion_tokens, getattr(usage, "cost", 0) or 0)
+def _tool_names(tools: list[dict] | None) -> list[str] | None:
+    if not tools:
+        return None
+    return [t["function"]["name"] for t in tools if "function" in t]
+
+
+def _track(
+    *,
+    source: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None,
+    usage,
+    reply: str | None,
+    tool_calls: list[dict] | None,
+    duration_ms: float,
+) -> None:
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    cost_usd = getattr(usage, "cost", 0) or 0
+    if usage:
+        record_usage(prompt_tokens, completion_tokens, cost_usd, source)
+    debug_log.record_request(
+        source=source,
+        model=model,
+        messages=messages,
+        tools=_tool_names(tools),
+        reply=reply,
+        tool_calls=tool_calls,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+    )
+
+
+def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
+    if not tool_calls:
+        return None
+    return [
+        {"name": tc.function.name, "arguments": tc.function.arguments}
+        for tc in tool_calls
+        if tc.function
+    ]
 
 
 async def chat_completion(
-    messages: list[dict], model: str | None = None, response_format: dict | None = None
+    messages: list[dict], model: str | None = None, response_format: dict | None = None, source: str = "unknown"
 ) -> str:
+    resolved_model = model or settings.openrouter_model
+    start = time.monotonic()
     response = await client.chat.completions.create(
-        model=model or settings.openrouter_model,
+        model=resolved_model,
         messages=messages,
         response_format=response_format,
         extra_body=_USAGE_EXTRA_BODY,
     )
-    _track_usage(response.usage)
-    return response.choices[0].message.content or ""
+    duration_ms = (time.monotonic() - start) * 1000
+    content = response.choices[0].message.content or ""
+    _track(
+        source=source,
+        model=resolved_model,
+        messages=messages,
+        tools=None,
+        usage=response.usage,
+        reply=content,
+        tool_calls=None,
+        duration_ms=duration_ms,
+    )
+    return content
 
 
-async def chat_completion_stream(messages: list[dict], model: str | None = None) -> AsyncIterator[str]:
+async def chat_completion_stream(
+    messages: list[dict], model: str | None = None, source: str = "unknown"
+) -> AsyncIterator[str]:
+    resolved_model = model or settings.openrouter_model
+    start = time.monotonic()
     stream = await client.chat.completions.create(
-        model=model or settings.openrouter_model,
+        model=resolved_model,
         messages=messages,
         stream=True,
         stream_options={"include_usage": True},
         extra_body=_USAGE_EXTRA_BODY,
     )
+    full_text = ""
+    usage = None
     async for chunk in stream:
-        _track_usage(chunk.usage)
+        if chunk.usage:
+            usage = chunk.usage
         if chunk.choices:
             delta = chunk.choices[0].delta.content
             if delta:
+                full_text += delta
                 yield delta
+    duration_ms = (time.monotonic() - start) * 1000
+    _track(
+        source=source,
+        model=resolved_model,
+        messages=messages,
+        tools=None,
+        usage=usage,
+        reply=full_text,
+        tool_calls=None,
+        duration_ms=duration_ms,
+    )
 
 
-async def chat_completion_message(messages: list[dict], model: str | None = None, tools: list[dict] | None = None):
+async def chat_completion_message(
+    messages: list[dict], model: str | None = None, tools: list[dict] | None = None, source: str = "unknown"
+):
     """Returns the raw assistant message, which may carry tool_calls instead of (or alongside) content."""
+    resolved_model = model or settings.openrouter_model
+    start = time.monotonic()
     response = await client.chat.completions.create(
-        model=model or settings.openrouter_model,
+        model=resolved_model,
         messages=messages,
         tools=tools,
         extra_body=_USAGE_EXTRA_BODY,
     )
-    _track_usage(response.usage)
-    return response.choices[0].message
+    duration_ms = (time.monotonic() - start) * 1000
+    message = response.choices[0].message
+    _track(
+        source=source,
+        model=resolved_model,
+        messages=messages,
+        tools=tools,
+        usage=response.usage,
+        reply=message.content,
+        tool_calls=_tool_calls_to_dicts(message.tool_calls),
+        duration_ms=duration_ms,
+    )
+    return message
 
 
-async def stream_chat_completion_deltas(messages: list[dict], model: str | None = None, tools: list[dict] | None = None):
+async def stream_chat_completion_deltas(
+    messages: list[dict], model: str | None = None, tools: list[dict] | None = None, source: str = "unknown"
+):
     """Yields raw delta objects (not just text) so callers can also observe streamed tool_calls."""
+    resolved_model = model or settings.openrouter_model
+    start = time.monotonic()
     stream = await client.chat.completions.create(
-        model=model or settings.openrouter_model,
+        model=resolved_model,
         messages=messages,
         tools=tools,
         stream=True,
         stream_options={"include_usage": True},
         extra_body=_USAGE_EXTRA_BODY,
     )
+    full_text = ""
+    tool_call_fragments: dict[int, dict] = {}
+    usage = None
     async for chunk in stream:
-        _track_usage(chunk.usage)
+        if chunk.usage:
+            usage = chunk.usage
         if chunk.choices:
-            yield chunk.choices[0].delta
+            delta = chunk.choices[0].delta
+            if delta.content:
+                full_text += delta.content
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    entry = tool_call_fragments.setdefault(tc.index, {"name": "", "arguments": ""})
+                    if tc.function and tc.function.name:
+                        entry["name"] += tc.function.name
+                    if tc.function and tc.function.arguments:
+                        entry["arguments"] += tc.function.arguments
+            yield delta
+    duration_ms = (time.monotonic() - start) * 1000
+    _track(
+        source=source,
+        model=resolved_model,
+        messages=messages,
+        tools=tools,
+        usage=usage,
+        reply=full_text or None,
+        tool_calls=list(tool_call_fragments.values()) or None,
+        duration_ms=duration_ms,
+    )
 
 
 async def list_models() -> list[dict]:

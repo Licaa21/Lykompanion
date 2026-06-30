@@ -1,4 +1,5 @@
 from app.core import memory
+from app.services.system.processes import get_foreground_process_name
 
 MEMORY_TOOLS = [
     {
@@ -18,7 +19,16 @@ MEMORY_TOOLS = [
                     "content": {
                         "type": "string",
                         "description": "The fact to remember, written as a short standalone sentence.",
-                    }
+                    },
+                    "game_specific": {
+                        "type": "boolean",
+                        "description": (
+                            "True if this fact is specific to the game currently being played (e.g. character "
+                            "build, quest progress, in-game relationships) and should only resurface while that "
+                            "same game is active. False/omitted for general facts (name, life context, "
+                            "preferences that hold across games)."
+                        ),
+                    },
                 },
                 "required": ["content"],
             },
@@ -55,7 +65,8 @@ def execute_tool_call(name: str, arguments: dict) -> str:
         content = (arguments.get("content") or "").strip()
         if not content:
             return "Nothing to save: content was empty."
-        entry = memory.add_memory(content)
+        process = get_foreground_process_name() if arguments.get("game_specific") else None
+        entry = memory.add_memory(content, process=process)
         return f"Saved memory [{entry['id']}]: {entry['content']}"
 
     if name == "remove_memory":

@@ -4,6 +4,7 @@ import logging
 import sys
 
 from app.core import game_state
+from app.core import game_state_processes
 from app.core import memory as memory_store
 from app.core.config import settings
 from app.core.prompts import load_prompt
@@ -59,7 +60,9 @@ async def extract_and_apply_game_state(process: str, ocr_text: str) -> None:
 
     try:
         model = settings.game_state_model or None
-        raw = await chat_completion(messages, model=model, response_format={"type": "json_object"})
+        raw = await chat_completion(
+            messages, model=model, response_format={"type": "json_object"}, source="game_state_extraction"
+        )
         data = json.loads(raw)
     except Exception:
         logger.exception("Game-state extraction failed")
@@ -76,7 +79,7 @@ async def extract_and_apply_game_state(process: str, ocr_text: str) -> None:
 
     for fact in data.get("save_memories") or []:
         if isinstance(fact, str) and fact.strip():
-            memory_store.add_memory(fact.strip())
+            memory_store.add_memory(fact.strip(), process=process)
 
     for memory_id in data.get("remove_memory_ids") or []:
         if isinstance(memory_id, str) and memory_id:
@@ -90,12 +93,18 @@ async def _poll_once() -> None:
         return
 
     process = get_foreground_process_name()
-    if not process or process.lower() in _NON_GAME_PROCESSES:
-        logger.debug("Game-state poll: skipping non-game/unknown foreground process=%r", process)
+    if not process or process.lower() in _NON_GAME_PROCESSES or game_state_processes.is_blacklisted(process):
+        logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", process)
         if _last_process is not None:
             _last_process = None
             _last_ocr_text = None
             game_state.clear_game_state()
+        return
+
+    if not game_state_processes.is_whitelisted(process):
+        if game_state_processes.get_pending_process() != process:
+            logger.info("Game-state poll: unfamiliar process=%r detected, awaiting user approval", process)
+            game_state_processes.set_pending_process(process)
         return
 
     if process != _last_process:

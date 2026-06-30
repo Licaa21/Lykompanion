@@ -16,7 +16,8 @@ async def create_memory(payload: MemoryCreate) -> MemoryEntry:
     content = payload.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
-    return memory.add_memory(content)
+    process = (payload.process or "").strip() or None
+    return memory.add_memory(content, process=process)
 
 
 @router.put("/{memory_id}", response_model=MemoryEntry)
@@ -24,7 +25,8 @@ async def update_memory(memory_id: str, payload: MemoryUpdate) -> MemoryEntry:
     content = payload.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
-    updated = memory.update_memory(memory_id, content)
+    process = (payload.process or "").strip() or None
+    updated = memory.update_memory(memory_id, content, process=process)
     if not updated:
         raise HTTPException(status_code=404, detail="Memory not found.")
     return updated

@@ -28,6 +28,7 @@ from app.services.llm.tools import MEMORY_TOOLS, execute_tool_call
 from app.services.llm.volume_tool import VOLUME_TOOLS, execute_set_narration_volume
 from app.services.llm.web_search_tool import WEB_SEARCH_TOOLS, execute_web_search
 from app.services.screenshot.capture import capture_primary_monitor_b64
+from app.services.system.processes import get_foreground_process_name
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -59,7 +60,8 @@ def _build_base_messages(include_screenshot: bool) -> list[dict]:
     # Variable content last — maximises cache hits on stable prefix above.
     system_content += "\n\n" + current_datetime_context()
 
-    memories = memory.format_memories_for_prompt()
+    active_process = get_foreground_process_name()
+    memories = memory.format_memories_for_prompt(active_process)
     if memories:
         system_content += "\n\n" + memories
 
@@ -124,8 +126,8 @@ async def _execute_tool(name: str, arguments: dict) -> tuple[str, list[dict] | N
         message = execute_set_narration_volume(arguments)
         return message, None, {"type": "volume", "value": settings.tts_volume}
     if name == "stop_listening":
-        message, duration_seconds = execute_stop_listening(arguments)
-        return message, None, {"type": "stop_listening", "duration_seconds": duration_seconds}
+        message = execute_stop_listening(arguments)
+        return message, None, {"type": "stop_listening"}
     if name == "fetch_active_process":
         return execute_fetch_active_process(arguments), None, None
     if name == "web_search":
@@ -162,27 +164,26 @@ async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
     return side_effects
 
 
-async def _run_chat_with_tools(messages: list[dict], model: str | None = None) -> tuple[str, bool, int | None]:
-    """Returns (reply, stop_listening, stop_listening_seconds). stop_listening is True if a
-    stop_listening tool call happened this turn (stop_listening_seconds may still be None in
-    that case, meaning "stop indefinitely") - so non-streaming callers can react to it too."""
+async def _run_chat_with_tools(messages: list[dict], model: str | None = None, source: str = "chat") -> tuple[str, bool]:
+    """Returns (reply, stop_listening). stop_listening is True if a stop_listening tool call
+    happened this turn, so non-streaming callers can react to it too."""
     stop_listening = False
-    stop_listening_seconds = None
     for _ in range(MAX_TOOL_ITERATIONS):
-        message = await chat_completion_message(messages, model=model, tools=ALL_TOOLS)
+        message = await chat_completion_message(messages, model=model, tools=ALL_TOOLS, source=source)
         if not message.tool_calls:
-            return message.content or "", stop_listening, stop_listening_seconds
+            return message.content or "", stop_listening
 
         messages.append(message.model_dump(exclude_none=True))
         for side_effect in await _run_tool_calls(messages, message.tool_calls):
             if side_effect["type"] == "stop_listening":
                 stop_listening = True
-                stop_listening_seconds = side_effect["duration_seconds"]
 
-    return "Sorry, I got stuck juggling tools just now - try asking again?", stop_listening, stop_listening_seconds
+    return "Sorry, I got stuck juggling tools just now - try asking again?", stop_listening
 
 
-async def _stream_chat_with_tools(messages: list[dict], model: str | None = None) -> AsyncIterator[dict]:
+async def _stream_chat_with_tools(
+    messages: list[dict], model: str | None = None, source: str = "chat_stream"
+) -> AsyncIterator[dict]:
     """Yields tagged events: {"type": "delta", "text": ...} for reply text, plus out-of-band
     events like {"type": "volume", ...} or {"type": "stop_listening", ...} the moment a tool
     changes something the frontend needs to react to immediately, rather than only after the
@@ -190,7 +191,7 @@ async def _stream_chat_with_tools(messages: list[dict], model: str | None = None
     for _ in range(MAX_TOOL_ITERATIONS):
         tool_calls: dict[int, dict] = {}
 
-        async for delta in stream_chat_completion_deltas(messages, model=model, tools=ALL_TOOLS):
+        async for delta in stream_chat_completion_deltas(messages, model=model, tools=ALL_TOOLS, source=source):
             if delta.content:
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
@@ -232,7 +233,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     messages.extend(_limit_history([m.model_dump() for m in request.messages]))
 
     try:
-        reply, stop_listening, stop_listening_seconds = await _run_chat_with_tools(messages)
+        reply, stop_listening = await _run_chat_with_tools(messages, source="chat")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}") from exc
 
@@ -243,7 +244,6 @@ async def chat(request: ChatRequest) -> ChatResponse:
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
-        stop_listening_seconds=stop_listening_seconds,
     )
 
 
@@ -257,14 +257,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     async def event_generator():
         full_reply = ""
         try:
-            async for event in _stream_chat_with_tools(messages):
+            async for event in _stream_chat_with_tools(messages, source="chat_stream"):
                 if event["type"] == "delta":
                     full_reply += event["text"]
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "volume":
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
                 elif event["type"] == "stop_listening":
-                    yield f"data: {json.dumps({'stop_listening': event['duration_seconds']})}\n\n"
+                    yield f"data: {json.dumps({'stop_listening': True})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
@@ -294,7 +294,7 @@ async def chat_voice(
 
     model = settings.openrouter_voice_model or settings.openrouter_model
     try:
-        reply, stop_listening, stop_listening_seconds = await _run_chat_with_tools(messages, model=model)
+        reply, stop_listening = await _run_chat_with_tools(messages, model=model, source="chat_voice")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
 
@@ -304,7 +304,6 @@ async def chat_voice(
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
-        stop_listening_seconds=stop_listening_seconds,
     )
 
 
@@ -317,7 +316,7 @@ async def chat_title(request: ChatTitleRequest) -> ChatTitleResponse:
     ]
 
     try:
-        title = await chat_completion(messages)
+        title = await chat_completion(messages, source="chat_title")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Title generation failed: {exc}") from exc
 

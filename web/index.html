@@ -58,6 +58,9 @@
       <button id="usage-btn" class="sidebar-btn">
         <span class="sidebar-icon">📊</span> Consumption
       </button>
+      <button id="debug-btn" class="sidebar-btn">
+        <span class="sidebar-icon">🐞</span> Debug
+      </button>
       <button id="settings-btn" class="sidebar-btn">
         <span class="sidebar-icon">⚙️</span> Settings
       </button>
@@ -96,6 +99,16 @@
             Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
             <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
           </label>
+          <h3>Vision</h3>
+          <p class="modal-hint">Lower values cut image token cost on screenshots sent to the LLM.</p>
+          <label>
+            Screenshot Max Width: <span id="cfg-screenshot-width-value">960</span>px
+            <input id="cfg-screenshot-width" type="range" min="480" max="1920" step="80" value="960" />
+          </label>
+          <label>
+            Screenshot JPEG Quality: <span id="cfg-screenshot-quality-value">70</span>
+            <input id="cfg-screenshot-quality" type="range" min="30" max="95" step="5" value="70" />
+          </label>
           <h3>Passive Game-State Awareness</h3>
           <label class="checkbox">
             <input id="cfg-game-state-enabled" type="checkbox" />
@@ -110,6 +123,25 @@
             <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models..." />
             <select id="cfg-game-state-model"></select>
           </label>
+          <label>
+            Blacklisted Processes
+            <p class="modal-hint">
+              Processes the game-state poller should never OCR/track, in case the built-in filters miss something.
+            </p>
+          </label>
+          <div id="game-state-blacklist" class="memory-list"></div>
+          <form id="game-state-blacklist-form" class="memory-add-form">
+            <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
+            <button type="submit" class="secondary-btn">Add</button>
+          </form>
+          <label>
+            Approved Processes
+            <p class="modal-hint">
+              Processes you've allowed the poller to OCR/track. New, unfamiliar processes show up as a
+              notification asking you to allow or blacklist them instead of being tracked automatically.
+            </p>
+          </label>
+          <div id="game-state-whitelist" class="memory-list"></div>
         </section>
 
         <section class="tab-panel" data-tab="voice" hidden>
@@ -199,6 +231,30 @@
             Minimum Speech Duration (<span id="cfg-vad-min-speech-value">300</span> ms)
             <input id="cfg-vad-min-speech" type="range" min="100" max="1500" step="100" value="300" />
           </label>
+
+          <h3>Wake Word</h3>
+          <p class="modal-hint">
+            Say this phrase to re-enable hands-free listening after it's been turned off (by you or the
+            companion), without touching the keyboard/mouse. Uses your browser's built-in speech recognition
+            (Chrome/Edge only).
+          </p>
+          <p id="wake-word-unsupported" class="modal-hint" hidden>
+            Not supported in this browser - try Chrome or Edge.
+          </p>
+          <div id="wake-word-controls">
+            <label class="checkbox">
+              <input id="cfg-wake-word-enabled" type="checkbox" />
+              Enable wake word
+            </label>
+            <label>
+              Wake Phrase
+              <input id="cfg-wake-word-phrase" type="text" value="Hey Buddy" autocomplete="off" />
+            </label>
+            <div id="wake-word-debug" class="wake-word-debug" hidden>
+              <div id="wake-word-status" class="wake-word-status">Listening for wake phrase...</div>
+              <div id="wake-word-transcript" class="wake-word-transcript"></div>
+            </div>
+          </div>
         </section>
 
         <section class="tab-panel" data-tab="third-party" hidden>
@@ -274,11 +330,24 @@
       <div class="modal-body">
         <p class="modal-hint">
           Facts your companion has saved about you. It can add or remove these itself during conversation, or you
-          can manage them directly here.
+          can manage them directly here. Facts tagged to a game only get shown to the companion while that game is
+          active; general facts always show.
         </p>
+        <div id="memory-filters" class="memory-filters"></div>
         <div id="memory-list" class="memory-list"></div>
         <form id="memory-add-form" class="memory-add-form">
           <input id="memory-add-input" type="text" placeholder="Add a memory..." autocomplete="off" />
+          <select id="memory-add-process">
+            <option value="">General</option>
+            <option value="__other__">Other...</option>
+          </select>
+          <input
+            id="memory-add-process-custom"
+            type="text"
+            placeholder="e.g. bg3.exe"
+            autocomplete="off"
+            hidden
+          />
           <button type="submit" class="secondary-btn">Add</button>
         </form>
       </div>
@@ -309,7 +378,18 @@
         <button type="button" class="modal-close" data-close="usage-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="modal-hint">Cumulative usage across all conversations, tracked since you started using the app.</p>
+        <p class="modal-hint">Usage across all conversations, broken down by feature and time range.</p>
+        <div id="usage-range-pills" class="memory-filters"></div>
+        <div id="usage-custom-range" class="usage-custom-range" hidden>
+          <label>
+            From
+            <input id="usage-range-start" type="datetime-local" />
+          </label>
+          <label>
+            To
+            <input id="usage-range-end" type="datetime-local" />
+          </label>
+        </div>
         <div class="usage-stats">
           <div class="usage-stat">
             <span class="usage-stat-value" id="usage-requests">-</span>
@@ -328,11 +408,48 @@
             <span class="usage-stat-label">Total cost</span>
           </div>
         </div>
+        <h3>By Feature</h3>
+        <div id="usage-by-source" class="usage-by-source"></div>
+        <button type="button" id="usage-clear-btn" class="secondary-btn usage-clear-btn">Clear Consumption Data</button>
       </div>
     </div>
   </div>
 
+  <div id="debug-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Debug</h2>
+        <button type="button" class="modal-close" data-close="debug-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">
+          The last 10 individual LLM requests (one per API call - a single reply can involve several if tools
+          were used), most recent first. Long fields are truncated. Not persisted - resets on server restart.
+        </p>
+        <div id="debug-requests-list" class="debug-requests-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-state-approval-chip" class="approval-chip" hidden>
+    <span class="approval-chip-text">
+      🎮 New process detected: <strong id="approval-chip-process"></strong> — allow background game-state tracking?
+    </span>
+    <div class="approval-chip-actions">
+      <button type="button" id="approval-chip-allow" class="secondary-btn">Allow</button>
+      <button type="button" id="approval-chip-blacklist" class="secondary-btn">Blacklist</button>
+    </div>
+  </div>
+
   <audio id="narration-audio" hidden></audio>
+  <!--
+    Lightweight speech/non-speech classifier (Silero VAD), used to filter out coughs/claps/keyboard
+    noise that pass the live mic's amplitude threshold but aren't actually speech, before sending an
+    utterance to the LLM. Loaded from CDN - if this fails to load (offline, CDN blocked, version
+    moved), app.js fails open and just sends utterances as before, so it's not a hard dependency.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web/dist/bundle.min.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
