@@ -19,6 +19,8 @@ It's built to be used **hands-free while playing** — not as a chat app you sit
   - [Passive game-state awareness](#passive-game-state-awareness)
   - [Live mic / hands-free mode](#live-mic--hands-free-mode)
   - [Narration](#narration)
+  - [Native desktop app](#native-desktop-app)
+  - [Persistence](#persistence)
 - [API reference](#api-reference)
 - [Tools available to the agent](#tools-available-to-the-agent)
 - [Development](#development)
@@ -40,15 +42,17 @@ A typical turn looks like:
 ## Features
 
 - **Hands-free voice loop** — a live mic mode using voice-activity detection (with pre-roll buffering so the first word isn't clipped) automatically records your utterance and sends it, no push-to-talk needed. Narration is interrupted ("barge-in") if you start talking over it.
+- **Wake word** — once hands-free is off (manually, or because the agent stopped it), say a configurable phrase (default "Hey Buddy") to turn it back on without touching the keyboard/mouse. Runs entirely in-browser via the Web Speech API.
 - **Streaming spoken replies** — text streams in and is narrated sentence-by-sentence as it's generated, not after the full reply finishes.
-- **Persistent memory** — the agent proactively saves and forgets facts about you (preferences, what you're playing, life context) across sessions, without being explicitly told to. A dedicated background LLM pass also analyzes every exchange for things worth remembering, so this doesn't depend on the main chat model reliably deciding to call a memory tool mid-conversation. Memory is viewable/editable/removable directly in the UI.
+- **Persistent memory** — the agent proactively saves and forgets facts about you (preferences, what you're playing, life context) across sessions, without being explicitly told to, and can tag a fact as specific to the game currently being played (so it only resurfaces while that game is active). A dedicated background LLM pass also analyzes every exchange for things worth remembering, so this doesn't depend on the main chat model reliably deciding to call a memory tool mid-conversation. Memory is viewable/editable/removable directly in the UI.
 - **Vision** — the agent can take a screenshot of your screen itself (auto-detecting which monitor you're actively using on multi-monitor setups), or you can manually attach one to a message.
-- **Awareness of real-world context** — it can check which game/app is currently focused, your system specs, and can pause/resume its own hands-free listening (e.g. if you say you're stepping away).
-- **Passive game-state awareness** *(opt-in, Windows-only, off by default)* — periodically OCRs your screen in the background and keeps a live snapshot of your current quest/location/character, injected into every conversation automatically. New/unfamiliar processes require explicit one-time approval via a notification chip before anything gets read. See [Passive game-state awareness](#passive-game-state-awareness).
+- **Awareness of real-world context** — it can check which game/app is currently focused, your system specs, and can pause/resume its own hands-free listening (e.g. if you say you're stepping away, or it notices the mic is picking up audio not meant for it).
+- **Passive game-state awareness** *(opt-in, Windows-only, off by default)* — periodically OCRs your screen in the background and keeps a live snapshot of your current quest/location/character, injected into every conversation automatically. New/unfamiliar processes require explicit one-time approval through the notification center before anything gets read. See [Passive game-state awareness](#passive-game-state-awareness).
 - **Web search & game databases** — OpenRouter's web search plugin, IGDB (structured game data), and Steam (store info + your own library/playtime) are all available as agent tools.
-- **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), all from a Settings UI, persisted to `.env`.
-- **Cost tracking** — cumulative token usage and real USD cost (via OpenRouter) tracked across all requests, viewable in the UI.
-- **Multiple chat sessions** — sidebar with per-chat history (stored client-side in `localStorage`), auto-titled by the LLM after the first exchange.
+- **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), wake word, live-mic sensitivity, screenshot quality, all from a Settings UI, persisted to `.env`.
+- **Cost tracking & debugging** — per-call usage records (tokens, cost, which feature triggered it) with time-range filtering and a per-feature breakdown, optional OpenRouter account balance display, and a Debug panel showing the last 10 raw LLM requests/responses for troubleshooting.
+- **Multiple chat sessions** — sidebar with per-chat history, auto-titled by the LLM after the first exchange. Persisted server-side (survives clearing browser data), along with replayable voice message recordings.
+- **Native desktop app** — `RUN.cmd` launches Lykompanion in its own window (via `pywebview`/EdgeWebView2) instead of a browser tab, with the server running invisibly underneath. See [Native desktop app](#native-desktop-app).
 
 ## Setup
 
@@ -69,11 +73,15 @@ pip install -r requirements.txt
 
 ### Run
 
+**Native app (recommended):** double-click `RUN.cmd` (Windows), or run `.venv\Scripts\python.exe run_app.py`. This starts the FastAPI server in the background and opens Lykompanion in its own window via `pywebview` — no browser tab, no visible terminal once it's up. See [Native desktop app](#native-desktop-app) for details.
+
+**Plain server (for development):**
+
 ```bash
 .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 6692 --reload
 ```
 
-Or just double-click `RUN.cmd` (Windows), which does the same thing. Then open `http://localhost:6692` in a browser.
+Then open `http://localhost:6692` in a browser. Use this instead of `RUN.cmd` when iterating on backend code, since `--reload` picks up Python changes automatically — `run_app.py` does not reload.
 
 On first run, open **Settings** (⚙️ in the sidebar) and paste in your OpenRouter API key — everything else has sane defaults.
 
@@ -83,7 +91,8 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | Required. Your OpenRouter key. |
+| `OPENROUTER_API_KEY` | Required. Your OpenRouter key (used for all LLM/TTS calls). |
+| `OPENROUTER_MANAGEMENT_KEY` | Optional. A separate OpenRouter [Provisioning API key](https://openrouter.ai/settings/provisioning-keys) (not your regular inference key) used only to display your account's credit balance in the Consumption view. Everything else works fine without it. |
 | `OPENROUTER_MODEL` | Main chat model. |
 | `OPENROUTER_VOICE_MODEL` | Model used for voice messages (audio-capable). Falls back to `OPENROUTER_MODEL` if unset. |
 | `TTS_PROVIDER` | `kokoro` (local) or `openrouter` (cloud Speech models). |
@@ -91,6 +100,8 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `KOKORO_VOICE`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_VOICE` | TTS voice selection per provider. |
 | `TTS_SPEED`, `TTS_VOLUME` | Narration speed/volume (the agent can also change these itself mid-conversation). |
 | `CONTEXT_WINDOW_MESSAGES` | How many of the most recent messages to send as context. `0` = unlimited. |
+| `WAKE_WORD_ENABLED`, `WAKE_WORD_PHRASE` | Enables the wake phrase (default `false`) and what to listen for (default `"Hey Buddy"`). |
+| `VAD_THRESHOLD`, `VAD_SILENCE_MS`, `VAD_MIN_SPEECH_MS` | Live-mic voice-activity-detection tuning — amplitude threshold, how long to wait after speech stops before sending, and the minimum recording length to bother sending. Defaults `8` / `1200` / `300`. |
 | `SCREENSHOT_MAX_WIDTH` | Downscale width (px) for screenshots sent to the LLM. Default `960`. Lower = cheaper in image tokens. |
 | `SCREENSHOT_JPEG_QUALITY` | JPEG quality (1-95) for screenshots sent to the LLM. Default `70`. |
 | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` | Twitch Developer app credentials for the IGDB game-database tool. IGDB auth runs entirely through Twitch — register a free app at [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) (any placeholder OAuth Redirect URL like `https://localhost` works, since it's never actually used — only the client-credentials grant is used). |
@@ -107,8 +118,8 @@ No API key is needed for web search — it goes through OpenRouter's own `web` p
 ```
 app/
   main.py              FastAPI app, router registration, static file mount, background poller lifespan
-  api/                  HTTP route handlers (one module per concern)
-  core/                 Config/settings, prompt loading, memory store, ephemeral game-state store, usage tracking
+  api/                  HTTP route handlers (one module per concern, incl. chats.py and voice.py for persistence)
+  core/                 Config/settings, prompt loading, memory store, chat/voice persistence, ephemeral game-state store, usage tracking
   models/schemas.py     Pydantic request/response models
   prompts/              System/task prompt templates (Markdown, loaded at runtime)
   services/
@@ -119,7 +130,8 @@ app/
     system/              Process/system-info lookups
 web/
   index.html, css/, js/app.js   Static frontend, no build step
-data/                   Runtime state (memory.json, usage.json, custom_instructions.txt) - gitignored
+run_app.py              Desktop launcher - runs the server in a background thread, opens it in a pywebview window
+data/                   Runtime state (memory.json, usage.json, chats.json, custom_instructions.txt, voice/*.wav) - gitignored
 ```
 
 ## Architecture notes
@@ -132,9 +144,9 @@ Some tools have side effects the *frontend* needs to react to immediately rather
 
 ### Memory
 
-Memory is a flat JSON list of `{id, content}` entries (`data/memory.json`), injected into the system prompt as "Known facts about the user" on every request. There are two independent paths that can write to it:
+Memory is a flat JSON list of `{id, content, process}` entries (`data/memory.json`), injected into the system prompt as "Known facts about the user" on every request. `process` is optional — when set (e.g. `"bg3.exe"`), that fact is treated as specific to whatever's currently being played and is only included in the prompt while that same process is the active foreground app; general facts (`process: null`) always show up. There are two independent paths that can write to memory:
 
-1. **Explicit tools** (`save_memory`, `remove_memory`) — available to the main chat model, used when it decides mid-conversation to remember/forget something.
+1. **Explicit tools** (`save_memory`, `remove_memory`) — available to the main chat model, used when it decides mid-conversation to remember/forget something. `save_memory` takes a `game_specific` flag the model sets when the fact is tied to the current playthrough rather than generally true.
 2. **A dedicated background extraction pass** (`app/services/llm/memory_extraction.py`) — after every text exchange, a separate, single-purpose LLM call analyzes the exchange against current memory and decides what to save/remove, applying it automatically. This runs as a fire-and-forget `asyncio` task so it never adds latency to the visible reply.
 
 The second path exists because relying purely on the conversational model's own initiative to call memory tools turned out to be unreliable in practice, especially with smaller/cheaper models — they tend to only act on explicit instructions rather than proactively managing memory as a background habit. Forcing a dedicated pass every turn makes memory capture deterministic regardless of which model is handling the conversation.
@@ -144,10 +156,10 @@ The second path exists because relying purely on the conversational model's own 
 *Opt-in, off by default (`GAME_STATE_OCR_ENABLED=false`), Windows-only.* A long-lived background task (`app/services/llm/game_state_extraction.py`, started via FastAPI's `lifespan` in `app/main.py`) wakes up every `GAME_STATE_POLL_INTERVAL_SECONDS` and:
 
 1. Checks the foreground process (`fetch_active_process`'s underlying lookup) and skips the tick entirely if it's not focused, or looks like an obviously non-game app (browser, terminal, IDE, etc. — a hardcoded denylist, not exhaustive).
-2. If the process is neither denylisted nor already approved, it's treated as **pending**: the poller does *not* OCR it yet. Instead a persistent notification chip appears in the UI (bottom-right, stays until acted on) asking you to **Allow** or **Blacklist** it. Nothing gets captured/read until you decide — this is the consent gate for an otherwise-automatic screen-reading feature. Decisions persist to `data/game_state_whitelist.json` / `data/game_state_blacklist.json`, both reviewable/editable from Settings → General (an "Approved Processes" list with revoke buttons, and a "Blacklisted Processes" list with add/remove).
+2. If the process is neither denylisted nor already approved, it's added to a **pending queue** (`data/game_state_pending.json`, survives restarts) — the poller does *not* OCR it yet. It shows up in the notification bell (🔔 in the sidebar, with an unread-count badge) asking you to **Allow** or **Blacklist** each one. Nothing gets captured/read until you decide — this is the consent gate for an otherwise-automatic screen-reading feature. Decisions persist to `data/game_state_whitelist.json` / `data/game_state_blacklist.json`, both reviewable/editable from Settings → General (an "Approved Processes" list with revoke buttons, and a "Blacklisted Processes" list with add/remove).
 3. For an approved process, captures a full-resolution screenshot and runs it through the local [Tesseract OCR engine](https://github.com/UB-Mannheim/tesseract/wiki) (`app/services/ocr/tesseract_ocr.py`) — free and local, no LLM tokens spent on this step.
 4. Diffs the recognized text against the last poll. If nothing changed, it stops there — this is what keeps the feature cheap, since the next step is the only one that costs tokens.
-5. If the text changed, a dedicated LLM pass (model configurable via `GAME_STATE_MODEL`, same fallback pattern as memory extraction) gets the raw OCR text *and* the current known-facts memory list (so it can recognize updates vs. duplicates, e.g. a level-up replacing an old level fact instead of stacking). It returns structured `activity`/`location`/`quest`/`character`/`notable_choice` fields (keeping previously-known fields if they're not visible in this particular OCR pass — `activity` is always refreshed fresh, since it describes the current moment), and can save/remove durable facts in the regular memory store — not just stats, but narrative moments read straight from on-screen dialogue (e.g. "The player rejected Shadowheart's romantic advances in Baldur's Gate 3").
+5. If the text changed, a dedicated LLM pass (model configurable via `GAME_STATE_MODEL`, same fallback pattern as memory extraction) gets the raw OCR text *and* the current known-facts memory list (so it can recognize updates vs. duplicates, e.g. a level-up replacing an old level fact instead of stacking). It returns structured `activity`/`location`/`quest`/`character`/`notable_choice` fields (keeping previously-known fields if they're not visible in this particular OCR pass — `activity` is always refreshed fresh, since it describes the current moment), and can save/remove durable facts in the regular memory store, tagged to that process — not just stats, but narrative moments read straight from on-screen dialogue (e.g. "The player rejected Shadowheart's romantic advances in Baldur's Gate 3").
 
 The structured snapshot is purely ephemeral (`app/core/game_state.py`, in-memory only, not written to disk — it resets on restart, unlike `memory.json`) and gets injected into the system prompt on every chat request, right after the memory block. You can inspect what's currently being tracked from the **Game State** button in the sidebar, which also shows a live status dot (gray = disabled, yellow = enabled but idle, green = actively tracking).
 
@@ -155,13 +167,25 @@ Because Tesseract's accuracy on stylized/low-contrast in-game fonts varies a lot
 
 ### Live mic / hands-free mode
 
-The live mic (🎙️) continuously records into a rolling ring buffer (not just monitoring volume) and uses simple amplitude-threshold voice activity detection. When speech is detected, ~600ms of pre-roll audio from *before* the threshold was crossed is prepended, so the first word isn't clipped (a fresh recorder starting only at detection time can't recover audio that already happened). After a configurable silence duration, the utterance is finalized as a WAV and sent directly to the LLM. Tuning (threshold, silence duration, minimum speech length) is in Settings → Live Mic, stored client-side.
+The live mic (🎙️) continuously records into a rolling ring buffer (not just monitoring volume) and uses simple amplitude-threshold voice activity detection, with `autoGainControl` requested on the mic stream so quiet speech gets normalized before it even reaches the threshold check. When speech is detected, 1500ms of pre-roll audio from *before* the threshold was crossed is prepended so the first word isn't clipped (a fresh recorder starting only at detection time can't recover audio that already happened), and finalization waits an extra fixed 500ms past the configured silence threshold (post-roll) so a trailing word doesn't get cut off either. After that silence window, the utterance is finalized as a WAV — a quick local pass through Silero VAD (`@ricky0123/vad-web`, loaded from CDN) then discards it if it doesn't actually look like speech (coughs, claps, keyboard noise that passed the amplitude gate), before sending what's left straight to the LLM. Tuning (amplitude threshold, silence duration, minimum speech length, wake word) is in Settings → Live Mic, persisted server-side via `/api/config`.
 
 While narrating, the live mic doesn't suppress itself — any loud sound is treated as the user interrupting ("barge-in"), cutting narration immediately and starting a new recording, so you can cut the companion off mid-sentence.
+
+Once hands-free is off, optionally say the configured **wake word** (Settings → Live Mic, default "Hey Buddy") to turn it back on — a separate `SpeechRecognition` instance listens only while hands-free is off (so it never competes with the live mic's own capture), with a debug transcript panel in Settings to see what it's hearing and confirm detection works. Chrome/Edge only (Web Speech API).
 
 ### Narration
 
 Replies are split into sentences as they stream in, and each sentence is sent to TTS and queued for playback as soon as it's ready — synthesis for the next sentence starts immediately on enqueue, overlapping with current playback, rather than waiting for the full reply before saying anything.
+
+### Native desktop app
+
+`run_app.py` starts the FastAPI server in a background thread, waits for it to come up, then opens it in a native `pywebview` window (EdgeWebView2 on Windows 11) instead of a browser tab — `RUN.cmd` runs this by default. It also: pre-seeds the WebView2 profile so microphone permission and download behavior (auto-save to your real Downloads folder, no Save-As dialog) work from the very first launch without any manual prompts, disables dev-tools/right-click to keep it feeling like a real app rather than an obviously embedded browser, and exposes a small JS-callable API so voice-message downloads are copied directly by Python rather than going through WebView2's flakier download handling.
+
+This is purely a presentation layer — the server underneath is the exact same FastAPI app you'd get running `uvicorn` directly, so anything documented elsewhere in this README applies whether or not you're using the desktop wrapper.
+
+### Persistence
+
+Chat sessions (`data/chats.json`, via `GET/PUT /api/chats`) and voice message recordings (`data/voice/*.wav`, via `/api/voice/{id}`) are persisted server-side rather than in browser `localStorage`/IndexedDB, so they survive clearing browser data and behave consistently whether you're using the desktop app or a browser tab. Voice messages are replayable directly from the chat log (play/pause, seek, speed, download) instead of just showing a "voice message" label.
 
 ## API reference
 
@@ -176,13 +200,16 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `GET/PUT /api/config` | Read/update all settings. |
 | `GET/POST /api/memory`, `PUT/DELETE /api/memory/{id}` | Memory CRUD. |
 | `GET/PUT /api/instructions` | Custom personal instructions, injected into every conversation. |
+| `GET/PUT /api/chats` | Server-side chat session persistence (`data/chats.json`) — the sidebar's full chat list, replacing client-side `localStorage`. |
+| `POST/GET/DELETE /api/voice/{id}` | Upload, fetch, or delete a voice message recording (`data/voice/{id}.wav`) — powers the in-chat voice player. |
 | `GET /api/usage/records`, `DELETE /api/usage` | Per-call usage records (timestamp, source, tokens, cost) and clearing them. The Consumption view aggregates these client-side by time range and feature. |
+| `GET /api/usage/balance` | OpenRouter account credit balance (requires `OPENROUTER_MANAGEMENT_KEY`; returns `available: false` otherwise). |
 | `GET /api/debug/requests` | Last 10 individual LLM API calls (not persisted) - full messages, tool calls, tokens, cost, duration. Powers the Debug panel. |
 | `GET /api/models/llm` `/tts` `/voice-input` | Model lists for Settings dropdowns. |
 | `GET /api/screenshot` | One-off screenshot capture (used by the manual screenshot toggle). |
 | `POST /api/tts` | Synthesize speech for arbitrary text. |
 | `GET /api/game-state` | Current passive game-state snapshot (read-only) — powers the Game State sidebar indicator/modal. |
-| `GET /api/game-state/pending` | The foreground process (if any) currently awaiting allow/blacklist approval — powers the notification chip. |
+| `GET /api/game-state/pending` | Foreground processes currently awaiting allow/blacklist approval (a persisted queue, not just one) — powers the notification bell. |
 | `GET/POST /api/game-state/whitelist`, `DELETE /api/game-state/whitelist/{process}` | Processes approved for game-state OCR. |
 | `GET/POST /api/game-state/blacklist`, `DELETE /api/game-state/blacklist/{process}` | Processes the poller should never OCR. |
 
@@ -190,10 +217,10 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 
 | Tool | What it does | Requires setup? |
 |---|---|---|
-| `save_memory` / `remove_memory` | Persist or forget a fact about the user. | No |
+| `save_memory` / `remove_memory` | Persist or forget a fact about the user, optionally tagged to the current game (`game_specific`). | No |
 | `take_screenshot` | Capture a monitor (defaults to the active one). | No |
 | `set_narration_volume` | Adjust its own TTS volume. | No |
-| `stop_listening` | Disable hands-free mic, optionally for a duration. | No |
+| `stop_listening` | Disable hands-free mic indefinitely — on a sign-off, an explicit request, or unwanted overheard audio. Re-enable via the wake word or the mic toggle. | No |
 | `fetch_active_process` | Check which app/game is currently focused. | No |
 | `fetch_system_info` | Check OS/CPU/RAM. | No |
 | `web_search` | Search the web (OpenRouter `web` plugin). | No (billed via OpenRouter) |
