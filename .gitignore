@@ -10,3 +10,5 @@ venv/
 *.wav
 *.mp3
 .DS_Store
+.vscode/
+image/
