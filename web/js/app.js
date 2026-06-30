@@ -670,7 +670,7 @@ micBtn.addEventListener("click", async () => {
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch (err) {
     setVoiceStatus("Microphone access denied", "error");
@@ -803,7 +803,7 @@ function extractFromRing(startAbs, endAbs) {
 async function startLiveMic() {
   try {
     liveMicStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch (err) {
     setVoiceStatus("Microphone access denied", "error");
