@@ -191,6 +191,13 @@ body {
   background: #1f2029;
 }
 
+.voice-message-audio {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 0.4rem;
+}
+
 .composer {
   width: 100%;
   max-width: 720px;
@@ -275,6 +282,37 @@ body {
   color: #6fa8ff;
   text-align: center;
   padding: 0.2rem 0;
+}
+
+.approval-chip {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.6rem;
+  background: #1d1e25;
+  border: 1px solid #2a2b33;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.approval-chip[hidden] {
+  display: none;
+}
+
+.approval-chip-text {
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.approval-chip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 /* --- Modals (Settings / Personal Instructions) --- */
@@ -488,6 +526,44 @@ body {
   cursor: text;
 }
 
+.memory-item-tag {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.72rem;
+  color: #9a9aa5;
+  background: #14151a;
+  border: 1px solid #2a2b33;
+  border-radius: 1rem;
+  padding: 0.15rem 0.55rem;
+  outline: none;
+  cursor: text;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.memory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.memory-filter-pill {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 1rem;
+  border: 1px solid #2a2b33;
+  background: #1d1e25;
+  color: #9a9aa5;
+  cursor: pointer;
+}
+
+.memory-filter-pill.active {
+  background: #3a5fdb;
+  border-color: #3a5fdb;
+  color: #fff;
+}
+
 .memory-item-delete {
   background: transparent;
   border: none;
@@ -509,6 +585,27 @@ body {
   color: #6a6a75;
   text-align: center;
   padding: 0.5rem 0;
+}
+
+.wake-word-debug {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.4rem;
+  background: #1d1e25;
+  border: 1px solid #2a2b33;
+}
+
+.wake-word-status {
+  font-size: 0.8rem;
+  color: #6fa8ff;
+  margin-bottom: 0.4rem;
+}
+
+.wake-word-transcript {
+  font-size: 0.8rem;
+  color: #9a9aa5;
+  min-height: 1.2rem;
+  font-style: italic;
 }
 
 .game-state-fields {
@@ -543,6 +640,16 @@ body {
 
 .memory-add-form input[type="text"] {
   flex: 1;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.4rem;
+  border: 1px solid #3a3b45;
+  background: #1d1e25;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+.memory-add-form select {
   padding: 0.5rem 0.6rem;
   border-radius: 0.4rem;
   border: 1px solid #3a3b45;

@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core import game_state as game_state_store
+from app.core import game_state_processes
 from app.core.config import settings
-from app.models.schemas import GameStateResponse
+from app.models.schemas import GameStateResponse, PendingProcessResponse, ProcessEntry
 
 router = APIRouter(prefix="/api/game-state", tags=["game-state"])
 
@@ -20,3 +21,48 @@ async def get_game_state() -> GameStateResponse:
         character=(state or {}).get("character"),
         notable_choice=(state or {}).get("notable_choice"),
     )
+
+
+@router.get("/pending", response_model=PendingProcessResponse)
+async def get_pending_process() -> PendingProcessResponse:
+    return PendingProcessResponse(process=game_state_processes.get_pending_process())
+
+
+@router.get("/blacklist", response_model=list[str])
+async def list_blacklist() -> list[str]:
+    return game_state_processes.load_blacklist()
+
+
+@router.post("/blacklist", response_model=list[str])
+async def add_blacklist_entry(payload: ProcessEntry) -> list[str]:
+    process = payload.process.strip()
+    if not process:
+        raise HTTPException(status_code=400, detail="Process name cannot be empty.")
+    game_state_processes.add_to_blacklist(process)
+    return game_state_processes.load_blacklist()
+
+
+@router.delete("/blacklist/{process}", response_model=list[str])
+async def remove_blacklist_entry(process: str) -> list[str]:
+    game_state_processes.remove_from_blacklist(process)
+    return game_state_processes.load_blacklist()
+
+
+@router.get("/whitelist", response_model=list[str])
+async def list_whitelist() -> list[str]:
+    return game_state_processes.load_whitelist()
+
+
+@router.post("/whitelist", response_model=list[str])
+async def add_whitelist_entry(payload: ProcessEntry) -> list[str]:
+    process = payload.process.strip()
+    if not process:
+        raise HTTPException(status_code=400, detail="Process name cannot be empty.")
+    game_state_processes.add_to_whitelist(process)
+    return game_state_processes.load_whitelist()
+
+
+@router.delete("/whitelist/{process}", response_model=list[str])
+async def remove_whitelist_entry(process: str) -> list[str]:
+    game_state_processes.remove_from_whitelist(process)
+    return game_state_processes.load_whitelist()

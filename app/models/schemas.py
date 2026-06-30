@@ -17,7 +17,6 @@ class ChatResponse(BaseModel):
     reply: str
     narration_volume: float = 1.0
     stop_listening: bool = False
-    stop_listening_seconds: int | None = None
 
 
 class ChatTitleRequest(BaseModel):
@@ -74,6 +73,14 @@ class GameStateResponse(BaseModel):
     notable_choice: str | None = None
 
 
+class ProcessEntry(BaseModel):
+    process: str
+
+
+class PendingProcessResponse(BaseModel):
+    process: str | None = None
+
+
 class CustomInstructions(BaseModel):
     instructions: str = ""
 
@@ -81,14 +88,17 @@ class CustomInstructions(BaseModel):
 class MemoryEntry(BaseModel):
     id: str
     content: str
+    process: str | None = None
 
 
 class MemoryCreate(BaseModel):
     content: str
+    process: str | None = None
 
 
 class MemoryUpdate(BaseModel):
     content: str
+    process: str | None = None
 
 
 class UsageStats(BaseModel):

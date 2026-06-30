@@ -33,6 +33,11 @@ let vadThreshold = Number(localStorage.getItem("vadThreshold")) || 8;
 let vadSilenceMs = Number(localStorage.getItem("vadSilenceMs")) || 1200;
 let vadMinSpeechMs = Number(localStorage.getItem("vadMinSpeechMs")) || 300;
 
+// Wake word - re-enables hands-free listening by voice after it's been turned off, since
+// touching the keyboard/mouse defeats the point of hands-free. Persisted client-side only.
+let wakeWordEnabled = localStorage.getItem("wakeWordEnabled") === "true";
+let wakeWordPhrase = localStorage.getItem("wakeWordPhrase") || "Hey Buddy";
+
 function setVoiceStatus(text, variant) {
   voiceStatus.textContent = text;
   voiceStatus.classList.remove("recording", "error");
@@ -54,6 +59,31 @@ function beep(frequency, duration) {
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
   oscillator.start();
   oscillator.stop(audioCtx.currentTime + duration);
+}
+
+// Distinct two-note ascending chime for wake-word detection, clearly different from the single
+// beeps used for recording start (880Hz) / utterance finalized (440Hz) - this confirms hands-free
+// is back on without an LLM/TTS round-trip, since the main use case is couch/controller, eyes off
+// the screen.
+function playWakeChime() {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const notes = [
+    { frequency: 660, start: 0 },
+    { frequency: 990, start: 0.12 },
+  ];
+  const duration = 0.15;
+  for (const { frequency, start } of notes) {
+    const startTime = audioCtx.currentTime + start;
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    oscillator.frequency.value = frequency;
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+    gain.gain.setValueAtTime(0.15, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration);
+  }
 }
 
 // --- Chat sessions (sidebar) ---
@@ -108,6 +138,12 @@ function switchChat(id) {
 }
 
 function deleteChat(id) {
+  const chat = chats.find((c) => c.id === id);
+  if (chat) {
+    for (const message of chat.messages) {
+      if (message.audioId) deleteVoiceBlob(message.audioId);
+    }
+  }
   chats = chats.filter((c) => c.id !== id);
   saveChatsToStorage();
   if (activeChatId === id) {
@@ -121,13 +157,70 @@ function deleteChat(id) {
   }
 }
 
-function addMessageToChat(chat, role, content) {
-  chat.messages.push({ role, content });
+function addMessageToChat(chat, role, content, audioId) {
+  chat.messages.push({ role, content, audioId: audioId || undefined });
   if (chat.title === "New Chat" && role === "user") {
     chat.title = content.slice(0, 40) || "New Chat";
     renderChatList();
   }
   saveChatsToStorage();
+}
+
+// --- Voice message audio storage (IndexedDB) ---
+// Voice messages have no text transcript (audio goes straight to an audio-capable LLM, skipping
+// local STT), so the actual recording is what's worth keeping for replay/debugging. Stored in
+// IndexedDB rather than localStorage, which can't hold binary Blobs efficiently and has a much
+// smaller size cap. Keyed by a random id referenced from the chat message itself.
+
+const VOICE_DB_NAME = "lykompanion-voice";
+const VOICE_STORE_NAME = "messages";
+
+function openVoiceDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(VOICE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(VOICE_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveVoiceBlob(id, blob) {
+  try {
+    const db = await openVoiceDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(VOICE_STORE_NAME, "readwrite");
+      tx.objectStore(VOICE_STORE_NAME).put(blob, id);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    // Replay is a nice-to-have - failing to persist the blob shouldn't break sending the message.
+  }
+}
+
+async function getVoiceBlob(id) {
+  try {
+    const db = await openVoiceDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(VOICE_STORE_NAME, "readonly");
+      const request = tx.objectStore(VOICE_STORE_NAME).get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    return null;
+  }
+}
+
+async function deleteVoiceBlob(id) {
+  try {
+    const db = await openVoiceDb();
+    db.transaction(VOICE_STORE_NAME, "readwrite").objectStore(VOICE_STORE_NAME).delete(id);
+  } catch (err) {
+    // best-effort cleanup
+  }
 }
 
 // Voice messages have no real text ("🎤 (voice message)"), so the
@@ -186,7 +279,7 @@ function renderChatLog() {
   const chat = getActiveChat();
   if (!chat) return;
   for (const message of chat.messages) {
-    appendMessage(message.role, message.content);
+    appendMessage(message.role, message.content, message.audioId);
   }
 }
 
@@ -306,10 +399,19 @@ function stopNarration() {
 
 stopNarrationBtn.addEventListener("click", stopNarration);
 
-function appendMessage(role, content) {
+function appendMessage(role, content, audioId) {
   const el = document.createElement("div");
   el.className = `message ${role}`;
   el.textContent = content;
+  if (audioId) {
+    const audioEl = document.createElement("audio");
+    audioEl.controls = true;
+    audioEl.className = "voice-message-audio";
+    el.appendChild(audioEl);
+    getVoiceBlob(audioId).then((blob) => {
+      if (blob) audioEl.src = URL.createObjectURL(blob);
+    });
+  }
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
   return el;
@@ -400,8 +502,8 @@ async function sendMessage(text) {
           applyNarrationVolume(payload.volume);
           continue;
         }
-        if (payload.stop_listening !== undefined) {
-          agentStopListening(payload.stop_listening);
+        if (payload.stop_listening) {
+          agentStopListening();
           continue;
         }
         if (payload.done) continue;
@@ -507,10 +609,13 @@ async function sendDirectVoice(wavBlob) {
   const chat = getActiveChat();
   if (!chat) return;
 
+  const audioId = (crypto.randomUUID && crypto.randomUUID()) || `voice-${Date.now()}`;
+  saveVoiceBlob(audioId, wavBlob);
+
   stopNarration();
   awaitingReply = true;
   try {
-    appendMessage("user", "🎤 (voice message)");
+    appendMessage("user", "🎤 (voice message)", audioId);
     setVoiceStatus("Sending voice message...");
 
     const formData = new FormData();
@@ -529,14 +634,14 @@ async function sendDirectVoice(wavBlob) {
 
     const data = await response.json();
     appendMessage("assistant", data.reply);
-    addMessageToChat(chat, "user", "🎤 (voice message)");
+    addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
     addMessageToChat(chat, "assistant", data.reply);
     maybeGenerateTitle(chat, "(voice message)", data.reply);
     applyNarrationVolume(data.narration_volume);
 
     awaitingReply = false;
     if (data.stop_listening) {
-      agentStopListening(data.stop_listening_seconds);
+      agentStopListening();
     } else {
       setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     }
@@ -602,6 +707,40 @@ micBtn.addEventListener("click", async () => {
 });
 
 // --- Live mic: hands-free, volume-gated capture for talking while gaming ---
+// --- Lightweight speech/non-speech gate (Silero VAD via @ricky0123/vad-web) ---
+// Runs once on each finalized live-mic utterance, locally, before sending - filters out coughs/
+// claps/keyboard noise that pass the amplitude threshold but aren't actually speech, without
+// adding round-trip latency (it's a local check on the already-captured buffer, not an extra
+// network call). Fails open: if the library didn't load or errors out, utterances are sent as
+// before rather than silently dropped, so this is a refinement, not a hard dependency.
+
+let nonRealTimeVadPromise = null;
+
+function getNonRealTimeVad() {
+  if (!window.vad || !window.vad.NonRealTimeVAD) return null;
+  if (!nonRealTimeVadPromise) {
+    nonRealTimeVadPromise = window.vad.NonRealTimeVAD.new().catch(() => {
+      nonRealTimeVadPromise = null;
+      return null;
+    });
+  }
+  return nonRealTimeVadPromise;
+}
+
+async function isLikelySpeech(samples, sampleRate) {
+  try {
+    const instance = await getNonRealTimeVad();
+    if (!instance) return true; // VAD unavailable - fail open, don't block sending
+
+    for await (const _segment of instance.run(samples, sampleRate)) {
+      return true; // any detected speech segment is enough
+    }
+    return false;
+  } catch (err) {
+    return true; // fail open on any runtime error
+  }
+}
+
 // Continuously records raw PCM into a rolling ring buffer (not just monitoring
 // volume) so that when speech is detected, we can prepend ~600ms of audio from
 // *before* the threshold was crossed. Without this pre-roll, the first word or
@@ -732,7 +871,7 @@ async function startLiveMic() {
   setVoiceStatus("Listening...");
 }
 
-function finalizeLiveUtterance() {
+async function finalizeLiveUtterance() {
   if (!liveRecording) return;
   liveRecording = false;
   micBtn.classList.remove("recording");
@@ -742,6 +881,11 @@ function finalizeLiveUtterance() {
   const durationMs = (samples.length / ringSampleRate) * 1000;
 
   if (durationMs < vadMinSpeechMs) {
+    setVoiceStatus(liveMicEnabled ? "Listening..." : "");
+    return;
+  }
+
+  if (!(await isLikelySpeech(samples, ringSampleRate))) {
     setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     return;
   }
@@ -770,15 +914,10 @@ function stopLiveMic() {
   liveRecording = false;
   ringBuffer = null;
   micBtn.classList.remove("recording");
-  setVoiceStatus("");
+  setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
 }
 
 liveMicToggle.addEventListener("click", () => {
-  // Manual intervention always wins over any auto-resume the agent scheduled earlier.
-  if (listeningResumeTimer) {
-    clearTimeout(listeningResumeTimer);
-    listeningResumeTimer = null;
-  }
   liveMicEnabled = !liveMicEnabled;
   liveMicToggle.classList.toggle("active", liveMicEnabled);
   if (liveMicEnabled) {
@@ -786,36 +925,171 @@ liveMicToggle.addEventListener("click", () => {
   } else {
     stopLiveMic();
   }
+  updateWakeWordListenerState();
 });
 
-// --- Agent-driven stop_listening tool: lets the companion disable hands-free
-// listening itself (e.g. user says "stop listening for a bit"), optionally
-// auto-resuming after a duration. No-ops if hands-free wasn't even on.
+// --- Agent-driven stop_listening tool: lets the companion disable hands-free listening itself
+// (e.g. user says "goodbye" or it's picking up unwanted audio). Always indefinite - resuming is
+// the wake word's job now, not a guessed auto-resume timer. No-op if hands-free wasn't even on.
 
-let listeningResumeTimer = null;
+function agentStopListening() {
+  if (!liveMicEnabled) return;
+  liveMicEnabled = false;
+  liveMicToggle.classList.remove("active");
+  stopLiveMic();
+  updateWakeWordListenerState();
+}
 
-function agentStopListening(durationSeconds) {
-  if (listeningResumeTimer) {
-    clearTimeout(listeningResumeTimer);
-    listeningResumeTimer = null;
+// --- Wake word ---
+// Re-enables hands-free listening by voice once it's been turned off (manually or by the
+// agent), since the main use case is couch/controller play where touching the keyboard/mouse
+// defeats the point. Uses the browser's built-in SpeechRecognition API (Chrome/Edge only) -
+// only actually runs while hands-free is off, so it never competes with the live mic's own
+// mic stream or double-submits the wake phrase itself as a voice message.
+
+const wakeWordUnsupportedEl = document.getElementById("wake-word-unsupported");
+const wakeWordControlsEl = document.getElementById("wake-word-controls");
+const wakeWordEnabledInput = document.getElementById("cfg-wake-word-enabled");
+const wakeWordPhraseInput = document.getElementById("cfg-wake-word-phrase");
+const wakeWordDebugEl = document.getElementById("wake-word-debug");
+const wakeWordStatusEl = document.getElementById("wake-word-status");
+const wakeWordTranscriptEl = document.getElementById("wake-word-transcript");
+
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const wakeWordSupported = Boolean(SpeechRecognitionCtor);
+
+let wakeWordRecognition = null;
+let wakeWordShouldRun = false;
+let wakeWordConsecutiveFailures = 0;
+let wakeWordLastError = null;
+
+// Errors that mean recognition is genuinely broken (e.g. a plain/open-source Chromium build
+// without Google's proprietary speech API key - the API exists but every start() fails). Distinct
+// from "no-speech", which fires routinely during normal continuous listening and isn't a failure.
+const WAKE_WORD_HARD_ERRORS = new Set(["network", "service-not-allowed", "audio-capture", "not-allowed"]);
+const WAKE_WORD_MAX_CONSECUTIVE_FAILURES = 3;
+const WAKE_WORD_RESTART_DELAY_MS = 500;
+
+function normalizeForWakeMatch(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function handleWakeWordDetected() {
+  if (liveMicEnabled) return;
+  liveMicEnabled = true;
+  liveMicToggle.classList.add("active");
+  startLiveMic();
+  playWakeChime();
+  if (!wakeWordDebugEl.hidden) {
+    wakeWordStatusEl.textContent = "Detected ✓";
+    setTimeout(() => {
+      if (wakeWordStatusEl) wakeWordStatusEl.textContent = "Listening for wake phrase...";
+    }, 1500);
   }
+  updateWakeWordListenerState();
+}
 
-  if (liveMicEnabled) {
-    liveMicEnabled = false;
-    liveMicToggle.classList.remove("active");
-    stopLiveMic();
-    setVoiceStatus(durationSeconds ? `Listening paused for ${durationSeconds}s...` : "Listening paused.");
-  }
+function startWakeWordRecognition() {
+  if (!wakeWordSupported || wakeWordRecognition) return;
+  wakeWordRecognition = new SpeechRecognitionCtor();
+  wakeWordRecognition.continuous = true;
+  wakeWordRecognition.interimResults = true;
+  wakeWordRecognition.lang = "en-US";
 
-  if (durationSeconds) {
-    listeningResumeTimer = setTimeout(() => {
-      listeningResumeTimer = null;
-      liveMicEnabled = true;
-      liveMicToggle.classList.add("active");
-      startLiveMic();
-    }, durationSeconds * 1000);
+  wakeWordRecognition.onresult = (event) => {
+    wakeWordConsecutiveFailures = 0; // got a real result - recognition is genuinely working
+
+    let transcript = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript + " ";
+    }
+    transcript = transcript.trim();
+    wakeWordTranscriptEl.textContent = transcript;
+
+    const normalizedPhrase = normalizeForWakeMatch(wakeWordPhrase);
+    if (normalizedPhrase && normalizeForWakeMatch(transcript).includes(normalizedPhrase)) {
+      handleWakeWordDetected();
+    }
+  };
+
+  wakeWordRecognition.onerror = (event) => {
+    wakeWordLastError = event.error;
+    if (WAKE_WORD_HARD_ERRORS.has(event.error)) {
+      wakeWordConsecutiveFailures++;
+    }
+  };
+
+  wakeWordRecognition.onend = () => {
+    wakeWordRecognition = null;
+    if (!wakeWordShouldRun) return;
+
+    if (wakeWordConsecutiveFailures >= WAKE_WORD_MAX_CONSECUTIVE_FAILURES) {
+      wakeWordStatusEl.textContent = `Speech recognition unavailable (${wakeWordLastError || "unknown error"}) - try Google Chrome.`;
+      return; // give up instead of hot-looping (and flickering the mic indicator) forever
+    }
+
+    setTimeout(() => {
+      if (wakeWordShouldRun) startWakeWordRecognition();
+    }, WAKE_WORD_RESTART_DELAY_MS);
+  };
+
+  try {
+    wakeWordRecognition.start();
+  } catch (err) {
+    wakeWordRecognition = null;
   }
 }
+
+function stopWakeWordRecognition() {
+  if (wakeWordRecognition) {
+    wakeWordRecognition.onend = null;
+    wakeWordRecognition.stop();
+    wakeWordRecognition = null;
+  }
+}
+
+function updateWakeWordListenerState() {
+  const wasRunning = wakeWordShouldRun;
+  wakeWordShouldRun = wakeWordSupported && wakeWordEnabled && !liveMicEnabled;
+
+  if (wakeWordShouldRun) {
+    if (!wasRunning) wakeWordConsecutiveFailures = 0; // fresh start - give it a clean shot
+    startWakeWordRecognition();
+  } else {
+    stopWakeWordRecognition();
+  }
+
+  wakeWordDebugEl.hidden = !(wakeWordEnabled && wakeWordSupported);
+  if (wakeWordEnabled && wakeWordSupported) {
+    wakeWordStatusEl.textContent = liveMicEnabled ? "Hands-free is already on." : "Listening for wake phrase...";
+    if (liveMicEnabled) wakeWordTranscriptEl.textContent = "";
+  }
+}
+
+if (!wakeWordSupported) {
+  wakeWordUnsupportedEl.hidden = false;
+  wakeWordControlsEl.hidden = true;
+} else {
+  wakeWordEnabledInput.checked = wakeWordEnabled;
+  wakeWordPhraseInput.value = wakeWordPhrase;
+}
+
+wakeWordEnabledInput.addEventListener("change", () => {
+  wakeWordEnabled = wakeWordEnabledInput.checked;
+  localStorage.setItem("wakeWordEnabled", wakeWordEnabled);
+  updateWakeWordListenerState();
+});
+
+wakeWordPhraseInput.addEventListener("change", () => {
+  wakeWordPhrase = wakeWordPhraseInput.value.trim() || "Hey Buddy";
+  localStorage.setItem("wakeWordPhrase", wakeWordPhrase);
+});
+
+updateWakeWordListenerState();
 
 // --- Settings modal ---
 
@@ -1182,24 +1456,85 @@ document.getElementById("instructions-save").addEventListener("click", async () 
 
 // --- Memory modal ---
 // The agent can save/remove facts itself via tool calls during conversation;
-// this view lets the user audit and correct that memory directly.
+// this view lets the user audit and correct that memory directly. Facts can optionally be
+// tagged to a process (e.g. "bg3.exe") so they only get shown to the companion while that
+// game is active - general facts (no tag) always show.
 
 const memoryList = document.getElementById("memory-list");
+const memoryFiltersEl = document.getElementById("memory-filters");
 const memoryAddForm = document.getElementById("memory-add-form");
 const memoryAddInput = document.getElementById("memory-add-input");
+const memoryAddProcess = document.getElementById("memory-add-process");
+const memoryAddProcessCustom = document.getElementById("memory-add-process-custom");
 
-function renderMemoryList(memories) {
+let allMemories = [];
+let memoryFilter = "all"; // "all" | "general" | a specific process name
+
+memoryAddProcess.addEventListener("change", () => {
+  memoryAddProcessCustom.hidden = memoryAddProcess.value !== "__other__";
+});
+
+async function populateMemoryProcessOptions() {
+  const whitelist = await fetch("/api/game-state/whitelist").then((r) => r.json());
+  const previousValue = memoryAddProcess.value;
+  memoryAddProcess.innerHTML = '<option value="">General</option>';
+  for (const process of whitelist) {
+    const option = document.createElement("option");
+    option.value = process;
+    option.textContent = process;
+    memoryAddProcess.appendChild(option);
+  }
+  const otherOption = document.createElement("option");
+  otherOption.value = "__other__";
+  otherOption.textContent = "Other...";
+  memoryAddProcess.appendChild(otherOption);
+  if ([...memoryAddProcess.options].some((o) => o.value === previousValue)) {
+    memoryAddProcess.value = previousValue;
+  }
+}
+
+function renderMemoryFilters() {
+  memoryFiltersEl.innerHTML = "";
+
+  const processes = [...new Set(allMemories.map((m) => m.process).filter(Boolean))].sort();
+  const filters = [
+    ["all", "All"],
+    ["general", "General"],
+    ...processes.map((p) => [p, p]),
+  ];
+
+  for (const [value, label] of filters) {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "memory-filter-pill" + (memoryFilter === value ? " active" : "");
+    pill.textContent = label;
+    pill.addEventListener("click", () => {
+      memoryFilter = value;
+      renderMemoryFilters();
+      renderMemoryList();
+    });
+    memoryFiltersEl.appendChild(pill);
+  }
+}
+
+function renderMemoryList() {
   memoryList.innerHTML = "";
 
-  if (memories.length === 0) {
+  const visible = allMemories.filter((m) => {
+    if (memoryFilter === "all") return true;
+    if (memoryFilter === "general") return !m.process;
+    return m.process === memoryFilter;
+  });
+
+  if (visible.length === 0) {
     const hint = document.createElement("div");
     hint.className = "memory-empty-hint";
-    hint.textContent = "No memories saved yet.";
+    hint.textContent = "No memories here yet.";
     memoryList.appendChild(hint);
     return;
   }
 
-  for (const entry of memories) {
+  for (const entry of visible) {
     const item = document.createElement("div");
     item.className = "memory-item";
 
@@ -1207,29 +1542,50 @@ function renderMemoryList(memories) {
     text.className = "memory-item-text";
     text.contentEditable = "true";
     text.textContent = entry.content;
-    text.addEventListener("blur", async () => {
+
+    const tag = document.createElement("div");
+    tag.className = "memory-item-tag";
+    tag.contentEditable = "true";
+    tag.textContent = entry.process || "General";
+    tag.title = "Edit to tag this fact to a process, or clear/type General for an always-shown fact";
+
+    const saveEdits = async () => {
       const content = text.textContent.trim();
-      if (!content || content === entry.content) {
+      const tagText = tag.textContent.trim();
+      const process = !tagText || tagText.toLowerCase() === "general" ? null : tagText;
+      if (!content) {
         text.textContent = entry.content;
+        return;
+      }
+      if (content === entry.content && process === entry.process) {
+        tag.textContent = entry.process || "General";
         return;
       }
       const response = await fetch(`/api/memory/${entry.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, process }),
       });
       if (response.ok) {
         entry.content = content;
+        entry.process = process;
+        renderMemoryFilters();
       } else {
         text.textContent = entry.content;
+        tag.textContent = entry.process || "General";
       }
-    });
-    text.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        text.blur();
-      }
-    });
+    };
+
+    text.addEventListener("blur", saveEdits);
+    tag.addEventListener("blur", saveEdits);
+    for (const el of [text, tag]) {
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          el.blur();
+        }
+      });
+    }
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "memory-item-delete";
@@ -1237,10 +1593,15 @@ function renderMemoryList(memories) {
     deleteBtn.title = "Remove memory";
     deleteBtn.addEventListener("click", async () => {
       const response = await fetch(`/api/memory/${entry.id}`, { method: "DELETE" });
-      if (response.ok) item.remove();
+      if (response.ok) {
+        allMemories = allMemories.filter((m) => m.id !== entry.id);
+        renderMemoryFilters();
+        renderMemoryList();
+      }
     });
 
     item.appendChild(text);
+    item.appendChild(tag);
     item.appendChild(deleteBtn);
     memoryList.appendChild(item);
   }
@@ -1248,12 +1609,14 @@ function renderMemoryList(memories) {
 
 async function loadMemories() {
   const response = await fetch("/api/memory");
-  const memories = await response.json();
-  renderMemoryList(memories);
+  allMemories = await response.json();
+  renderMemoryFilters();
+  renderMemoryList();
 }
 
 memoryBtn.addEventListener("click", async () => {
   openModal(memoryModal);
+  await populateMemoryProcessOptions();
   await loadMemories();
 });
 
@@ -1261,11 +1624,16 @@ memoryAddForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const content = memoryAddInput.value.trim();
   if (!content) return;
+  let process = memoryAddProcess.value;
+  if (process === "__other__") {
+    process = memoryAddProcessCustom.value.trim();
+  }
   memoryAddInput.value = "";
+  memoryAddProcessCustom.value = "";
   await fetch("/api/memory", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, process: process || null }),
   });
   await loadMemories();
 });
@@ -1347,6 +1715,158 @@ fetchGameState().then(updateGameStateDot);
 setInterval(() => {
   fetchGameState().then(updateGameStateDot);
 }, 20000);
+
+// --- Game-state process blacklist / whitelist (Settings > General) ---
+
+const gameStateBlacklistEl = document.getElementById("game-state-blacklist");
+const gameStateBlacklistForm = document.getElementById("game-state-blacklist-form");
+const gameStateBlacklistInput = document.getElementById("game-state-blacklist-input");
+const gameStateWhitelistEl = document.getElementById("game-state-whitelist");
+
+async function loadGameStateProcessLists() {
+  const [blacklist, whitelist] = await Promise.all([
+    fetch("/api/game-state/blacklist").then((r) => r.json()),
+    fetch("/api/game-state/whitelist").then((r) => r.json()),
+  ]);
+  renderGameStateBlacklist(blacklist);
+  renderGameStateWhitelist(whitelist);
+}
+
+function renderGameStateBlacklist(blacklist) {
+  gameStateBlacklistEl.innerHTML = "";
+
+  if (blacklist.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "No blacklisted processes.";
+    gameStateBlacklistEl.appendChild(hint);
+    return;
+  }
+
+  for (const process of blacklist) {
+    const item = document.createElement("div");
+    item.className = "memory-item";
+
+    const text = document.createElement("div");
+    text.className = "memory-item-text";
+    text.textContent = process;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "memory-item-delete";
+    deleteBtn.textContent = "×";
+    deleteBtn.title = "Remove from blacklist";
+    deleteBtn.addEventListener("click", async () => {
+      await fetch(`/api/game-state/blacklist/${encodeURIComponent(process)}`, { method: "DELETE" });
+      await loadGameStateProcessLists();
+    });
+
+    item.appendChild(text);
+    item.appendChild(deleteBtn);
+    gameStateBlacklistEl.appendChild(item);
+  }
+}
+
+function renderGameStateWhitelist(whitelist) {
+  gameStateWhitelistEl.innerHTML = "";
+
+  if (whitelist.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "No approved processes yet.";
+    gameStateWhitelistEl.appendChild(hint);
+    return;
+  }
+
+  for (const process of whitelist) {
+    const item = document.createElement("div");
+    item.className = "memory-item";
+
+    const text = document.createElement("div");
+    text.className = "memory-item-text";
+    text.textContent = process;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "memory-item-delete";
+    deleteBtn.textContent = "×";
+    deleteBtn.title = "Revoke approval";
+    deleteBtn.addEventListener("click", async () => {
+      await fetch(`/api/game-state/whitelist/${encodeURIComponent(process)}`, { method: "DELETE" });
+      await loadGameStateProcessLists();
+    });
+
+    item.appendChild(text);
+    item.appendChild(deleteBtn);
+    gameStateWhitelistEl.appendChild(item);
+  }
+}
+
+gameStateBlacklistForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const process = gameStateBlacklistInput.value.trim();
+  if (!process) return;
+  gameStateBlacklistInput.value = "";
+  await fetch("/api/game-state/blacklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ process }),
+  });
+  await loadGameStateProcessLists();
+});
+
+settingsBtn.addEventListener("click", loadGameStateProcessLists);
+loadGameStateProcessLists();
+
+// --- Game-state approval chip ---
+// Unfamiliar foreground processes aren't OCR'd automatically - they show up here so the user can
+// explicitly allow or blacklist them, staying visible until acted upon (no auto-dismiss).
+
+const approvalChip = document.getElementById("game-state-approval-chip");
+const approvalChipProcess = document.getElementById("approval-chip-process");
+let approvalChipShownFor = null;
+
+async function checkPendingApproval() {
+  const response = await fetch("/api/game-state/pending");
+  const data = await response.json();
+
+  if (!data.process) {
+    approvalChip.hidden = true;
+    approvalChipShownFor = null;
+    return;
+  }
+
+  if (data.process === approvalChipShownFor) return;
+
+  approvalChipShownFor = data.process;
+  approvalChipProcess.textContent = data.process;
+  approvalChip.hidden = false;
+}
+
+document.getElementById("approval-chip-allow").addEventListener("click", async () => {
+  if (!approvalChipShownFor) return;
+  await fetch("/api/game-state/whitelist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ process: approvalChipShownFor }),
+  });
+  approvalChip.hidden = true;
+  approvalChipShownFor = null;
+  await loadGameStateProcessLists();
+});
+
+document.getElementById("approval-chip-blacklist").addEventListener("click", async () => {
+  if (!approvalChipShownFor) return;
+  await fetch("/api/game-state/blacklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ process: approvalChipShownFor }),
+  });
+  approvalChip.hidden = true;
+  approvalChipShownFor = null;
+  await loadGameStateProcessLists();
+});
+
+checkPendingApproval();
+setInterval(checkPendingApproval, 20000);
 
 usageBtn.addEventListener("click", async () => {
   openModal(usageModal);

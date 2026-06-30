@@ -4,32 +4,18 @@ LISTENING_TOOLS = [
         "function": {
             "name": "stop_listening",
             "description": (
-                "Disable hands-free (live mic) listening - e.g. the user is stepping away, getting "
-                "a phone call, or directly asks you to stop listening. If they mention a duration "
-                "(e.g. 'for 5 minutes'), pass duration_seconds so listening resumes automatically "
-                "afterward; omit it to stop indefinitely until they manually re-enable the mic."
+                "Disable hands-free (live mic) listening, indefinitely, until the user says the wake "
+                "phrase or manually re-enables the mic. Call it the moment the user needs to step away, "
+                "is getting a call, wants quiet, directly asks you to stop listening, says any kind of "
+                "sign-off/farewell ('goodbye', 'bye', 'talk to you later', 'I'm done', 'gotta go', etc.), "
+                "or when hands-free is clearly picking up audio not meant for you (overheard conversation, "
+                "movie/show dialogue, music, a phone call)."
             ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "duration_seconds": {
-                        "type": "integer",
-                        "description": "Seconds to pause listening before auto-resuming. Omit to stop indefinitely.",
-                    }
-                },
-            },
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
 
 
-def execute_stop_listening(arguments: dict) -> tuple[str, int | None]:
-    duration = arguments.get("duration_seconds")
-    duration = int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
-
-    if duration:
-        message = f"Paused hands-free listening for {duration} seconds."
-    else:
-        message = "Disabled hands-free listening."
-
-    return message, duration
+def execute_stop_listening(_arguments: dict) -> str:
+    return "Disabled hands-free listening."

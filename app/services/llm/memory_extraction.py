@@ -5,6 +5,7 @@ from app.core import memory
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
+from app.services.system.processes import get_foreground_process_name
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,19 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
         logger.exception("Memory extraction failed")
         return
 
+    process = None
     for fact in data.get("save") or []:
-        if isinstance(fact, str) and fact.strip():
-            memory.add_memory(fact.strip())
+        if not isinstance(fact, dict):
+            continue
+        content = (fact.get("content") or "").strip()
+        if not content:
+            continue
+        if fact.get("game_specific"):
+            if process is None:
+                process = get_foreground_process_name() or ""
+            memory.add_memory(content, process=process or None)
+        else:
+            memory.add_memory(content)
 
     for memory_id in data.get("remove") or []:
         if isinstance(memory_id, str) and memory_id:
