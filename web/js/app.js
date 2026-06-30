@@ -451,22 +451,95 @@ function stopNarration() {
 
 stopNarrationBtn.addEventListener("click", stopNarration);
 
-function appendMessage(role, content, audioId) {
+function appendMessage(role, content, audioId, isNew = false) {
   const el = document.createElement("div");
   el.className = `message ${role}`;
-  el.textContent = content;
+  if (isNew) el.classList.add("message-enter");
+
+  // SVG icon helpers
+  const copyIcon  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  const checkIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 12 4 9"/></svg>`;
+
+  // ── Role header ───────────────────────────────────────────
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+
+  const avatar = document.createElement("span");
+  avatar.className = "msg-avatar";
+  avatar.innerHTML = role === "assistant" ? `<img src="img/logo.png" alt="" />` : "Y";
+  meta.appendChild(avatar);
+
+  const roleName = document.createElement("span");
+  roleName.className = "msg-role-name";
+  roleName.textContent = role === "user" ? "You" : "Lykompanion";
+  meta.appendChild(roleName);
+
+  // ── Action buttons (hidden for pure voice bubbles) ────────
+  const actionsEl = document.createElement("div");
+  actionsEl.className = "msg-actions";
+
+  if (!audioId) {
+    // Copy — always shown for text messages
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "msg-action-btn";
+    copyBtn.title = "Copy";
+    copyBtn.innerHTML = copyIcon;
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(contentDiv.textContent).then(() => {
+        copyBtn.innerHTML = checkIcon;
+        copyBtn.classList.add("copied");
+        setTimeout(() => { copyBtn.innerHTML = copyIcon; copyBtn.classList.remove("copied"); }, 1500);
+      });
+    });
+    actionsEl.appendChild(copyBtn);
+
+    if (role === "user") {
+      // Retry — resend the same text
+      const retryBtn = document.createElement("button");
+      retryBtn.className = "msg-action-btn";
+      retryBtn.title = "Retry";
+      retryBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>`;
+      retryBtn.addEventListener("click", () => sendMessage(contentDiv.textContent));
+      actionsEl.appendChild(retryBtn);
+    }
+
+    if (role === "assistant") {
+      // Add to Memory — pre-fills the memory modal input
+      const memBtn = document.createElement("button");
+      memBtn.className = "msg-action-btn";
+      memBtn.title = "Add to Memory";
+      memBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+      memBtn.addEventListener("click", () => {
+        document.getElementById("memory-add-input").value = contentDiv.textContent.trim().slice(0, 300);
+        openModal(document.getElementById("memory-modal"));
+      });
+      actionsEl.appendChild(memBtn);
+    }
+  }
+
+  meta.appendChild(actionsEl);
+  el.appendChild(meta);
+
+  // ── Content area ──────────────────────────────────────────
+  const contentDiv = document.createElement("div");
+  contentDiv.className = "msg-content";
+  contentDiv.textContent = content;
+  // For voice messages the player IS the bubble; hide the text placeholder
+  if (audioId) contentDiv.hidden = true;
+  el.appendChild(contentDiv);
+
+  // ── Voice player — styled as the message bubble ───────────
   if (audioId) {
     const audio = new Audio(`/api/voice/${audioId}`);
 
     const player = document.createElement("div");
-    player.className = "voice-player";
+    // voice-bubble class makes it look like the role's message bubble
+    player.className = `voice-player voice-bubble ${role}`;
 
-    // Play / Pause button
     const playBtn = document.createElement("button");
     playBtn.className = "vp-play";
-    playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+    playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
 
-    // Progress bar
     const barWrap = document.createElement("div");
     barWrap.className = "vp-bar-wrap";
     const bar = document.createElement("div");
@@ -476,19 +549,16 @@ function appendMessage(role, content, audioId) {
     bar.appendChild(fill);
     barWrap.appendChild(bar);
 
-    // Time display
     const timeEl = document.createElement("span");
     timeEl.className = "vp-time";
     timeEl.textContent = "0:00";
 
-    // Speed cycle button
     const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
     let speedIdx = 2;
     const speedBtn = document.createElement("button");
     speedBtn.className = "vp-speed";
     speedBtn.textContent = "1×";
 
-    // Download button
     const dlBtn = document.createElement("button");
     dlBtn.className = "vp-dl";
     dlBtn.title = "Save to Downloads";
@@ -501,20 +571,14 @@ function appendMessage(role, content, audioId) {
     player.appendChild(dlBtn);
     el.appendChild(player);
 
-    // --- Behaviour ---
-
     function fmt(s) {
       if (!isFinite(s)) return "0:00";
       const m = Math.floor(s / 60);
       return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
     }
 
-    audio.addEventListener("loadedmetadata", () => {
-      timeEl.textContent = fmt(audio.duration);
-    });
+    audio.addEventListener("loadedmetadata", () => { timeEl.textContent = fmt(audio.duration); });
 
-    // Use rAF instead of timeupdate so the bar moves smoothly every frame,
-    // not in jumps every ~250 ms.
     let rafId = null;
     function tick() {
       if (!audio.duration) return;
@@ -522,12 +586,11 @@ function appendMessage(role, content, audioId) {
       timeEl.textContent = fmt(audio.currentTime);
       if (!audio.paused && !audio.ended) rafId = requestAnimationFrame(tick);
     }
-
-    audio.addEventListener("play", () => { rafId = requestAnimationFrame(tick); });
+    audio.addEventListener("play",  () => { rafId = requestAnimationFrame(tick); });
     audio.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
     audio.addEventListener("ended", () => {
       cancelAnimationFrame(rafId);
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
       fill.style.width = "0%";
       timeEl.textContent = fmt(audio.duration);
     });
@@ -535,10 +598,10 @@ function appendMessage(role, content, audioId) {
     playBtn.addEventListener("click", () => {
       if (audio.paused) {
         audio.play();
-        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
       } else {
         audio.pause();
-        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
       }
     });
 
@@ -581,7 +644,7 @@ function appendMessage(role, content, audioId) {
   }
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
-  return el;
+  return contentDiv;
 }
 
 // Splits a growing text buffer into complete sentences plus a leftover
@@ -614,11 +677,11 @@ async function sendMessage(text) {
   if (!chat) return;
 
   stopNarration();
-  appendMessage("user", text);
+  appendMessage("user", text, null, true);
   addMessageToChat(chat, "user", text);
 
   const narrateEnabled = document.getElementById("cfg-narrate").checked;
-  const assistantEl = appendMessage("assistant", "");
+  const assistantEl = appendMessage("assistant", "", null, true);
   let fullReply = "";
   let sentenceBuffer = "";
 
@@ -782,7 +845,7 @@ async function sendDirectVoice(wavBlob) {
   stopNarration();
   awaitingReply = true;
   try {
-    appendMessage("user", "🎤 (voice message)", audioId);
+    appendMessage("user", "🎤 (voice message)", audioId, true);
     setVoiceStatus("Sending voice message...");
 
     const formData = new FormData();
@@ -794,13 +857,13 @@ async function sendDirectVoice(wavBlob) {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      appendMessage("assistant", `⚠️ ${error.detail || "Voice chat failed."}`);
+      appendMessage("assistant", `⚠️ ${error.detail || "Voice chat failed."}`, null, true);
       setVoiceStatus(liveMicEnabled ? "Listening..." : "");
       return;
     }
 
     const data = await response.json();
-    appendMessage("assistant", data.reply);
+    appendMessage("assistant", data.reply, null, true);
     addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
     addMessageToChat(chat, "assistant", data.reply);
     maybeGenerateTitle(chat, "(voice message)", data.reply);
@@ -1273,10 +1336,13 @@ updateWakeWordListenerState();
 
 function openModal(modal) {
   modal.hidden = false;
+  // Double rAF: first lets display:flex paint, second triggers the CSS transition
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('modal-animate-in')));
 }
 
 function closeModal(modal) {
-  modal.hidden = true;
+  modal.classList.remove('modal-animate-in');
+  setTimeout(() => { modal.hidden = true; }, 240);
 }
 
 document.querySelectorAll("[data-close]").forEach((btn) => {
