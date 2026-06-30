@@ -50,10 +50,17 @@ class CompanionConfig(BaseModel):
     google_tts_voice: str | None = None
     openrouter_api_key: str | None = None
     openrouter_api_key_set: bool = False
+    openrouter_management_key: str | None = None
+    openrouter_management_key_set: bool = False
     narration_speed: float = 1.0
     narration_volume: float = 1.0
     context_window_messages: int = 20
     screenshot_max_width: int = 960
+    wake_word_enabled: bool = False
+    wake_word_phrase: str = "Hey Buddy"
+    vad_threshold: int = 8
+    vad_silence_ms: int = 1200
+    vad_min_speech_ms: int = 300
     screenshot_jpeg_quality: int = 70
 
     igdb_client_id: str | None = None
@@ -80,7 +87,24 @@ class ProcessEntry(BaseModel):
 
 
 class PendingProcessResponse(BaseModel):
-    process: str | None = None
+    processes: list[str] = []
+
+
+class ChatHistoryResponse(BaseModel):
+    chats: list[dict]
+
+
+class ChatHistorySaveRequest(BaseModel):
+    chats: list[dict]
+
+
+class AccountBalance(BaseModel):
+    available: bool
+    spent_usd: float | None = None
+    limit_usd: float | None = None
+    remaining_usd: float | None = None
+    is_free_tier: bool = False
+    reason: str | None = None
 
 
 class CustomInstructions(BaseModel):

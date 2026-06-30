@@ -191,12 +191,195 @@ body {
   background: #1f2029;
 }
 
-.voice-message-audio {
-  display: block;
+.voice-player {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: #16171f;
+  border-radius: 10px;
   width: 100%;
-  height: 32px;
-  margin-top: 0.4rem;
+  box-sizing: border-box;
 }
+
+.vp-play {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: #5b5fc7;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.vp-play:hover { background: #7072d6; }
+
+.vp-bar-wrap {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.vp-bar {
+  position: relative;
+  height: 4px;
+  background: #2e2f3e;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.vp-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0%;
+  background: #5b5fc7;
+  border-radius: 2px;
+  /* No transition — rAF updates every frame, transition would add lag */
+}
+
+.vp-time {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: #6b6e82;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+  text-align: right;
+}
+
+.vp-speed,
+.vp-dl {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: #2a2b3d;
+  color: #a0a3b1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.vp-speed {
+  padding: 0 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  min-width: 34px;
+}
+
+.vp-dl { width: 26px; }
+
+.vp-speed:hover,
+.vp-dl:hover {
+  background: #3a3c52;
+  color: #fff;
+}
+
+/* ── Toast notification system ─────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-end;
+  width: 296px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast-overflow {
+  pointer-events: auto;
+  background: #2a2b3d;
+  color: #a0a3b1;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.8rem;
+  border-radius: 20px;
+  align-self: center;
+}
+
+.toast {
+  pointer-events: auto;
+  width: 100%;
+  position: relative;
+  background: #1f2029;
+  border: 1px solid #2e2f3e;
+  border-radius: 10px;
+  padding: 0.6rem 2rem 0.6rem 0.85rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  opacity: 0;
+  transform: translateX(14px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.toast.toast-in {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast-x {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  background: none;
+  border: none;
+  color: #6b6e82;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+
+.toast-x:hover { color: #c5c7d4; }
+
+.toast-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #c5c7d4;
+  margin-bottom: 0.15rem;
+}
+
+.toast-body-text {
+  font-size: 0.7rem;
+  color: #6b6e82;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.toast-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.toast-btn {
+  flex: 1;
+  padding: 0.28rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.71rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toast-btn-primary { background: #5b5fc7; color: #fff; }
+.toast-btn-primary:hover { background: #7072d6; }
+
+.toast-btn-danger { background: rgba(224,92,92,0.14); color: #e05c5c; }
+.toast-btn-danger:hover { background: rgba(224,92,92,0.26); }
+
+.toast-btn-default { background: #2a2b3d; color: #a0a3b1; }
+.toast-btn-default:hover { background: #3a3c52; color: #fff; }
 
 .composer {
   width: 100%;
@@ -284,35 +467,102 @@ body {
   padding: 0.2rem 0;
 }
 
-.approval-chip {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  max-width: 360px;
+/* --- Notification bell & modal --- */
+
+.notif-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #e05c5c;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
   display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.85rem 1rem;
-  border-radius: 0.6rem;
-  background: #1d1e25;
-  border: 1px solid #2a2b33;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 50;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
-.approval-chip[hidden] {
+.notif-badge[hidden] {
   display: none;
 }
 
-.approval-chip-text {
-  font-size: 0.85rem;
-  line-height: 1.4;
+.notif-list {
+  display: flex;
+  flex-direction: column;
 }
 
-.approval-chip-actions {
+.notif-item {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
   gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #22232b;
+}
+
+.notif-item:last-child {
+  border-bottom: none;
+}
+
+.notif-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.notif-item-sub {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.notif-item-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.notif-action-btn {
+  flex: 1;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.notif-empty {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0;
+}
+
+/* --- Usage modal balance row --- */
+
+.usage-balance-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #1d1e25;
+  border: 1px solid #2a2b33;
+  border-radius: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.usage-balance-row[hidden] {
+  display: none;
+}
+
+.usage-balance-label {
+  font-size: 0.8rem;
+  color: #888;
+  white-space: nowrap;
+}
+
+.usage-balance-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #c8f0c0;
+  text-align: right;
 }
 
 /* --- Modals (Settings / Personal Instructions) --- */
@@ -407,6 +657,12 @@ body {
 
 .tab-panel[hidden] {
   display: none;
+}
+
+.cfg-key-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
 
 .modal-hint {

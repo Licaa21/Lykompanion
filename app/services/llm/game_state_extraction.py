@@ -102,9 +102,8 @@ async def _poll_once() -> None:
         return
 
     if not game_state_processes.is_whitelisted(process):
-        if game_state_processes.get_pending_process() != process:
-            logger.info("Game-state poll: unfamiliar process=%r detected, awaiting user approval", process)
-            game_state_processes.set_pending_process(process)
+        if game_state_processes.add_pending_process(process):
+            logger.info("Game-state poll: unfamiliar process=%r queued for user approval", process)
         return
 
     if process != _last_process:

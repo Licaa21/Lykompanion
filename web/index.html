@@ -61,6 +61,11 @@
       <button id="debug-btn" class="sidebar-btn">
         <span class="sidebar-icon">🐞</span> Debug
       </button>
+      <button id="notif-bell-btn" class="sidebar-btn">
+        <span class="sidebar-icon">🔔</span>
+        <span class="sidebar-btn-label">Notifications</span>
+        <span id="notif-badge" class="notif-badge" hidden>0</span>
+      </button>
       <button id="settings-btn" class="sidebar-btn">
         <span class="sidebar-icon">⚙️</span> Settings
       </button>
@@ -81,10 +86,16 @@
       </div>
       <div class="modal-body">
         <section class="tab-panel" data-tab="general">
-          <label>
-            OpenRouter API Key
-            <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
-          </label>
+          <div class="cfg-key-row">
+            <label>
+              OpenRouter API Key
+              <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
+            </label>
+            <label>
+              OpenRouter Management Key
+              <input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
           <label>
             LLM Model
             <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models..." />
@@ -379,6 +390,10 @@
       </div>
       <div class="modal-body">
         <p class="modal-hint">Usage across all conversations, broken down by feature and time range.</p>
+        <div id="usage-balance-row" class="usage-balance-row" hidden>
+          <span class="usage-balance-label">OpenRouter balance</span>
+          <span id="usage-balance-value" class="usage-balance-value">—</span>
+        </div>
         <div id="usage-range-pills" class="memory-filters"></div>
         <div id="usage-custom-range" class="usage-custom-range" hidden>
           <label>
@@ -431,13 +446,16 @@
     </div>
   </div>
 
-  <div id="game-state-approval-chip" class="approval-chip" hidden>
-    <span class="approval-chip-text">
-      🎮 New process detected: <strong id="approval-chip-process"></strong> — allow background game-state tracking?
-    </span>
-    <div class="approval-chip-actions">
-      <button type="button" id="approval-chip-allow" class="secondary-btn">Allow</button>
-      <button type="button" id="approval-chip-blacklist" class="secondary-btn">Blacklist</button>
+  <div id="notif-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Notifications</h2>
+        <button type="button" class="modal-close" data-close="notif-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="notif-list" class="notif-list"></div>
+        <p id="notif-empty" class="notif-empty">No pending notifications</p>
+      </div>
     </div>
   </div>
 

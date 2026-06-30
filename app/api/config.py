@@ -23,9 +23,15 @@ async def get_config() -> CompanionConfig:
         openrouter_tts_model=settings.openrouter_tts_model,
         openrouter_voice=settings.openrouter_voice,
         openrouter_api_key_set=bool(settings.openrouter_api_key),
+        openrouter_management_key_set=bool(settings.openrouter_management_key),
         narration_speed=settings.tts_speed,
         narration_volume=settings.tts_volume,
         context_window_messages=settings.context_window_messages,
+        wake_word_enabled=settings.wake_word_enabled,
+        wake_word_phrase=settings.wake_word_phrase,
+        vad_threshold=settings.vad_threshold,
+        vad_silence_ms=settings.vad_silence_ms,
+        vad_min_speech_ms=settings.vad_min_speech_ms,
         screenshot_max_width=settings.screenshot_max_width,
         screenshot_jpeg_quality=settings.screenshot_jpeg_quality,
         igdb_client_id=settings.igdb_client_id,
@@ -56,6 +62,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         settings.openrouter_api_key = config.openrouter_api_key
         llm_client.client.api_key = config.openrouter_api_key
         persist_env_value("OPENROUTER_API_KEY", config.openrouter_api_key)
+    if config.openrouter_management_key:
+        settings.openrouter_management_key = config.openrouter_management_key
+        persist_env_value("OPENROUTER_MANAGEMENT_KEY", config.openrouter_management_key)
     if config.openrouter_voice_model is not None:
         settings.openrouter_voice_model = config.openrouter_voice_model
         persist_env_value("OPENROUTER_VOICE_MODEL", config.openrouter_voice_model)
@@ -87,6 +96,18 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     settings.context_window_messages = config.context_window_messages
     persist_env_value("CONTEXT_WINDOW_MESSAGES", str(config.context_window_messages))
+
+    settings.wake_word_enabled = config.wake_word_enabled
+    persist_env_value("WAKE_WORD_ENABLED", str(config.wake_word_enabled))
+    settings.wake_word_phrase = config.wake_word_phrase
+    persist_env_value("WAKE_WORD_PHRASE", config.wake_word_phrase)
+
+    settings.vad_threshold = config.vad_threshold
+    persist_env_value("VAD_THRESHOLD", str(config.vad_threshold))
+    settings.vad_silence_ms = config.vad_silence_ms
+    persist_env_value("VAD_SILENCE_MS", str(config.vad_silence_ms))
+    settings.vad_min_speech_ms = config.vad_min_speech_ms
+    persist_env_value("VAD_MIN_SPEECH_MS", str(config.vad_min_speech_ms))
 
     settings.screenshot_max_width = config.screenshot_max_width
     persist_env_value("SCREENSHOT_MAX_WIDTH", str(config.screenshot_max_width))

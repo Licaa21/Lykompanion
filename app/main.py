@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import chat, config, debug, game_state, instructions, memory, models, screenshot, tts, usage
+from app.api import chat, chats, config, debug, game_state, instructions, memory, models, screenshot, tts, usage, voice
 from app.services.llm.game_state_extraction import run_game_state_poller
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -24,6 +24,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Lykompanion", lifespan=lifespan)
 
 app.include_router(chat.router)
+app.include_router(chats.router)
+app.include_router(voice.router)
 app.include_router(tts.router)
 app.include_router(screenshot.router)
 app.include_router(config.router)
