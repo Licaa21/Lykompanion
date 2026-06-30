@@ -7,7 +7,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openai import APIError
 
-from app.core import memory
+from app.core import game_state, memory
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -47,19 +47,25 @@ MAX_TOOL_ITERATIONS = 8
 
 def _build_base_messages(include_screenshot: bool) -> list[dict]:
     system_content = load_prompt("system_companion")
-    system_content += "\n\n" + current_datetime_context()
 
     custom_instructions = load_custom_instructions().strip()
     if custom_instructions:
         system_content += "\n\n" + custom_instructions
 
+    monitors = format_monitors_for_prompt()
+    if monitors:
+        system_content += "\n\n" + monitors
+
+    # Variable content last — maximises cache hits on stable prefix above.
+    system_content += "\n\n" + current_datetime_context()
+
     memories = memory.format_memories_for_prompt()
     if memories:
         system_content += "\n\n" + memories
 
-    monitors = format_monitors_for_prompt()
-    if monitors:
-        system_content += "\n\n" + monitors
+    game_state_text = game_state.format_game_state_for_prompt()
+    if game_state_text:
+        system_content += "\n\n" + game_state_text
 
     messages = [{"role": "system", "content": system_content}]
 
@@ -136,15 +142,19 @@ async def _execute_tool(name: str, arguments: dict) -> tuple[str, list[dict] | N
 
 
 async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
-    side_effects = []
+    parsed = []
     for tool_call in tool_calls:
-        name = tool_call.function.name
         try:
             arguments = json.loads(tool_call.function.arguments or "{}")
         except json.JSONDecodeError:
             arguments = {}
-        result, extra_messages, side_effect = await _execute_tool(name, arguments)
-        messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
+        parsed.append((tool_call.id, tool_call.function.name, arguments))
+
+    results = await asyncio.gather(*[_execute_tool(name, args) for _, name, args in parsed])
+
+    side_effects = []
+    for (tool_call_id, _, _), (result, extra_messages, side_effect) in zip(parsed, results):
+        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": result})
         if extra_messages:
             messages.extend(extra_messages)
         if side_effect:
@@ -197,13 +207,19 @@ async def _stream_chat_with_tools(messages: list[dict], model: str | None = None
             return
 
         messages.append(_tool_calls_to_dict(tool_calls))
-        for tc in tool_calls.values():
+        tc_list = list(tool_calls.values())
+        parsed = []
+        for tc in tc_list:
             try:
                 arguments = json.loads(tc["arguments"] or "{}")
             except json.JSONDecodeError:
                 arguments = {}
-            result, extra_messages, side_effect = await _execute_tool(tc["name"], arguments)
-            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+            parsed.append((tc["id"], tc["name"], arguments))
+
+        results = await asyncio.gather(*[_execute_tool(name, args) for _, name, args in parsed])
+
+        for (tool_call_id, _, _), (result, extra_messages, side_effect) in zip(parsed, results):
+            messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": result})
             if extra_messages:
                 messages.extend(extra_messages)
             if side_effect:

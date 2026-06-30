@@ -9,3 +9,10 @@ psutil
 Pillow
 python-multipart
 websockets
+
+# Passive game-state OCR. Also requires the Tesseract OCR engine binary installed separately
+# (https://github.com/UB-Mannheim/tesseract/wiki on Windows) - pip only installs the Python wrapper.
+pytesseract
+
+# Optional: required only for Chirp 3 HD Voices (Google Cloud TTS).
+# google-auth[requests]

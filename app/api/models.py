@@ -1,6 +1,9 @@
+import asyncio
+
 from fastapi import APIRouter
 
 from app.services.llm.client import list_models as list_openrouter_models
+from app.services.tts.chirp3 import list_voices as list_chirp3_voices
 from app.services.tts.kokoro import list_voices as list_kokoro_voices
 
 router = APIRouter(prefix="/api/models", tags=["models"])
@@ -23,8 +26,8 @@ async def get_tts_models() -> dict:
     """
     openrouter_models = await list_openrouter_models()
     speech_models = [m for m in openrouter_models if "speech" in m["output_modalities"]]
-    kokoro_voices = await list_kokoro_voices()
-    return {"kokoro_voices": kokoro_voices, "openrouter_speech_models": speech_models}
+    kokoro_voices, chirp3_voices = await asyncio.gather(list_kokoro_voices(), list_chirp3_voices())
+    return {"kokoro_voices": kokoro_voices, "openrouter_speech_models": speech_models, "chirp3_voices": chirp3_voices}
 
 
 @router.get("/voice-input")

@@ -38,10 +38,17 @@ class TTSRequest(BaseModel):
 class CompanionConfig(BaseModel):
     openrouter_model: str
     openrouter_voice_model: str | None = None
-    tts_provider: Literal["kokoro", "openrouter"] = "kokoro"
+    memory_extraction_model: str | None = None
+    game_state_ocr_enabled: bool = False
+    game_state_poll_interval_seconds: int = 90
+    game_state_model: str | None = None
+    tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"
     kokoro_voice: str | None = None
     openrouter_tts_model: str | None = None
     openrouter_voice: str | None = None
+    google_tts_api_key: str | None = None
+    google_tts_api_key_set: bool = False
+    google_tts_voice: str | None = None
     openrouter_api_key: str | None = None
     openrouter_api_key_set: bool = False
     narration_speed: float = 1.0
@@ -54,6 +61,17 @@ class CompanionConfig(BaseModel):
     steam_api_key: str | None = None
     steam_api_key_set: bool = False
     steam_id: str | None = None
+
+
+class GameStateResponse(BaseModel):
+    enabled: bool
+    tracking: bool
+    process: str | None = None
+    activity: str | None = None
+    location: str | None = None
+    quest: str | None = None
+    character: str | None = None
+    notable_choice: str | None = None
 
 
 class CustomInstructions(BaseModel):

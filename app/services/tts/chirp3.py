@@ -1,0 +1,103 @@
+import asyncio
+import base64
+import struct
+
+import httpx
+
+from app.core.config import settings
+
+_BASE_URL = "https://texttospeech.googleapis.com"
+_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+# Cached credentials — google-auth refreshes the token automatically when it expires.
+_credentials = None
+
+
+def _get_access_token() -> str:
+    try:
+        import google.auth
+        import google.auth.transport.requests
+    except ImportError as exc:
+        raise RuntimeError(
+            "google-auth is not installed. Run: pip install google-auth[requests]"
+        ) from exc
+
+    global _credentials
+    if _credentials is None:
+        _credentials, _ = google.auth.default(scopes=_SCOPES)
+    if not _credentials.valid:
+        _credentials.refresh(google.auth.transport.requests.Request())
+    return _credentials.token
+
+
+async def _request_auth() -> tuple[dict, dict]:
+    """Returns (headers, params) for the chosen auth method.
+
+    API key takes priority when set — no google-auth dependency needed.
+    Falls back to Application Default Credentials otherwise.
+
+    User OAuth2 credentials (from gcloud auth application-default login) require
+    x-goog-user-project so Google knows which project to bill — this isn't added
+    automatically when we build the Bearer header ourselves.
+    """
+    if settings.google_tts_api_key:
+        return {}, {"key": settings.google_tts_api_key}
+    token = await asyncio.to_thread(_get_access_token)
+    headers = {"Authorization": f"Bearer {token}"}
+    quota_project = getattr(_credentials, "quota_project_id", None)
+    if quota_project:
+        headers["x-goog-user-project"] = quota_project
+    return headers, {}
+
+
+def _wrap_pcm_as_wav(pcm_bytes: bytes, sample_rate: int, channels: int, bits_per_sample: int = 16) -> bytes:
+    block_align = channels * bits_per_sample // 8
+    byte_rate = sample_rate * block_align
+    header = b"RIFF" + struct.pack("<I", 36 + len(pcm_bytes)) + b"WAVE"
+    header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, channels, sample_rate, byte_rate, block_align, bits_per_sample)
+    header += b"data" + struct.pack("<I", len(pcm_bytes))
+    return header + pcm_bytes
+
+
+async def synthesize(text: str, voice: str | None = None, speed: float | None = None) -> bytes:
+    """Synthesize speech via Google Cloud Text-to-Speech (Chirp 3 HD) using Application Default Credentials."""
+    voice_name = voice or settings.google_tts_voice
+    parts = voice_name.split("-")
+    language_code = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else "en-US"
+
+    headers, params = await _request_auth()
+    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
+        response = await client.post(
+            "/v1/text:synthesize",
+            headers=headers,
+            params=params,
+            json={
+                "input": {"text": text},
+                "voice": {"languageCode": language_code, "name": voice_name},
+                "audioConfig": {
+                    "audioEncoding": "LINEAR16",
+                    "speakingRate": speed or settings.tts_speed,
+                },
+            },
+        )
+        response.raise_for_status()
+
+    pcm_bytes = base64.b64decode(response.json()["audioContent"])
+    # Chirp 3 HD returns 24000 Hz mono 16-bit PCM.
+    return _wrap_pcm_as_wav(pcm_bytes, sample_rate=24000, channels=1)
+
+
+async def list_voices() -> list[dict]:
+    """Fetch Chirp 3 HD voices. Returns [] if neither API key nor ADC credentials are configured."""
+    try:
+        headers, params = await _request_auth()
+    except Exception:
+        return []
+    try:
+        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=10) as client:
+            response = await client.get("/v1/voices", headers=headers, params=params)
+            response.raise_for_status()
+            voices = response.json().get("voices", [])
+        return [{"id": v["name"], "name": v["name"]} for v in voices if "Chirp3-HD" in v["name"]]
+    except httpx.HTTPError:
+        return []

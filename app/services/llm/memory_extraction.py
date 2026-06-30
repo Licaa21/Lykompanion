@@ -2,6 +2,7 @@ import json
 import logging
 
 from app.core import memory
+from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
 
@@ -31,7 +32,8 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     ]
 
     try:
-        raw = await chat_completion(messages, response_format={"type": "json_object"})
+        model = settings.memory_extraction_model or None
+        raw = await chat_completion(messages, model=model, response_format={"type": "json_object"})
         data = json.loads(raw)
     except Exception:
         logger.exception("Memory extraction failed")

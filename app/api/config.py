@@ -12,6 +12,12 @@ async def get_config() -> CompanionConfig:
     return CompanionConfig(
         openrouter_model=settings.openrouter_model,
         openrouter_voice_model=settings.openrouter_voice_model,
+        memory_extraction_model=settings.memory_extraction_model or None,
+        game_state_ocr_enabled=settings.game_state_ocr_enabled,
+        game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
+        game_state_model=settings.game_state_model or None,
+        google_tts_api_key_set=bool(settings.google_tts_api_key),
+        google_tts_voice=settings.google_tts_voice or None,
         tts_provider=settings.tts_provider,
         kokoro_voice=settings.kokoro_voice,
         openrouter_tts_model=settings.openrouter_tts_model,
@@ -51,6 +57,25 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.openrouter_voice_model is not None:
         settings.openrouter_voice_model = config.openrouter_voice_model
         persist_env_value("OPENROUTER_VOICE_MODEL", config.openrouter_voice_model)
+    if config.memory_extraction_model is not None:
+        settings.memory_extraction_model = config.memory_extraction_model
+        persist_env_value("MEMORY_EXTRACTION_MODEL", config.memory_extraction_model)
+
+    settings.game_state_ocr_enabled = config.game_state_ocr_enabled
+    persist_env_value("GAME_STATE_OCR_ENABLED", str(config.game_state_ocr_enabled))
+
+    settings.game_state_poll_interval_seconds = config.game_state_poll_interval_seconds
+    persist_env_value("GAME_STATE_POLL_INTERVAL_SECONDS", str(config.game_state_poll_interval_seconds))
+
+    if config.game_state_model is not None:
+        settings.game_state_model = config.game_state_model
+        persist_env_value("GAME_STATE_MODEL", config.game_state_model)
+    if config.google_tts_api_key:
+        settings.google_tts_api_key = config.google_tts_api_key
+        persist_env_value("GOOGLE_TTS_API_KEY", config.google_tts_api_key)
+    if config.google_tts_voice is not None:
+        settings.google_tts_voice = config.google_tts_voice
+        persist_env_value("GOOGLE_TTS_VOICE", config.google_tts_voice)
 
     settings.tts_speed = config.narration_speed
     persist_env_value("TTS_SPEED", str(config.narration_speed))
