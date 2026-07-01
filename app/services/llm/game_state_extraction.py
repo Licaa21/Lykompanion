@@ -135,12 +135,20 @@ async def _run_training_pass(process: str, ocr_text: str) -> None:
 def _maybe_start_training_pass(process: str, confidence, ocr_text: str) -> None:
     if not settings.game_state_training_enabled:
         return
-    if not isinstance(confidence, (int, float)) or confidence >= _TRAINING_CONFIDENCE_THRESHOLD:
+    no_training_data = not game_state_training_data.get_training_data(process)
+    confidence_low = isinstance(confidence, (int, float)) and confidence < _TRAINING_CONFIDENCE_THRESHOLD
+    # Fire when confidence is low OR when this process has never been trained before — the
+    # chicken-and-egg guard: the first extraction for a new game has no training data to lean on,
+    # and might produce a confidently-wrong result that never triggers a normal training pass.
+    if not confidence_low and not no_training_data:
         return
     if process.lower() in _training_in_progress:
         logger.debug("Game-state poll: training already in flight for process=%r, skipping", process)
         return
-    logger.info("Game-state poll: low confidence (%.2f) for process=%r, starting training pass", confidence, process)
+    if no_training_data:
+        logger.info("Game-state poll: no training data yet for process=%r, bootstrapping", process)
+    else:
+        logger.info("Game-state poll: low confidence (%.2f) for process=%r, starting training pass", confidence, process)
     _training_in_progress.add(process.lower())
     task = asyncio.create_task(_run_training_pass(process, ocr_text))
     _training_tasks.add(task)
