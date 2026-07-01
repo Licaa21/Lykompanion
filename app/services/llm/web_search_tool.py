@@ -34,7 +34,13 @@ async def execute_web_search(arguments: dict) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "Search the web for the user's query and answer concisely with the key facts, citing source URLs.",
+                    "content": (
+                        "Search the web for the user's query and answer concisely with the key facts, citing "
+                        "source URLs. If the search results include a direct image URL (a link ending in an "
+                        "image extension like .jpg/.jpeg/.png/.webp, not a webpage) that's genuinely relevant "
+                        "to the query, include it explicitly on its own line formatted as 'Image: <url>'. Only "
+                        "do this for image URLs actually present in the results — never invent or guess one."
+                    ),
                 },
                 {"role": "user", "content": query},
             ],

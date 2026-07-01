@@ -30,6 +30,17 @@ let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
 let includeScreenshot = false;
 
+// User's uploaded profile picture (shown in chat in place of the "Y" initial). Cache-busted
+// with a version stamp each time it's changed, since the URL itself never changes.
+let hasUserAvatar = false;
+let avatarVersion = Date.now();
+
+async function refreshAvatarStatus() {
+  const res = await fetch("/api/profile/avatar/status");
+  const data = await res.json();
+  hasUserAvatar = data.has_avatar;
+}
+
 // Live-mic voice activity detection tuning, persisted server-side via /api/config.
 let vadThreshold = 8;
 let vadSilenceMs = 1200;
@@ -371,9 +382,18 @@ async function synthesizeSentence(text) {
   return response.blob();
 }
 
+// The companion may embed markdown images/links (see renderMessageMarkup) - narration should
+// speak the alt/link text, not read raw "bracket bracket parenthesis http" syntax aloud.
+function stripMarkdownForNarration(text) {
+  return text
+    .replace(/!\[([^\]]*)\]\(https?:\/\/[^\s)]+\)/g, (_m, alt) => alt || "an image")
+    .replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g, (_m, label) => label)
+    .replace(/https?:\/\/[^\s<>"']+/g, "");
+}
+
 function enqueueNarration(text) {
   if (!text || !text.trim()) return Promise.resolve();
-  const promise = synthesizeSentence(text);
+  const promise = synthesizeSentence(stripMarkdownForNarration(text));
   return new Promise((resolveItem) => {
     ttsQueue.push({ promise, resolveItem });
     processTtsQueue();
@@ -451,6 +471,36 @@ function stopNarration() {
 
 stopNarrationBtn.addEventListener("click", stopNarration);
 
+// --- Minimal markdown rendering for chat content ---
+// Only supports what the companion is instructed to use: images, links, and bare URLs.
+// Text is HTML-escaped first so the LLM can never inject arbitrary markup, then the three
+// patterns are substituted in an order where each one can't be re-matched by the next.
+
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderMessageMarkup(text) {
+  let html = escapeHtml(text);
+
+  // Images: ![alt](https://...)
+  html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (_m, alt, url) => {
+    return `<img src="${url}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
+  });
+
+  // Links: [text](https://...)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
+  // Bare URLs left over (not already inside an href="..."/src="..." we just generated).
+  html = html.replace(/(?<!["'])https?:\/\/[^\s<>"']+/g, (url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+
+  return html;
+}
+
 function appendMessage(role, content, audioId, isNew = false) {
   const el = document.createElement("div");
   el.className = `message ${role}`;
@@ -466,7 +516,12 @@ function appendMessage(role, content, audioId, isNew = false) {
 
   const avatar = document.createElement("span");
   avatar.className = "msg-avatar";
-  avatar.innerHTML = role === "assistant" ? `<img src="img/logo.png" alt="" />` : "Y";
+  avatar.innerHTML =
+    role === "assistant"
+      ? `<img src="img/logo.png" alt="" />`
+      : hasUserAvatar
+      ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />`
+      : "Y";
   meta.appendChild(avatar);
 
   const roleName = document.createElement("span");
@@ -523,7 +578,7 @@ function appendMessage(role, content, audioId, isNew = false) {
   // ── Content area ──────────────────────────────────────────
   const contentDiv = document.createElement("div");
   contentDiv.className = "msg-content";
-  contentDiv.textContent = content;
+  contentDiv.innerHTML = renderMessageMarkup(content);
   // For voice messages the player IS the bubble; hide the text placeholder
   if (audioId) contentDiv.hidden = true;
   el.appendChild(contentDiv);
@@ -698,7 +753,7 @@ async function sendMessage(text) {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({}));
-      assistantEl.textContent = `⚠️ ${error.detail || "Chat request failed."}`;
+      assistantEl.innerHTML = renderMessageMarkup(`⚠️ ${error.detail || "Chat request failed."}`);
       return;
     }
 
@@ -723,7 +778,7 @@ async function sendMessage(text) {
 
         if (payload.error) {
           fullReply += `\n⚠️ ${payload.error}`;
-          assistantEl.textContent = fullReply;
+          assistantEl.innerHTML = renderMessageMarkup(fullReply);
           continue;
         }
         if (payload.volume !== undefined) {
@@ -739,7 +794,7 @@ async function sendMessage(text) {
         if (payload.done) continue;
 
         fullReply += payload.delta;
-        assistantEl.textContent = fullReply;
+        assistantEl.innerHTML = renderMessageMarkup(fullReply);
         chatLog.scrollTop = chatLog.scrollHeight;
 
         if (narrateEnabled) {
@@ -761,7 +816,7 @@ async function sendMessage(text) {
     maybeGenerateTitle(chat, text, fullReply);
   } catch (err) {
     if (err.name !== "AbortError") {
-      assistantEl.textContent = fullReply || "⚠️ Chat request failed.";
+      assistantEl.innerHTML = renderMessageMarkup(fullReply || "⚠️ Chat request failed.");
     } else if (fullReply) {
       addMessageToChat(chat, "assistant", fullReply);
     }
@@ -979,15 +1034,15 @@ async function isLikelySpeech(samples, sampleRate) {
 // already happened. Once volume drops back below threshold for vadSilenceMs,
 // the utterance is finalized as a WAV and sent directly to the LLM.
 
-const PRE_ROLL_MS = 1500;
-// Extra fixed padding kept past the silence-detection point before finalizing, on top of the
-// user-configurable vadSilenceMs threshold - same idea as PRE_ROLL_MS but for the tail end, so a
-// trailing word/breath right at the silence cutoff doesn't get clipped.
-const POST_ROLL_MS = 500;
+// Padding kept around the detected speech window, user-configurable (0-2500ms), so the first/last
+// word or breath doesn't get clipped. Set from server config in loadConfig().
+let preRollMs = 1000;
+let postRollMs = 500;
 const MAX_UTTERANCE_MS = 60000;
-// Must comfortably exceed the worst case: PRE_ROLL_MS + MAX_UTTERANCE_MS + (max configurable
-// vadSilenceMs + POST_ROLL_MS), or extractFromRing silently truncates the start of long utterances.
-const RING_BUFFER_SECONDS = 24;
+// The forced cutoff at liveSpeechStartTime + MAX_UTTERANCE_MS bounds total recording length
+// regardless of vadSilenceMs/postRollMs, so the worst case span extractFromRing ever needs is
+// preRollMs (max 2500ms) + MAX_UTTERANCE_MS = 62.5s. 65s leaves a safety margin.
+const RING_BUFFER_SECONDS = 65;
 
 let liveMicEnabled = false;
 let liveMicStream = null;
@@ -1077,7 +1132,7 @@ async function startLiveMic() {
         liveRecording = true;
         liveSilenceStart = null;
         liveSpeechStartTime = Date.now();
-        const preRollSamples = Math.round((PRE_ROLL_MS / 1000) * ringSampleRate);
+        const preRollSamples = Math.round((preRollMs / 1000) * ringSampleRate);
         utteranceStartAbsolute = Math.max(0, absoluteSampleCount - samples.length - preRollSamples);
         micBtn.classList.add("recording");
         setVoiceStatus("Listening to your request...", "recording");
@@ -1090,7 +1145,7 @@ async function startLiveMic() {
       liveSilenceStart = null;
     } else {
       if (liveSilenceStart === null) liveSilenceStart = Date.now();
-      if (Date.now() - liveSilenceStart > vadSilenceMs + POST_ROLL_MS) {
+      if (Date.now() - liveSilenceStart > vadSilenceMs + postRollMs) {
         finalizeLiveUtterance();
       }
     }
@@ -1197,6 +1252,9 @@ const wakeWordUnsupportedEl = document.getElementById("wake-word-unsupported");
 const wakeWordControlsEl = document.getElementById("wake-word-controls");
 const wakeWordEnabledInput = document.getElementById("cfg-wake-word-enabled");
 const wakeWordPhraseInput = document.getElementById("cfg-wake-word-phrase");
+const wakeWordDependentEl = document.getElementById("wake-word-dependent");
+const wakeWordMaxFailuresInput = document.getElementById("cfg-wake-word-max-failures");
+const wakeWordMaxFailuresValue = document.getElementById("cfg-wake-word-max-failures-value");
 const wakeWordDebugEl = document.getElementById("wake-word-debug");
 const wakeWordStatusEl = document.getElementById("wake-word-status");
 const wakeWordTranscriptEl = document.getElementById("wake-word-transcript");
@@ -1208,13 +1266,18 @@ let wakeWordRecognition = null;
 let wakeWordShouldRun = false;
 let wakeWordConsecutiveFailures = 0;
 let wakeWordLastError = null;
+let wakeWordMaxFailures = 3;
 
 // Errors that mean recognition is genuinely broken (e.g. a plain/open-source Chromium build
 // without Google's proprietary speech API key - the API exists but every start() fails). Distinct
 // from "no-speech", which fires routinely during normal continuous listening and isn't a failure.
 const WAKE_WORD_HARD_ERRORS = new Set(["network", "service-not-allowed", "audio-capture", "not-allowed"]);
-const WAKE_WORD_MAX_CONSECUTIVE_FAILURES = 3;
 const WAKE_WORD_RESTART_DELAY_MS = 500;
+
+wakeWordMaxFailuresInput.addEventListener("input", () => {
+  wakeWordMaxFailures = Number(wakeWordMaxFailuresInput.value);
+  wakeWordMaxFailuresValue.textContent = wakeWordMaxFailures;
+});
 
 function normalizeForWakeMatch(text) {
   return text
@@ -1273,7 +1336,7 @@ function startWakeWordRecognition() {
     wakeWordRecognition = null;
     if (!wakeWordShouldRun) return;
 
-    if (wakeWordConsecutiveFailures >= WAKE_WORD_MAX_CONSECUTIVE_FAILURES) {
+    if (wakeWordConsecutiveFailures >= wakeWordMaxFailures) {
       wakeWordStatusEl.textContent = `Speech recognition unavailable (${wakeWordLastError || "unknown error"}) - try Google Chrome.`;
       return; // give up instead of hot-looping (and flickering the mic indicator) forever
     }
@@ -1309,6 +1372,7 @@ function updateWakeWordListenerState() {
     stopWakeWordRecognition();
   }
 
+  wakeWordDependentEl.hidden = !wakeWordEnabled;
   wakeWordDebugEl.hidden = !(wakeWordEnabled && wakeWordSupported);
   if (wakeWordEnabled && wakeWordSupported) {
     wakeWordStatusEl.textContent = liveMicEnabled ? "Hands-free is already on." : "Listening for wake phrase...";
@@ -1362,6 +1426,22 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     const tab = btn.dataset.tab;
     document.querySelectorAll(".tab-panel").forEach((panel) => {
       panel.hidden = panel.dataset.tab !== tab;
+    });
+  });
+});
+
+// Secondary pill nav within a tab panel - same show/hide idea as the main tabs, scoped to
+// whichever .tab-panel the clicked bar lives in so identical subtab names don't collide.
+document.querySelectorAll(".subtab-bar").forEach((bar) => {
+  const panel = bar.closest(".tab-panel");
+  bar.querySelectorAll(".subtab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      bar.querySelectorAll(".subtab-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const subtab = btn.dataset.subtab;
+      panel.querySelectorAll(".subtab-panel").forEach((sp) => {
+        sp.hidden = sp.dataset.subtab !== subtab;
+      });
     });
   });
 });
@@ -1557,12 +1637,69 @@ gameStateIntervalInput.addEventListener("input", () => {
   gameStateIntervalValue.textContent = gameStateIntervalInput.value;
 });
 
+const avatarPreviewEl = document.getElementById("cfg-avatar-preview");
+const avatarInputEl = document.getElementById("cfg-avatar-input");
+const avatarUploadBtn = document.getElementById("cfg-avatar-upload-btn");
+const avatarRemoveBtn = document.getElementById("cfg-avatar-remove-btn");
+
+function renderAvatarPreview() {
+  avatarPreviewEl.innerHTML = hasUserAvatar ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />` : "Y";
+}
+
+avatarUploadBtn.addEventListener("click", () => avatarInputEl.click());
+
+avatarInputEl.addEventListener("change", async () => {
+  const file = avatarInputEl.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append("avatar", file);
+  const res = await fetch("/api/profile/avatar", { method: "POST", body: formData });
+  avatarInputEl.value = "";
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    showToast("avatar-error", { title: "Couldn't set picture", body: error.detail || "Upload failed.", duration: 4000 });
+    return;
+  }
+  hasUserAvatar = true;
+  avatarVersion = Date.now();
+  renderAvatarPreview();
+});
+
+avatarRemoveBtn.addEventListener("click", async () => {
+  await fetch("/api/profile/avatar", { method: "DELETE" });
+  hasUserAvatar = false;
+  renderAvatarPreview();
+});
+
+const gameStateEnabledInput = document.getElementById("cfg-game-state-enabled");
+const gameStateDependentEl = document.getElementById("game-state-dependent");
+
+function updateGameStateDependentVisibility() {
+  gameStateDependentEl.hidden = !gameStateEnabledInput.checked;
+}
+
+gameStateEnabledInput.addEventListener("change", updateGameStateDependentVisibility);
+
 const vadThresholdInput = document.getElementById("cfg-vad-threshold");
 const vadThresholdValue = document.getElementById("cfg-vad-threshold-value");
 const vadSilenceInput = document.getElementById("cfg-vad-silence");
 const vadSilenceValue = document.getElementById("cfg-vad-silence-value");
 const vadMinSpeechInput = document.getElementById("cfg-vad-min-speech");
 const vadMinSpeechValue = document.getElementById("cfg-vad-min-speech-value");
+const preRollInput = document.getElementById("cfg-pre-roll");
+const preRollValue = document.getElementById("cfg-pre-roll-value");
+const postRollInput = document.getElementById("cfg-post-roll");
+const postRollValue = document.getElementById("cfg-post-roll-value");
+
+preRollInput.addEventListener("input", () => {
+  preRollMs = Number(preRollInput.value);
+  preRollValue.textContent = preRollMs;
+});
+
+postRollInput.addEventListener("input", () => {
+  postRollMs = Number(postRollInput.value);
+  postRollValue.textContent = postRollMs;
+});
 
 vadThresholdInput.value = vadThreshold;
 vadThresholdValue.textContent = vadThreshold;
@@ -1599,6 +1736,7 @@ document.getElementById("cfg-tts-provider").addEventListener("change", updateTts
 async function loadConfig() {
   const response = await fetch("/api/config");
   const cfg = await response.json();
+  renderAvatarPreview();
   document.getElementById("cfg-tts-provider").value = cfg.tts_provider;
   updateTtsProviderVisibility();
   document.getElementById("cfg-api-key").placeholder = cfg.openrouter_api_key_set
@@ -1622,13 +1760,20 @@ async function loadConfig() {
   screenshotQualityInput.value = cfg.screenshot_jpeg_quality;
   screenshotQualityValue.textContent = cfg.screenshot_jpeg_quality;
 
-  document.getElementById("cfg-game-state-enabled").checked = cfg.game_state_ocr_enabled;
+  gameStateEnabledInput.checked = cfg.game_state_ocr_enabled;
+  updateGameStateDependentVisibility();
+  document.getElementById("cfg-tesseract-cmd").value = cfg.tesseract_cmd || "";
+  document.getElementById("cfg-openrouter-base-url").value = cfg.openrouter_base_url || "";
+  document.getElementById("cfg-kokoro-base-url").value = cfg.kokoro_base_url || "";
   gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
   gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
   restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
 
   wakeWordEnabled = cfg.wake_word_enabled;
   wakeWordPhrase = cfg.wake_word_phrase || "Hey Buddy";
+  wakeWordMaxFailures = cfg.wake_word_max_failures ?? 3;
+  wakeWordMaxFailuresInput.value = wakeWordMaxFailures;
+  wakeWordMaxFailuresValue.textContent = wakeWordMaxFailures;
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
@@ -1644,6 +1789,13 @@ async function loadConfig() {
   vadSilenceValue.textContent = vadSilenceMs;
   vadMinSpeechInput.value = vadMinSpeechMs;
   vadMinSpeechValue.textContent = vadMinSpeechMs;
+
+  preRollMs = cfg.pre_roll_ms ?? 1000;
+  postRollMs = cfg.post_roll_ms ?? 500;
+  preRollInput.value = preRollMs;
+  preRollValue.textContent = preRollMs;
+  postRollInput.value = postRollMs;
+  postRollValue.textContent = postRollMs;
 
   document.getElementById("cfg-google-tts-api-key").placeholder = cfg.google_tts_api_key_set
     ? "•••••••• (set)"
@@ -1686,10 +1838,12 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
   const steamApiKeyInput = document.getElementById("cfg-steam-api-key");
   const body = {
     openrouter_model: document.getElementById("cfg-model").value,
+    openrouter_base_url: document.getElementById("cfg-openrouter-base-url").value.trim() || "https://openrouter.ai/api/v1",
     memory_extraction_model: document.getElementById("cfg-memory-model").value,
     tts_provider: document.getElementById("cfg-tts-provider").value,
     google_tts_api_key: document.getElementById("cfg-google-tts-api-key").value || null,
     google_tts_voice: document.getElementById("cfg-chirp3-voice").value,
+    kokoro_base_url: document.getElementById("cfg-kokoro-base-url").value.trim() || "http://localhost:8880/v1",
     kokoro_voice: document.getElementById("cfg-kokoro-voice").value,
     openrouter_tts_model: document.getElementById("cfg-openrouter-tts-model").value,
     openrouter_voice: document.getElementById("cfg-openrouter-voice").value,
@@ -1705,14 +1859,18 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     igdb_client_secret: igdbSecretInput.value || null,
     steam_api_key: steamApiKeyInput.value || null,
     steam_id: document.getElementById("cfg-steam-id").value,
-    game_state_ocr_enabled: document.getElementById("cfg-game-state-enabled").checked,
+    game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
+    tesseract_cmd: document.getElementById("cfg-tesseract-cmd").value,
     wake_word_enabled: wakeWordEnabledInput.checked,
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
+    wake_word_max_failures: wakeWordMaxFailures,
     vad_threshold: vadThreshold,
     vad_silence_ms: vadSilenceMs,
     vad_min_speech_ms: vadMinSpeechMs,
+    pre_roll_ms: preRollMs,
+    post_roll_ms: postRollMs,
   };
   await fetch("/api/config", {
     method: "PUT",
@@ -2516,6 +2674,7 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 // --- Init ---
 
 async function init() {
+  await refreshAvatarStatus();
   await loadChatsFromStorage();
   if (chats.length === 0) {
     createNewChat();

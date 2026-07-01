@@ -100,163 +100,236 @@
 
   <!-- ── SETTINGS MODAL ─────────────────────────────────────────────── -->
   <div id="settings-modal" class="modal-overlay" hidden>
-    <div class="modal">
+    <div class="modal modal--wide">
       <div class="modal-header">
         <h2>Settings</h2>
         <button type="button" class="modal-close" data-close="settings-modal">&times;</button>
       </div>
-      <div class="modal-tabs">
-        <button type="button" class="tab-btn active" data-tab="general">General</button>
-        <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
-        <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
-        <button type="button" class="tab-btn" data-tab="third-party">Third-Party APIs</button>
-      </div>
-      <div class="modal-body">
+      <div class="modal-layout">
+        <nav class="modal-tabs">
+          <button type="button" class="tab-btn active" data-tab="general">General</button>
+          <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
+          <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
+          <button type="button" class="tab-btn" data-tab="third-party">Integrations</button>
+        </nav>
+        <div class="modal-main modal-body">
 
         <!-- GENERAL tab -->
         <section class="tab-panel" data-tab="general">
-          <div class="cfg-key-row">
-            <label>
-              OpenRouter API Key
-              <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
-            </label>
-            <label>
-              OpenRouter Management Key
-              <input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" />
-            </label>
+          <div class="subtab-bar">
+            <button type="button" class="subtab-btn active" data-subtab="core">Core</button>
+            <button type="button" class="subtab-btn" data-subtab="vision">Vision</button>
+            <button type="button" class="subtab-btn" data-subtab="game-awareness">Game Awareness</button>
           </div>
-          <label>
-            LLM Model
-            <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
-            <select id="cfg-model"></select>
-          </label>
-          <label>
-            Memory Extraction Model
-            <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models…" />
-            <select id="cfg-memory-model"></select>
-          </label>
-          <label>
-            Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
-            <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
-          </label>
 
-          <h3>Vision</h3>
-          <p class="modal-hint">Lower values cut image token cost on screenshots sent to the LLM.</p>
-          <label>
-            Screenshot Max Width: <span id="cfg-screenshot-width-value">960</span>px
-            <input id="cfg-screenshot-width" type="range" min="480" max="1920" step="80" value="960" />
-          </label>
-          <label>
-            Screenshot JPEG Quality: <span id="cfg-screenshot-quality-value">70</span>
-            <input id="cfg-screenshot-quality" type="range" min="30" max="95" step="5" value="70" />
-          </label>
+          <div class="subtab-panel" data-subtab="core">
+            <label>
+              <span class="cfg-label">Profile Picture <button type="button" class="cfg-help" data-tip="Shown next to your messages in chat, instead of the default initial.">?</button></span>
+            </label>
+            <div class="cfg-avatar-row">
+              <div id="cfg-avatar-preview" class="cfg-avatar-preview">Y</div>
+              <div class="cfg-avatar-actions">
+                <input id="cfg-avatar-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+                <button type="button" id="cfg-avatar-upload-btn" class="secondary-btn">Change Picture</button>
+                <button type="button" id="cfg-avatar-remove-btn" class="secondary-btn">Remove</button>
+              </div>
+            </div>
+            <div class="cfg-key-row">
+              <label>
+                <span class="cfg-label">OpenRouter API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests.">?</button></span>
+                <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
+              </label>
+              <label>
+                <span class="cfg-label">OpenRouter Management Key <button type="button" class="cfg-help" data-tip="A separate OpenRouter key with account-read permissions, used only to fetch your usage/balance — never used for chat requests.">?</button></span>
+                <input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" />
+              </label>
+            </div>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply.">?</button></span>
+                <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
+                <select id="cfg-model"></select>
+              </label>
+              <label>
+                <span class="cfg-label">Memory Extraction Model <button type="button" class="cfg-help" data-tip="Model used for the background task that extracts memorable facts from your conversations. Leave blank to reuse the main chat model.">?</button></span>
+                <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models…" />
+                <select id="cfg-memory-model"></select>
+              </label>
+            </div>
+            <label>
+              <span class="cfg-label">Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit) <button type="button" class="cfg-help" data-tip="How many of the most recent chat messages are sent to the LLM as context. Lower values cut cost; 0 sends the entire conversation.">?</button></span>
+              <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
+            </label>
+            <details class="cfg-advanced">
+              <summary>Advanced</summary>
+              <label>
+                <span class="cfg-label">OpenRouter Base URL <button type="button" class="cfg-help" data-tip="The API endpoint used for all OpenRouter requests. Only change this if you're routing through a proxy or compatible gateway.">?</button></span>
+                <input id="cfg-openrouter-base-url" type="text" placeholder="https://openrouter.ai/api/v1" autocomplete="off" />
+              </label>
+            </details>
+          </div>
 
-          <h3>Passive Game-State Awareness</h3>
-          <label class="checkbox">
-            <input id="cfg-game-state-enabled" type="checkbox" />
-            Background OCR awareness (Windows only) — track quest/location/character automatically
-          </label>
-          <label>
-            Poll Interval: <span id="cfg-game-state-interval-value">90</span>s
-            <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
-          </label>
-          <label>
-            Game-State Model
-            <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
-            <select id="cfg-game-state-model"></select>
-          </label>
-          <label>
-            Blacklisted Processes
-            <p class="modal-hint">Processes the poller should never OCR, in case built-in filters miss something.</p>
-          </label>
-          <div id="game-state-blacklist" class="memory-list"></div>
-          <form id="game-state-blacklist-form" class="memory-add-form">
-            <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
-            <button type="submit" class="secondary-btn">Add</button>
-          </form>
-          <label>
-            Approved Processes
-            <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
-          </label>
-          <div id="game-state-whitelist" class="memory-list"></div>
+          <div class="subtab-panel" data-subtab="vision" hidden>
+            <p class="modal-hint">Lower values cut image token cost on screenshots sent to the LLM.</p>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Screenshot Max Width: <span id="cfg-screenshot-width-value">960</span>px <button type="button" class="cfg-help" data-tip="Screenshots are downscaled to this width before being sent to the LLM. Lower values reduce image token cost at the expense of detail.">?</button></span>
+                <input id="cfg-screenshot-width" type="range" min="480" max="1920" step="80" value="960" />
+              </label>
+              <label>
+                <span class="cfg-label">Screenshot JPEG Quality: <span id="cfg-screenshot-quality-value">70</span> <button type="button" class="cfg-help" data-tip="Compression quality for screenshots sent to the LLM. Lower values reduce token cost but introduce more visual artifacts.">?</button></span>
+                <input id="cfg-screenshot-quality" type="range" min="30" max="95" step="5" value="70" />
+              </label>
+            </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab="game-awareness" hidden>
+            <label class="checkbox">
+              <input id="cfg-game-state-enabled" type="checkbox" />
+              Background OCR awareness (Windows only) — track quest/location/character automatically
+              <button type="button" class="cfg-help" data-tip="Periodically OCR-scans your screen in the background so the companion knows your current quest/location/character without being told. Windows only.">?</button>
+            </label>
+            <div id="game-state-dependent">
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>
+                  <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
+                </label>
+                <label>
+                  <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Model used to interpret OCR text into quest/location/character fields. Leave blank to reuse the main chat model.">?</button></span>
+                  <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
+                  <select id="cfg-game-state-model"></select>
+                </label>
+              </div>
+              <details class="cfg-advanced">
+                <summary>Advanced</summary>
+                <label>
+                  <span class="cfg-label">Tesseract Path Override <button type="button" class="cfg-help" data-tip="Full path to tesseract.exe. Only needed if Tesseract OCR isn't discoverable on your system PATH.">?</button></span>
+                  <input id="cfg-tesseract-cmd" type="text" placeholder="Auto-detected from PATH" autocomplete="off" />
+                </label>
+              </details>
+              <label>
+                <span class="cfg-label">Blacklisted Processes <button type="button" class="cfg-help" data-tip="Processes the OCR poller should never scan, even if detected as a foreground game.">?</button></span>
+                <p class="modal-hint">Processes the poller should never OCR, in case built-in filters miss something.</p>
+              </label>
+              <div id="game-state-blacklist" class="memory-list"></div>
+              <form id="game-state-blacklist-form" class="memory-add-form">
+                <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
+                <button type="submit" class="secondary-btn">Add</button>
+              </form>
+              <label>
+                <span class="cfg-label">Approved Processes <button type="button" class="cfg-help" data-tip="Processes you've allowed the OCR poller to scan. New, unrecognized processes prompt you before being added here.">?</button></span>
+                <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
+              </label>
+              <div id="game-state-whitelist" class="memory-list"></div>
+            </div>
+          </div>
         </section>
 
         <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
-          <label>
-            TTS Provider
-            <select id="cfg-tts-provider">
-              <option value="kokoro">Kokoro (local)</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="chirp3">Chirp 3 HD (Google)</option>
-            </select>
-          </label>
-          <div data-tts-provider="kokoro">
-            <label>
-              Kokoro Voice
-              <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices…" />
-              <select id="cfg-kokoro-voice"></select>
-            </label>
+          <div class="subtab-bar">
+            <button type="button" class="subtab-btn active" data-subtab="narration">Narration</button>
+            <button type="button" class="subtab-btn" data-subtab="voice-input">Voice Input</button>
           </div>
-          <div data-tts-provider="openrouter">
-            <label>
-              OpenRouter TTS Model
-              <input id="cfg-openrouter-tts-model-search" type="text" class="model-search" placeholder="Search models…" />
-              <select id="cfg-openrouter-tts-model"></select>
-            </label>
-            <label>
-              OpenRouter Voice
-              <select id="cfg-openrouter-voice"></select>
-            </label>
-          </div>
-          <div data-tts-provider="chirp3">
-            <label>
-              Google API Key
-              <input id="cfg-google-tts-api-key" type="password" placeholder="Not set (uses Application Default Credentials)" autocomplete="off" />
-            </label>
-            <label>
-              Chirp 3 HD Voice
-              <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices…" />
-              <select id="cfg-chirp3-voice"></select>
-            </label>
-          </div>
-          <label>
-            Narration Speed (<span id="cfg-narration-speed-value">1.0</span>×)
-            <input id="cfg-narration-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
-          </label>
-          <label>
-            Narration Volume (<span id="cfg-narration-volume-value">100</span>%)
-            <input id="cfg-narration-volume" type="range" min="0" max="100" step="5" value="100" />
-          </label>
-          <label class="checkbox">
-            <input id="cfg-narrate" type="checkbox" checked />
-            Narrate replies (TTS)
-          </label>
 
-          <h3>Voice Input</h3>
-          <p class="modal-hint">Speech is always sent directly to an audio-capable LLM (no local transcription).</p>
-          <label>
-            OpenRouter Voice Model
-            <input id="cfg-openrouter-voice-model-search" type="text" class="model-search" placeholder="Search models…" />
-            <select id="cfg-openrouter-voice-model"></select>
-          </label>
+          <div class="subtab-panel" data-subtab="narration">
+            <label>
+              <span class="cfg-label">TTS Provider <button type="button" class="cfg-help" data-tip="Which text-to-speech engine narrates the companion's replies.">?</button></span>
+              <select id="cfg-tts-provider">
+                <option value="kokoro">Kokoro (local)</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="chirp3">Chirp 3 HD (Google)</option>
+              </select>
+            </label>
+            <div data-tts-provider="kokoro">
+              <label>
+                <span class="cfg-label">Kokoro Voice <button type="button" class="cfg-help" data-tip="Voice used by the local Kokoro TTS server.">?</button></span>
+                <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices…" />
+                <select id="cfg-kokoro-voice"></select>
+              </label>
+              <details class="cfg-advanced">
+                <summary>Advanced</summary>
+                <label>
+                  <span class="cfg-label">Kokoro Base URL <button type="button" class="cfg-help" data-tip="Address of your local Kokoro TTS server. Only change this if it's running on a different host or port.">?</button></span>
+                  <input id="cfg-kokoro-base-url" type="text" placeholder="http://localhost:8880/v1" autocomplete="off" />
+                </label>
+              </details>
+            </div>
+            <div data-tts-provider="openrouter">
+              <label>
+                <span class="cfg-label">OpenRouter TTS Model <button type="button" class="cfg-help" data-tip="The OpenRouter speech model used to synthesize narration.">?</button></span>
+                <input id="cfg-openrouter-tts-model-search" type="text" class="model-search" placeholder="Search models…" />
+                <select id="cfg-openrouter-tts-model"></select>
+              </label>
+              <label>
+                <span class="cfg-label">OpenRouter Voice <button type="button" class="cfg-help" data-tip="Voice preset for the selected OpenRouter speech model.">?</button></span>
+                <select id="cfg-openrouter-voice"></select>
+              </label>
+            </div>
+            <div data-tts-provider="chirp3">
+              <label>
+                <span class="cfg-label">Google API Key <button type="button" class="cfg-help" data-tip="Google Cloud API key for Chirp 3 HD voices. Leave blank to use Application Default Credentials instead.">?</button></span>
+                <input id="cfg-google-tts-api-key" type="password" placeholder="Not set (uses Application Default Credentials)" autocomplete="off" />
+              </label>
+              <label>
+                <span class="cfg-label">Chirp 3 HD Voice <button type="button" class="cfg-help" data-tip="Voice used by Google's Chirp 3 HD text-to-speech.">?</button></span>
+                <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices…" />
+                <select id="cfg-chirp3-voice"></select>
+              </label>
+            </div>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Narration Speed (<span id="cfg-narration-speed-value">1.0</span>×) <button type="button" class="cfg-help" data-tip="Playback speed multiplier for narrated replies.">?</button></span>
+                <input id="cfg-narration-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
+              </label>
+              <label>
+                <span class="cfg-label">Narration Volume (<span id="cfg-narration-volume-value">100</span>%) <button type="button" class="cfg-help" data-tip="Playback volume for narrated replies.">?</button></span>
+                <input id="cfg-narration-volume" type="range" min="0" max="100" step="5" value="100" />
+              </label>
+            </div>
+            <label class="checkbox">
+              <input id="cfg-narrate" type="checkbox" checked />
+              Narrate replies (TTS)
+              <button type="button" class="cfg-help" data-tip="Automatically read replies aloud using the selected TTS provider.">?</button>
+            </label>
+          </div>
+
+          <div class="subtab-panel" data-subtab="voice-input" hidden>
+            <p class="modal-hint">Speech is always sent directly to an audio-capable LLM (no local transcription).</p>
+            <label>
+              <span class="cfg-label">OpenRouter Voice Model <button type="button" class="cfg-help" data-tip="Audio-capable model used to transcribe/understand your spoken messages. Leave blank to reuse the main chat model.">?</button></span>
+              <input id="cfg-openrouter-voice-model-search" type="text" class="model-search" placeholder="Search models…" />
+              <select id="cfg-openrouter-voice-model"></select>
+            </label>
+          </div>
         </section>
 
         <!-- LIVE MIC tab -->
         <section class="tab-panel" data-tab="live-mic" hidden>
           <p class="modal-hint">Tune how the hands-free mic decides when you're speaking. Stored server-side.</p>
-          <label>
-            Voice Activation Threshold (<span id="cfg-vad-threshold-value">8</span>)
-            <input id="cfg-vad-threshold" type="range" min="1" max="40" step="1" value="8" />
-          </label>
-          <label>
-            Silence Before Sending (<span id="cfg-vad-silence-value">1200</span> ms)
-            <input id="cfg-vad-silence" type="range" min="300" max="3000" step="100" value="1200" />
-          </label>
-          <label>
-            Minimum Speech Duration (<span id="cfg-vad-min-speech-value">300</span> ms)
-            <input id="cfg-vad-min-speech" type="range" min="100" max="1500" step="100" value="300" />
-          </label>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Voice Activation Threshold (<span id="cfg-vad-threshold-value">8</span>) <button type="button" class="cfg-help" data-tip="Microphone input level that counts as speech starting. Raise it in noisy environments to avoid false triggers.">?</button></span>
+              <input id="cfg-vad-threshold" type="range" min="1" max="40" step="1" value="8" />
+            </label>
+            <label>
+              <span class="cfg-label">Silence Before Sending (<span id="cfg-vad-silence-value">1200</span> ms) <button type="button" class="cfg-help" data-tip="How long the mic must stay silent before your utterance is finalized and sent.">?</button></span>
+              <input id="cfg-vad-silence" type="range" min="300" max="3000" step="100" value="1200" />
+            </label>
+            <label>
+              <span class="cfg-label">Minimum Speech Duration (<span id="cfg-vad-min-speech-value">300</span> ms) <button type="button" class="cfg-help" data-tip="Utterances shorter than this are discarded as noise instead of being sent.">?</button></span>
+              <input id="cfg-vad-min-speech" type="range" min="100" max="1500" step="100" value="300" />
+            </label>
+            <label>
+              <span class="cfg-label">Pre-Roll (<span id="cfg-pre-roll-value">1000</span> ms) <button type="button" class="cfg-help" data-tip="Extra audio kept from just before speech is detected, so the first word or breath isn't clipped off the start of the recording.">?</button></span>
+              <input id="cfg-pre-roll" type="range" min="0" max="2500" step="100" value="1000" />
+            </label>
+            <label>
+              <span class="cfg-label">Post-Roll (<span id="cfg-post-roll-value">500</span> ms) <button type="button" class="cfg-help" data-tip="Extra padding kept past the silence cutoff before finalizing, on top of Silence Before Sending, so a trailing word or breath isn't clipped off the end.">?</button></span>
+              <input id="cfg-post-roll" type="range" min="0" max="2500" step="100" value="500" />
+            </label>
+          </div>
 
           <h3>Wake Word</h3>
           <p class="modal-hint">
@@ -270,52 +343,70 @@
             <label class="checkbox">
               <input id="cfg-wake-word-enabled" type="checkbox" />
               Enable wake word
+              <button type="button" class="cfg-help" data-tip="Lets you say a phrase to turn hands-free listening back on without touching the keyboard or mouse.">?</button>
             </label>
-            <label>
-              Wake Phrase
-              <input id="cfg-wake-word-phrase" type="text" value="Hey Buddy" autocomplete="off" />
-            </label>
-            <div id="wake-word-debug" class="wake-word-debug" hidden>
-              <div id="wake-word-status" class="wake-word-status">Listening for wake phrase…</div>
-              <div id="wake-word-transcript" class="wake-word-transcript"></div>
+            <div id="wake-word-dependent">
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Wake Phrase <button type="button" class="cfg-help" data-tip="The phrase that re-enables hands-free listening when spoken.">?</button></span>
+                  <input id="cfg-wake-word-phrase" type="text" value="Hey Buddy" autocomplete="off" />
+                </label>
+                <label>
+                  <span class="cfg-label">Give Up After: <span id="cfg-wake-word-max-failures-value">3</span> failed restarts <button type="button" class="cfg-help" data-tip="How many consecutive speech-recognition errors are tolerated before wake-word listening gives up instead of retrying forever.">?</button></span>
+                  <input id="cfg-wake-word-max-failures" type="range" min="1" max="10" step="1" value="3" />
+                </label>
+              </div>
+              <div id="wake-word-debug" class="wake-word-debug" hidden>
+                <div id="wake-word-status" class="wake-word-status">Listening for wake phrase…</div>
+                <div id="wake-word-transcript" class="wake-word-transcript"></div>
+              </div>
             </div>
           </div>
         </section>
 
-        <!-- THIRD-PARTY tab -->
+        <!-- INTEGRATIONS tab -->
         <section class="tab-panel" data-tab="third-party" hidden>
-          <h3>IGDB</h3>
-          <p class="modal-hint">
-            Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
-            Twitch — create a free app at
-            <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
-            to get a Client ID and Secret.
-          </p>
-          <label>
-            Twitch Client ID
-            <input id="cfg-igdb-client-id" type="text" placeholder="Not set" autocomplete="off" />
-          </label>
-          <label>
-            Twitch Client Secret
-            <input id="cfg-igdb-client-secret" type="password" placeholder="Not set" autocomplete="off" />
-          </label>
+          <div class="subtab-bar">
+            <button type="button" class="subtab-btn active" data-subtab="igdb">IGDB</button>
+            <button type="button" class="subtab-btn" data-subtab="steam">Steam</button>
+          </div>
 
-          <h3>Steam</h3>
-          <p class="modal-hint">
-            Store/app info works with no setup. To let the agent check your owned games and playtime, add a
-            free API key from
-            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>
-            plus your numeric SteamID64.
-          </p>
-          <label>
-            Steam API Key
-            <input id="cfg-steam-api-key" type="password" placeholder="Not set" autocomplete="off" />
-          </label>
-          <label>
-            SteamID64
-            <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
-          </label>
+          <div class="subtab-panel" data-subtab="igdb">
+            <p class="modal-hint">
+              Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
+              Twitch — create a free app at
+              <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
+              to get a Client ID and Secret.
+            </p>
+            <label>
+              <span class="cfg-label">Twitch Client ID <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client ID, used to look up game info (genre, summary, platforms, rating).">?</button></span>
+              <input id="cfg-igdb-client-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+            <label>
+              <span class="cfg-label">Twitch Client Secret <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client Secret, paired with the Client ID above.">?</button></span>
+              <input id="cfg-igdb-client-secret" type="password" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="subtab-panel" data-subtab="steam" hidden>
+            <p class="modal-hint">
+              Store/app info works with no setup. To let the agent check your owned games and playtime, add a
+              free API key from
+              <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>
+              plus your numeric SteamID64.
+            </p>
+            <label>
+              <span class="cfg-label">Steam API Key <button type="button" class="cfg-help" data-tip="Free Steam Web API key, lets the companion check your owned games and playtime.">?</button></span>
+              <input id="cfg-steam-api-key" type="password" placeholder="Not set" autocomplete="off" />
+            </label>
+            <label>
+              <span class="cfg-label">SteamID64 <button type="button" class="cfg-help" data-tip="Your numeric SteamID64, used together with the API key to look up your library.">?</button></span>
+              <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
         </section>
+
+        </div>
       </div>
 
       <div class="modal-footer">

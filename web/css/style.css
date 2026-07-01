@@ -167,7 +167,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 
 .sidebar-logo {
-  height: 40px;
+  height: 100px;
   width: auto;
   object-fit: contain;
   position: relative;
@@ -447,6 +447,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border: 1px solid rgba(91,95,199,0.25);
 }
 .msg-avatar img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
+.message.user .msg-avatar img { object-fit: cover; padding: 0; }
 
 .msg-role-name {
   font-size: 11px;
@@ -507,6 +508,19 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-left: 2px solid var(--accent);
   border-top-left-radius: var(--r1);
   box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+
+.msg-content a { color: var(--accent-2); text-decoration: underline; text-underline-offset: 2px; }
+.message.user .msg-content a { color: #fff; }
+.chat-inline-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  width: auto;
+  border-radius: var(--r2);
+  margin: 8px 0;
+  border: 1px solid var(--glass-border);
+  object-fit: contain;
 }
 
 /* ════════════════════════════════════════════════════
@@ -798,6 +812,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   transform: scale(0.94) translateY(16px);
   transition: opacity 220ms ease, transform var(--ease-out);
 }
+.modal--wide { width: 980px; height: 88vh; }
 .modal-overlay.modal-animate-in .modal {
   opacity: 1;
   transform: scale(1) translateY(0);
@@ -833,28 +848,38 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .modal-close:hover { background: rgba(255,255,255,0.06); color: var(--t1); }
 
-/* Tabs */
+/* Settings layout — sidebar nav + scrollable content pane */
+.modal-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
 .modal-tabs {
   display: flex;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--glass-border);
+  flex-direction: column;
   flex-shrink: 0;
+  width: 176px;
+  padding: 14px 10px;
+  border-right: 1px solid var(--glass-border);
+  gap: 2px;
+  overflow-y: auto;
 }
 .tab-btn {
-  padding: 10px 14px;
+  padding: 10px 12px;
   border: none;
+  border-radius: var(--r2);
   background: transparent;
   color: var(--t3);
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
+  text-align: left;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color var(--ease), border-color var(--ease);
+  border-left: 2px solid transparent;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
 }
-.tab-btn:hover  { color: var(--t2); }
-.tab-btn.active { color: var(--t1); border-bottom-color: var(--accent); }
+.tab-btn:hover  { color: var(--t2); background: rgba(255,255,255,0.03); }
+.tab-btn.active { color: var(--t1); background: var(--accent-dim); border-left-color: var(--accent); }
 
 /* Modal body */
 .modal-body {
@@ -864,8 +889,108 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   flex-direction: column;
   gap: 14px;
 }
+.modal-main { flex: 1; min-width: 0; }
 .tab-panel         { display: flex; flex-direction: column; gap: 14px; }
 .tab-panel[hidden] { display: none; }
+
+/* Sub-tabs — secondary pill nav within a tab panel */
+.subtab-bar {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 12px;
+  margin-bottom: 2px;
+}
+.subtab-btn {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--pill);
+  background: rgba(255,255,255,0.03);
+  color: var(--t3);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+.subtab-btn:hover  { color: var(--t2); }
+.subtab-btn.active { color: var(--t1); background: var(--accent-dim); border-color: rgba(91,95,199,0.35); }
+
+.subtab-panel         { display: flex; flex-direction: column; gap: 14px; }
+.subtab-panel[hidden] { display: none; }
+
+/* Rows of related fields side by side, to cut down on vertical scrolling */
+.cfg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+
+/* Advanced / rarely-touched fields, collapsed by default */
+.cfg-advanced {
+  border-top: 1px solid var(--glass-border);
+  padding-top: 10px;
+}
+.cfg-advanced summary {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  cursor: pointer;
+  list-style: none;
+}
+.cfg-advanced summary::-webkit-details-marker { display: none; }
+.cfg-advanced summary::before { content: "▸ "; }
+.cfg-advanced[open] summary::before { content: "▾ "; }
+.cfg-advanced[open] summary { margin-bottom: 10px; }
+
+/* Per-setting help tooltip */
+.cfg-label { display: inline-flex; align-items: center; gap: 6px; }
+.cfg-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--t3);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  position: relative;
+  transition: background var(--ease), color var(--ease);
+}
+.cfg-help:hover, .cfg-help:focus-visible { background: var(--accent); color: #fff; }
+.cfg-help::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 230px;
+  padding: 8px 10px;
+  border-radius: var(--r2);
+  background: #1c1d2a;
+  border: 1px solid var(--glass-border);
+  color: var(--t1);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  z-index: 20;
+}
+.cfg-help:hover::after, .cfg-help:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
 
 .modal-footer {
   display: flex; justify-content: flex-end; align-items: center;
@@ -971,6 +1096,20 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .modal-hint { font-size: 12px; color: var(--t3); line-height: 1.5; margin: 0; }
 .model-search { font-size: 12px; }
 .cfg-key-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.cfg-avatar-row { display: flex; align-items: center; gap: 14px; }
+.cfg-avatar-preview {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--blue-grad);
+  color: #fff;
+  font-size: 16px; font-weight: 700;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.cfg-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+.cfg-avatar-actions { display: flex; gap: 8px; }
 
 /* ════════════════════════════════════════════════════
    BUTTONS

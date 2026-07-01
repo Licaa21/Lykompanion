@@ -11,14 +11,17 @@ router = APIRouter(prefix="/api/config", tags=["config"])
 async def get_config() -> CompanionConfig:
     return CompanionConfig(
         openrouter_model=settings.openrouter_model,
+        openrouter_base_url=settings.openrouter_base_url,
         openrouter_voice_model=settings.openrouter_voice_model,
         memory_extraction_model=settings.memory_extraction_model or None,
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
         game_state_model=settings.game_state_model or None,
+        tesseract_cmd=settings.tesseract_cmd or None,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
         tts_provider=settings.tts_provider,
+        kokoro_base_url=settings.kokoro_base_url,
         kokoro_voice=settings.kokoro_voice,
         openrouter_tts_model=settings.openrouter_tts_model,
         openrouter_voice=settings.openrouter_voice,
@@ -29,9 +32,12 @@ async def get_config() -> CompanionConfig:
         context_window_messages=settings.context_window_messages,
         wake_word_enabled=settings.wake_word_enabled,
         wake_word_phrase=settings.wake_word_phrase,
+        wake_word_max_failures=settings.wake_word_max_failures,
         vad_threshold=settings.vad_threshold,
         vad_silence_ms=settings.vad_silence_ms,
         vad_min_speech_ms=settings.vad_min_speech_ms,
+        pre_roll_ms=settings.pre_roll_ms,
+        post_roll_ms=settings.post_roll_ms,
         screenshot_max_width=settings.screenshot_max_width,
         screenshot_jpeg_quality=settings.screenshot_jpeg_quality,
         igdb_client_id=settings.igdb_client_id,
@@ -46,9 +52,16 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     settings.openrouter_model = config.openrouter_model
     persist_env_value("OPENROUTER_MODEL", config.openrouter_model)
 
+    if config.openrouter_base_url:
+        settings.openrouter_base_url = config.openrouter_base_url
+        persist_env_value("OPENROUTER_BASE_URL", config.openrouter_base_url)
+
     settings.tts_provider = config.tts_provider
     persist_env_value("TTS_PROVIDER", config.tts_provider)
 
+    if config.kokoro_base_url:
+        settings.kokoro_base_url = config.kokoro_base_url
+        persist_env_value("KOKORO_BASE_URL", config.kokoro_base_url)
     if config.kokoro_voice is not None:
         settings.kokoro_voice = config.kokoro_voice
         persist_env_value("KOKORO_VOICE", config.kokoro_voice)
@@ -81,6 +94,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.game_state_model is not None:
         settings.game_state_model = config.game_state_model
         persist_env_value("GAME_STATE_MODEL", config.game_state_model)
+    if config.tesseract_cmd is not None:
+        settings.tesseract_cmd = config.tesseract_cmd
+        persist_env_value("TESSERACT_CMD", config.tesseract_cmd)
     if config.google_tts_api_key:
         settings.google_tts_api_key = config.google_tts_api_key
         persist_env_value("GOOGLE_TTS_API_KEY", config.google_tts_api_key)
@@ -101,6 +117,8 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     persist_env_value("WAKE_WORD_ENABLED", str(config.wake_word_enabled))
     settings.wake_word_phrase = config.wake_word_phrase
     persist_env_value("WAKE_WORD_PHRASE", config.wake_word_phrase)
+    settings.wake_word_max_failures = config.wake_word_max_failures
+    persist_env_value("WAKE_WORD_MAX_FAILURES", str(config.wake_word_max_failures))
 
     settings.vad_threshold = config.vad_threshold
     persist_env_value("VAD_THRESHOLD", str(config.vad_threshold))
@@ -108,6 +126,11 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     persist_env_value("VAD_SILENCE_MS", str(config.vad_silence_ms))
     settings.vad_min_speech_ms = config.vad_min_speech_ms
     persist_env_value("VAD_MIN_SPEECH_MS", str(config.vad_min_speech_ms))
+
+    settings.pre_roll_ms = config.pre_roll_ms
+    persist_env_value("PRE_ROLL_MS", str(config.pre_roll_ms))
+    settings.post_roll_ms = config.post_roll_ms
+    persist_env_value("POST_ROLL_MS", str(config.post_roll_ms))
 
     settings.screenshot_max_width = config.screenshot_max_width
     persist_env_value("SCREENSHOT_MAX_WIDTH", str(config.screenshot_max_width))

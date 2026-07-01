@@ -36,12 +36,15 @@ class TTSRequest(BaseModel):
 
 class CompanionConfig(BaseModel):
     openrouter_model: str
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_voice_model: str | None = None
     memory_extraction_model: str | None = None
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_model: str | None = None
+    tesseract_cmd: str | None = None
     tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"
+    kokoro_base_url: str = "http://localhost:8880/v1"
     kokoro_voice: str | None = None
     openrouter_tts_model: str | None = None
     openrouter_voice: str | None = None
@@ -58,9 +61,12 @@ class CompanionConfig(BaseModel):
     screenshot_max_width: int = 960
     wake_word_enabled: bool = False
     wake_word_phrase: str = "Hey Buddy"
+    wake_word_max_failures: int = 3
     vad_threshold: int = 8
     vad_silence_ms: int = 1200
     vad_min_speech_ms: int = 300
+    pre_roll_ms: int = 1000
+    post_roll_ms: int = 500
     screenshot_jpeg_quality: int = 70
 
     igdb_client_id: str | None = None

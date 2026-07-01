@@ -42,10 +42,15 @@ class Settings(BaseSettings):
 
     wake_word_enabled: bool = False
     wake_word_phrase: str = "Hey Buddy"
+    wake_word_max_failures: int = 3
 
     vad_threshold: int = 8
     vad_silence_ms: int = 3000
     vad_min_speech_ms: int = 300
+    # Padding kept around the detected speech window before finalizing the utterance, so the
+    # first/last word or breath doesn't get clipped.
+    pre_roll_ms: int = 1000
+    post_roll_ms: int = 500
 
     # Screenshot downscaling before sending to the LLM - lower values cut image token cost.
     screenshot_max_width: int = 960
