@@ -88,17 +88,18 @@ def _format_tracker_fields(trackers: list[dict], previous_values: dict[str, str]
     return "Fields to track for this process:\n" + "\n".join(lines) + f"\n\nPrevious values: {previous_text}"
 
 
-async def _run_training_pass(process: str, ocr_text: str) -> None:
+async def _run_training_pass(process: str, ocr_text: str, screenshot_b64: str) -> None:
     """Fire-and-forget: re-examines a low-confidence OCR frame with a vision-capable "trainer"
-    model (a fresh screenshot + the OCR text + the training data document as it stands) and saves
+    model (screenshot + the OCR text + the training data document as it stands) and saves
     its revised document as the new persistent per-process training data, so future extraction
     passes for this game understand its HUD/UI layout without needing another training pass.
+    The screenshot is captured by the caller before the extraction LLM call, so it matches the
+    frames being trained on rather than whatever happens to be on screen when training fires.
     Never raises into the caller - training is best-effort. Always releases the in-flight guard
     for this process, even on failure, so a later low-confidence frame can retry."""
     try:
         current_doc = game_state_training_data.get_training_data(process)
         doc_text = current_doc or "(empty - no training data yet for this process)"
-        screenshot_b64 = capture_monitor_b64()
         messages = [
             {"role": "system", "content": load_prompt("game_state_training")},
             {
@@ -132,7 +133,7 @@ async def _run_training_pass(process: str, ocr_text: str) -> None:
         _training_in_progress.discard(process.lower())
 
 
-def _maybe_start_training_pass(process: str, confidence, ocr_text: str) -> None:
+def _maybe_start_training_pass(process: str, confidence, ocr_text: str, screenshot_b64: str) -> None:
     if not settings.game_state_training_enabled:
         return
     no_training_data = not game_state_training_data.get_training_data(process)
@@ -150,7 +151,7 @@ def _maybe_start_training_pass(process: str, confidence, ocr_text: str) -> None:
     else:
         logger.info("Game-state poll: low confidence (%.2f) for process=%r, starting training pass", confidence, process)
     _training_in_progress.add(process.lower())
-    task = asyncio.create_task(_run_training_pass(process, ocr_text))
+    task = asyncio.create_task(_run_training_pass(process, ocr_text, screenshot_b64))
     _training_tasks.add(task)
     task.add_done_callback(_training_tasks.discard)
 
@@ -160,6 +161,10 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
     frames into structured game state. Fire-and-forget by design (see memory_extraction.
     extract_and_apply_memory for the same pattern) - failures here must never raise into the
     poller loop."""
+    # Capture the screenshot now, before the extraction LLM call, so a training pass that fires
+    # afterwards gets a frame that matches the OCR text being trained on — not whatever happens to
+    # be on screen several seconds later when the training task actually starts.
+    screenshot_b64 = capture_monitor_b64()
     previous = game_state.get_game_state()
     previous_values = (previous or {}).get("values", {})
     trackers = game_state_trackers.get_trackers(process)
@@ -210,7 +215,7 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
         if isinstance(memory_id, str) and memory_id:
             memory_store.remove_memory(memory_id)
 
-    _maybe_start_training_pass(process, data.get("confidence"), frames[-1][1])
+    _maybe_start_training_pass(process, data.get("confidence"), frames[-1][1], screenshot_b64)
 
 
 async def _capture_tick() -> None:
