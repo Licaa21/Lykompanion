@@ -8,14 +8,41 @@ from app.core import debug_log
 from app.core.config import settings
 from app.core.usage import record_usage
 
-client = AsyncOpenAI(
-    api_key=settings.openrouter_api_key or "unset",
-    base_url=settings.openrouter_base_url,
-)
+# Google AI Studio's OpenAI-compatibility endpoint - a Gemini API key + this base_url is all
+# that's needed to reuse the same OpenAI SDK request path as OpenRouter/custom endpoints.
+GOOGLE_AI_STUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # Asks OpenRouter to include actual generation cost (in USD) on the usage object,
-# not just token counts - off by default.
+# not just token counts - off by default, and OpenRouter-specific so only sent to that provider.
 _USAGE_EXTRA_BODY = {"usage": {"include": True}}
+
+
+def _provider_config(provider: str) -> tuple[str, str]:
+    """Returns (api_key, base_url) for a provider name ("openrouter" | "google_ai_studio" |
+    "custom"). Unrecognized/empty values fall back to openrouter, matching existing behavior."""
+    if provider == "google_ai_studio":
+        return settings.google_ai_studio_api_key or "unset", GOOGLE_AI_STUDIO_BASE_URL
+    if provider == "custom":
+        return settings.custom_openai_api_key or "unset", settings.custom_openai_base_url or "https://api.openai.com/v1"
+    return settings.openrouter_api_key or "unset", settings.openrouter_base_url
+
+
+# One AsyncOpenAI instance per (provider, api_key, base_url) triple - saved settings changes
+# (a new key/URL via the config API) transparently get a fresh client on the next call instead
+# of an existing instance silently keeping stale credentials.
+_client_cache: dict[tuple[str, str, str], AsyncOpenAI] = {}
+
+
+def get_client(provider: str) -> AsyncOpenAI:
+    api_key, base_url = _provider_config(provider)
+    cache_key = (provider, api_key, base_url)
+    cached = _client_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    fresh = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    _client_cache.clear()
+    _client_cache[cache_key] = fresh
+    return fresh
 
 
 def _tool_names(tools: list[dict] | None) -> list[str] | None:
@@ -69,17 +96,20 @@ async def chat_completion(
     model: str | None = None,
     response_format: dict | None = None,
     source: str = "unknown",
+    provider: str = "openrouter",
     on_usage: Callable[[float], None] | None = None,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log."""
     resolved_model = model or settings.openrouter_model
+    client = get_client(provider)
+    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
     response = await client.chat.completions.create(
         model=resolved_model,
         messages=messages,
         response_format=response_format,
-        extra_body=_USAGE_EXTRA_BODY,
+        extra_body=extra_body,
     )
     duration_ms = (time.monotonic() - start) * 1000
     content = response.choices[0].message.content or ""
@@ -99,16 +129,18 @@ async def chat_completion(
 
 
 async def chat_completion_stream(
-    messages: list[dict], model: str | None = None, source: str = "unknown"
+    messages: list[dict], model: str | None = None, source: str = "unknown", provider: str = "openrouter"
 ) -> AsyncIterator[str]:
     resolved_model = model or settings.openrouter_model
+    client = get_client(provider)
+    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
     stream = await client.chat.completions.create(
         model=resolved_model,
         messages=messages,
         stream=True,
         stream_options={"include_usage": True},
-        extra_body=_USAGE_EXTRA_BODY,
+        extra_body=extra_body,
     )
     full_text = ""
     usage = None
@@ -134,16 +166,22 @@ async def chat_completion_stream(
 
 
 async def chat_completion_message(
-    messages: list[dict], model: str | None = None, tools: list[dict] | None = None, source: str = "unknown"
+    messages: list[dict],
+    model: str | None = None,
+    tools: list[dict] | None = None,
+    source: str = "unknown",
+    provider: str = "openrouter",
 ):
     """Returns the raw assistant message, which may carry tool_calls instead of (or alongside) content."""
     resolved_model = model or settings.openrouter_model
+    client = get_client(provider)
+    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
     response = await client.chat.completions.create(
         model=resolved_model,
         messages=messages,
         tools=tools,
-        extra_body=_USAGE_EXTRA_BODY,
+        extra_body=extra_body,
     )
     duration_ms = (time.monotonic() - start) * 1000
     message = response.choices[0].message
@@ -161,10 +199,16 @@ async def chat_completion_message(
 
 
 async def stream_chat_completion_deltas(
-    messages: list[dict], model: str | None = None, tools: list[dict] | None = None, source: str = "unknown"
+    messages: list[dict],
+    model: str | None = None,
+    tools: list[dict] | None = None,
+    source: str = "unknown",
+    provider: str = "openrouter",
 ):
     """Yields raw delta objects (not just text) so callers can also observe streamed tool_calls."""
     resolved_model = model or settings.openrouter_model
+    client = get_client(provider)
+    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
     stream = await client.chat.completions.create(
         model=resolved_model,
@@ -172,7 +216,7 @@ async def stream_chat_completion_deltas(
         tools=tools,
         stream=True,
         stream_options={"include_usage": True},
-        extra_body=_USAGE_EXTRA_BODY,
+        extra_body=extra_body,
     )
     full_text = ""
     tool_call_fragments: dict[int, dict] = {}
@@ -205,11 +249,17 @@ async def stream_chat_completion_deltas(
     )
 
 
-async def fetch_account_balance() -> "AccountBalance":
+async def fetch_account_balance(provider: str = "openrouter") -> "AccountBalance":
     from app.models.schemas import AccountBalance
 
+    if provider != "openrouter":
+        # Neither Google AI Studio nor a generic custom OpenAI-compatible endpoint expose a
+        # standard balance/credits API - nothing to fetch, so report unavailable rather than
+        # guessing at a provider-specific endpoint that may not exist.
+        return AccountBalance(available=False, provider=provider, reason="No balance API for this provider")
+
     if not settings.openrouter_management_key:
-        return AccountBalance(available=False, reason="No management key configured")
+        return AccountBalance(available=False, provider=provider, reason="No management key configured")
     try:
         async with httpx.AsyncClient(timeout=10) as http:
             response = await http.get(
@@ -223,21 +273,43 @@ async def fetch_account_balance() -> "AccountBalance":
         remaining = total - used
         return AccountBalance(
             available=True,
+            provider=provider,
             spent_usd=used,
             limit_usd=total,
             remaining_usd=remaining,
         )
     except Exception as exc:
-        return AccountBalance(available=False, reason=str(exc))
+        return AccountBalance(available=False, provider=provider, reason=str(exc))
 
 
-async def list_models() -> list[dict]:
-    """Fetch all models available on OpenRouter, with input/output modality info.
+async def list_models(provider: str = "openrouter") -> list[dict]:
+    """Fetch models available for a provider, with input/output modality info where the provider
+    exposes it.
 
-    OpenRouter's /models endpoint only returns chat-completion-style models by
-    default — dedicated Speech/Transcription-category models (e.g. Kokoro,
-    Voxtral Mini TTS) are omitted unless output_modalities=all is passed.
+    OpenRouter's /models endpoint only returns chat-completion-style models by default -
+    dedicated Speech/Transcription-category models (e.g. Kokoro, Voxtral Mini TTS) are omitted
+    unless output_modalities=all is passed. Other OpenAI-compatible providers (Google AI Studio,
+    a custom endpoint) only expose a bare model id via the standard SDK model-list call, with no
+    modality metadata - callers should not modality-filter those results.
     """
+    if provider != "openrouter":
+        try:
+            response = await get_client(provider).models.list()
+        except Exception:
+            return []
+        return [
+            {
+                "id": m.id,
+                "name": m.id,
+                "context_length": None,
+                "input_modalities": [],
+                "output_modalities": [],
+                "supported_voices": [],
+                "supported_parameters": [],
+            }
+            for m in response.data
+        ]
+
     async with httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=15) as http_client:
         response = await http_client.get("/models", params={"output_modalities": "all"})
         response.raise_for_status()

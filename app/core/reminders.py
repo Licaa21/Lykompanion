@@ -30,12 +30,12 @@ def list_alarms() -> list[dict]:
     return [e for e in load_entries() if e["kind"] == "alarm"]
 
 
-def add_reminder(message_prompt: str, process: str, interval_minutes: int) -> dict:
+def add_reminder(message: str, process: str, interval_minutes: int) -> dict:
     entries = load_entries()
     entry = {
         "id": uuid.uuid4().hex[:8],
         "kind": "reminder",
-        "message_prompt": message_prompt,
+        "message": message,
         "process": process,
         "interval_minutes": interval_minutes,
         "next_fire_at": (_now() + timedelta(minutes=interval_minutes)).isoformat(),
@@ -54,12 +54,12 @@ def remove_reminder(reminder_id: str) -> bool:
     return True
 
 
-def add_alarm(message_prompt: str, process: str, fire_at: str) -> dict:
+def add_alarm(message: str, process: str, fire_at: str) -> dict:
     entries = load_entries()
     entry = {
         "id": uuid.uuid4().hex[:8],
         "kind": "alarm",
-        "message_prompt": message_prompt,
+        "message": message,
         "process": process,
         "fire_at": fire_at,
     }

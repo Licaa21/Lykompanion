@@ -121,9 +121,14 @@
               <span class="cfg-label">Display Name <button type="button" class="cfg-help" data-tip="Your name, shown next to your messages in chat instead of 'You'.">?</button></span>
               <input id="cfg-user-name" type="text" placeholder="You" autocomplete="off" />
             </label>
+            <h3>Provider Credentials</h3>
+            <p class="modal-hint">
+              Set up credentials for whichever providers you use below - each LLM feature (main chat,
+              memory extraction, game-state, training) picks its own provider independently.
+            </p>
             <div class="cfg-key-row">
               <label>
-                <span class="cfg-label">OpenRouter API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests.">?</button></span>
+                <span class="cfg-label">OpenRouter API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests routed through OpenRouter.">?</button></span>
                 <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
               </label>
               <label>
@@ -131,11 +136,50 @@
                 <input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" />
               </label>
             </div>
+            <div class="cfg-key-row">
+              <label>
+                <span class="cfg-label">Google AI Studio API Key <button type="button" class="cfg-help" data-tip="Your Gemini API key from Google AI Studio — used for any feature set to the Google AI Studio provider.">?</button></span>
+                <input id="cfg-google-ai-studio-key" type="password" placeholder="Not set" autocomplete="off" />
+              </label>
+            </div>
+            <div class="cfg-key-row">
+              <label>
+                <span class="cfg-label">Custom Provider Base URL <button type="button" class="cfg-help" data-tip="Base URL of any OpenAI-compatible API (self-hosted, a different aggregator, etc), e.g. https://api.example.com/v1.">?</button></span>
+                <input id="cfg-custom-openai-base-url" type="text" placeholder="https://api.example.com/v1" autocomplete="off" />
+              </label>
+              <label>
+                <span class="cfg-label">Custom Provider API Key <button type="button" class="cfg-help" data-tip="API key for the custom OpenAI-compatible endpoint above.">?</button></span>
+                <input id="cfg-custom-openai-key" type="password" placeholder="Not set" autocomplete="off" />
+              </label>
+            </div>
+
+            <h3>Main Chat</h3>
             <div class="cfg-row">
+              <label>
+                <span class="cfg-label">LLM Provider <button type="button" class="cfg-help" data-tip="Which provider handles the main conversation.">?</button></span>
+                <select id="cfg-llm-provider">
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="google_ai_studio">Google AI Studio</option>
+                  <option value="custom">Custom OpenAI-compatible</option>
+                </select>
+              </label>
               <label>
                 <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply.">?</button></span>
                 <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-model"></select>
+              </label>
+            </div>
+
+            <h3>Memory Extraction</h3>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Provider <button type="button" class="cfg-help" data-tip="Which provider handles the background memory-extraction pass. Leave as 'use main chat provider' to reuse whatever the main chat uses.">?</button></span>
+                <select id="cfg-memory-provider">
+                  <option value="">(use main chat provider)</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="google_ai_studio">Google AI Studio</option>
+                  <option value="custom">Custom OpenAI-compatible</option>
+                </select>
               </label>
               <label>
                 <span class="cfg-label">Memory Extraction Model <button type="button" class="cfg-help" data-tip="Model used for the background task that extracts memorable facts from your conversations. Leave blank to reuse the main chat model.">?</button></span>
@@ -339,9 +383,29 @@
               </div>
               <div class="cfg-row">
                 <label>
+                  <span class="cfg-label">Game-State Provider <button type="button" class="cfg-help" data-tip="Which provider handles the game-state extraction pass. Leave as 'use main chat provider' to reuse whatever the main chat uses.">?</button></span>
+                  <select id="cfg-game-state-provider">
+                    <option value="">(use main chat provider)</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="google_ai_studio">Google AI Studio</option>
+                    <option value="custom">Custom OpenAI-compatible</option>
+                  </select>
+                </label>
+                <label>
                   <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Model used to interpret OCR text into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
                   <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
                   <select id="cfg-game-state-model"></select>
+                </label>
+              </div>
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Training Provider <button type="button" class="cfg-help" data-tip="Which provider handles the game-state training pass. Leave as 'use main chat provider' to reuse whatever the main chat uses.">?</button></span>
+                  <select id="cfg-game-state-training-provider">
+                    <option value="">(use main chat provider)</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="google_ai_studio">Google AI Studio</option>
+                    <option value="custom">Custom OpenAI-compatible</option>
+                  </select>
                 </label>
                 <label>
                   <span class="cfg-label">Training Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to re-interpret low-confidence OCR frames for the game-state training pass. Leave blank to reuse the main chat model.">?</button></span>
@@ -513,18 +577,20 @@
 
           <section class="tab-panel" data-tab="reminders" hidden>
             <p class="modal-hint">
-              Recurring nudges the companion set up during conversation - each fires with a fresh spoken
-              message every N minutes while its game is the one being played, and pauses automatically
-              otherwise. Set these by asking your companion, e.g. "remind me to save every 5 minutes".
+              Recurring nudges the companion set up during conversation - each repeats the exact message
+              it composed when you set it up, spoken every N minutes while its game is the one being
+              played, and pausing automatically otherwise. Set these by asking your companion, e.g.
+              "remind me to save every 5 minutes".
             </p>
             <div id="reminder-list" class="memory-list"></div>
           </section>
 
           <section class="tab-panel" data-tab="alarms" hidden>
             <p class="modal-hint">
-              One-time nudges the companion set up during conversation - each fires once, at a specific
-              time, while its game is the one being played. Set these by asking your companion, e.g. "in
-              20 minutes remind me to check the auction house".
+              One-time nudges the companion set up during conversation - each speaks the exact message it
+              composed when you set it up, once, at a specific time while its game is the one being
+              played. Set these by asking your companion, e.g. "in 20 minutes remind me to check the
+              auction house".
             </p>
             <div id="alarm-list" class="memory-list"></div>
           </section>
@@ -550,10 +616,7 @@
 
           <section class="tab-panel" data-tab="usage">
             <p class="modal-hint">Usage across all conversations, broken down by feature and time range.</p>
-            <div id="usage-balance-row" class="usage-balance-row" hidden>
-              <span class="usage-balance-label">OpenRouter balance</span>
-              <span id="usage-balance-value" class="usage-balance-value">—</span>
-            </div>
+            <div id="usage-balance-list"></div>
             <div id="usage-range-pills" class="memory-filters"></div>
             <div id="usage-custom-range" class="usage-custom-range" hidden>
               <label>

@@ -3,7 +3,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.core.config import settings
-from app.services.llm.client import client
+from app.services.llm.client import get_client
 
 WEB_SEARCH_TOOLS = [
     {
@@ -87,7 +87,7 @@ async def execute_web_search(arguments: dict) -> str:
         return await _execute_web_search_searxng(query)
 
     try:
-        response = await client.chat.completions.create(
+        response = await get_client("openrouter").chat.completions.create(
             model=settings.openrouter_model,
             messages=[
                 {

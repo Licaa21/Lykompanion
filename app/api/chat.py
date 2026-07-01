@@ -191,7 +191,9 @@ async def _run_chat_with_tools(messages: list[dict], model: str | None = None, s
     happened this turn, so non-streaming callers can react to it too."""
     stop_listening = False
     for _ in range(MAX_TOOL_ITERATIONS):
-        message = await chat_completion_message(messages, model=model, tools=ALL_TOOLS, source=source)
+        message = await chat_completion_message(
+            messages, model=model, tools=ALL_TOOLS, source=source, provider=settings.llm_provider
+        )
         if not message.tool_calls:
             return message.content or "", stop_listening
 
@@ -213,7 +215,9 @@ async def _stream_chat_with_tools(
     for _ in range(MAX_TOOL_ITERATIONS):
         tool_calls: dict[int, dict] = {}
 
-        async for delta in stream_chat_completion_deltas(messages, model=model, tools=ALL_TOOLS, source=source):
+        async for delta in stream_chat_completion_deltas(
+            messages, model=model, tools=ALL_TOOLS, source=source, provider=settings.llm_provider
+        ):
             if delta.content:
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
@@ -337,7 +341,7 @@ async def chat_title(request: ChatTitleRequest) -> ChatTitleResponse:
     ]
 
     try:
-        title = await chat_completion(messages, source="chat_title")
+        title = await chat_completion(messages, source="chat_title", provider=settings.llm_provider)
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Title generation failed: {exc}") from exc
 

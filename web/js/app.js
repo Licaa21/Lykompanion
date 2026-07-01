@@ -1586,8 +1586,9 @@ function sortByLabel(options) {
 // boxes can re-filter without needing to re-fetch from the backend.
 const modelOptionsCache = {
   llm: [],
-  llmText: [],
-  llmVision: [],
+  memoryModel: [],
+  gameStateModel: [],
+  gameStateTrainingModel: [],
   kokoroVoice: [],
   openrouterTts: [],
   chirp3Voice: [],
@@ -1626,21 +1627,88 @@ function setupModelSearch(searchInputId, selectId, cacheKey, pinnedOption) {
 }
 
 setupModelSearch("cfg-model-search", "cfg-model", "llm");
-setupModelSearch("cfg-memory-model-search", "cfg-memory-model", "llmText", {
+setupModelSearch("cfg-memory-model-search", "cfg-memory-model", "memoryModel", {
   value: "",
   label: "(use main chat model)",
 });
-setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "llmText", {
+setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "gameStateModel", {
   value: "",
   label: "(use main chat model)",
 });
-setupModelSearch("cfg-game-state-training-model-search", "cfg-game-state-training-model", "llmVision", {
+setupModelSearch("cfg-game-state-training-model-search", "cfg-game-state-training-model", "gameStateTrainingModel", {
   value: "",
   label: "(use main chat model)",
 });
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
 setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
 setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", "openrouterTts");
+
+// Each LLM feature (main chat, memory extraction, game-state, training) picks its own provider
+// independently - an empty feature provider select means "inherit the main chat provider."
+const PROVIDER_FEATURES = {
+  llm: { endpoint: "/api/models/llm", cacheKey: "llm", providerSelectId: "cfg-llm-provider", selectId: "cfg-model", pinned: null },
+  memory: {
+    endpoint: "/api/models/llm/text",
+    cacheKey: "memoryModel",
+    providerSelectId: "cfg-memory-provider",
+    selectId: "cfg-memory-model",
+    pinned: { value: "", label: "(use main chat model)" },
+  },
+  gameState: {
+    endpoint: "/api/models/llm/text",
+    cacheKey: "gameStateModel",
+    providerSelectId: "cfg-game-state-provider",
+    selectId: "cfg-game-state-model",
+    pinned: { value: "", label: "(use main chat model)" },
+  },
+  gameStateTraining: {
+    endpoint: "/api/models/llm/vision",
+    cacheKey: "gameStateTrainingModel",
+    providerSelectId: "cfg-game-state-training-provider",
+    selectId: "cfg-game-state-training-model",
+    pinned: { value: "", label: "(use main chat model)" },
+  },
+};
+
+function effectiveProvider(providerSelectId) {
+  const value = document.getElementById(providerSelectId).value;
+  if (providerSelectId === "cfg-llm-provider") return value || "openrouter";
+  return value || document.getElementById("cfg-llm-provider").value || "openrouter";
+}
+
+async function reloadModelSelect(featureKey, selectedValue) {
+  const spec = PROVIDER_FEATURES[featureKey];
+  const selectEl = document.getElementById(spec.selectId);
+  const currentValue = selectedValue !== undefined ? selectedValue : selectEl.value;
+  const provider = effectiveProvider(spec.providerSelectId);
+
+  let models = [];
+  try {
+    const response = await fetch(`${spec.endpoint}?provider=${encodeURIComponent(provider)}`);
+    if (response.ok) models = await response.json();
+  } catch (err) {
+    models = [];
+  }
+
+  modelOptionsCache[spec.cacheKey] = sortByLabel(models.map((m) => ({ value: m.id, label: m.name })));
+  populateSelect(
+    selectEl,
+    spec.pinned ? [spec.pinned, ...modelOptionsCache[spec.cacheKey]] : modelOptionsCache[spec.cacheKey],
+    currentValue
+  );
+}
+
+for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
+  document.getElementById(PROVIDER_FEATURES[featureKey].providerSelectId).addEventListener("change", () => {
+    reloadModelSelect(featureKey);
+    // Main chat provider changing also affects any feature currently inheriting it.
+    if (featureKey === "llm") {
+      for (const other of ["memory", "gameState", "gameStateTraining"]) {
+        if (!document.getElementById(PROVIDER_FEATURES[other].providerSelectId).value) reloadModelSelect(other);
+      }
+    }
+  });
+}
 
 async function loadModels(
   selectedLlm,
@@ -1652,11 +1720,12 @@ async function loadModels(
   selectedGameStateModel,
   selectedGameStateTrainingModel
 ) {
-  const [llmModels, llmTextModels, llmVisionModels, ttsModels] = await Promise.all([
-    fetch("/api/models/llm").then((r) => r.json()),
-    fetch("/api/models/llm/text").then((r) => r.json()),
-    fetch("/api/models/llm/vision").then((r) => r.json()),
+  const [ttsModels] = await Promise.all([
     fetch("/api/models/tts").then((r) => r.json()),
+    reloadModelSelect("llm", selectedLlm),
+    reloadModelSelect("memory", selectedMemoryModel),
+    reloadModelSelect("gameState", selectedGameStateModel),
+    reloadModelSelect("gameStateTraining", selectedGameStateTrainingModel),
   ]);
 
   const speechModels = ttsModels.openrouter_speech_models || [];
@@ -1665,31 +1734,12 @@ async function loadModels(
     openrouterSpeechModelsById[m.id] = m;
   }
 
-  modelOptionsCache.llm = sortByLabel(llmModels.map((m) => ({ value: m.id, label: m.name })));
-  modelOptionsCache.llmText = sortByLabel(llmTextModels.map((m) => ({ value: m.id, label: m.name })));
-  modelOptionsCache.llmVision = sortByLabel(llmVisionModels.map((m) => ({ value: m.id, label: m.name })));
   modelOptionsCache.kokoroVoice = sortByLabel(
     (ttsModels.kokoro_voices || []).map((v) => ({ value: v.id, label: v.name }))
   );
   modelOptionsCache.openrouterTts = sortByLabel(speechModels.map((m) => ({ value: m.id, label: m.name })));
   modelOptionsCache.chirp3Voice = sortByLabel((ttsModels.chirp3_voices || []).map((v) => ({ value: v.id, label: v.name })));
 
-  populateSelect(document.getElementById("cfg-model"), modelOptionsCache.llm, selectedLlm);
-  populateSelect(
-    document.getElementById("cfg-memory-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmText],
-    selectedMemoryModel
-  );
-  populateSelect(
-    document.getElementById("cfg-game-state-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmText],
-    selectedGameStateModel
-  );
-  populateSelect(
-    document.getElementById("cfg-game-state-training-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmVision],
-    selectedGameStateTrainingModel
-  );
   populateSelect(document.getElementById("cfg-kokoro-voice"), modelOptionsCache.kokoroVoice, selectedKokoroVoice);
   populateSelect(document.getElementById("cfg-chirp3-voice"), modelOptionsCache.chirp3Voice, selectedChirp3Voice);
   populateSelect(
@@ -1896,6 +1946,17 @@ function applyConfigToForm(cfg) {
   document.getElementById("cfg-management-key").placeholder = cfg.openrouter_management_key_set
     ? "•••••••• (set)"
     : "Not set";
+  document.getElementById("cfg-google-ai-studio-key").placeholder = cfg.google_ai_studio_api_key_set
+    ? "•••••••• (set)"
+    : "Not set";
+  document.getElementById("cfg-custom-openai-base-url").value = cfg.custom_openai_base_url || "";
+  document.getElementById("cfg-custom-openai-key").placeholder = cfg.custom_openai_api_key_set
+    ? "•••••••• (set)"
+    : "Not set";
+  document.getElementById("cfg-llm-provider").value = cfg.llm_provider || "openrouter";
+  document.getElementById("cfg-memory-provider").value = cfg.memory_extraction_provider || "";
+  document.getElementById("cfg-game-state-provider").value = cfg.game_state_provider || "";
+  document.getElementById("cfg-game-state-training-provider").value = cfg.game_state_training_provider || "";
 
   narrationSpeed = cfg.narration_speed;
   narrationSpeedInput.value = cfg.narration_speed;
@@ -2001,6 +2062,13 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     user_display_name: userNameInput.value.trim() || "You",
     openrouter_model: document.getElementById("cfg-model").value,
     openrouter_base_url: document.getElementById("cfg-openrouter-base-url").value.trim() || "https://openrouter.ai/api/v1",
+    llm_provider: document.getElementById("cfg-llm-provider").value,
+    memory_extraction_provider: document.getElementById("cfg-memory-provider").value,
+    game_state_provider: document.getElementById("cfg-game-state-provider").value,
+    game_state_training_provider: document.getElementById("cfg-game-state-training-provider").value,
+    google_ai_studio_api_key: document.getElementById("cfg-google-ai-studio-key").value || null,
+    custom_openai_base_url: document.getElementById("cfg-custom-openai-base-url").value.trim(),
+    custom_openai_api_key: document.getElementById("cfg-custom-openai-key").value || null,
     memory_extraction_model: document.getElementById("cfg-memory-model").value,
     web_search_provider: document.getElementById("cfg-web-search-provider").value,
     searxng_base_url: document.getElementById("cfg-searxng-base-url").value.trim() || "http://localhost:8080",
@@ -2046,6 +2114,8 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
   const updatedCfg = await response.json();
   apiKeyInput.value = "";
   document.getElementById("cfg-management-key").value = "";
+  document.getElementById("cfg-google-ai-studio-key").value = "";
+  document.getElementById("cfg-custom-openai-key").value = "";
   igdbSecretInput.value = "";
   steamApiKeyInput.value = "";
   applyConfigToForm(updatedCfg);
@@ -2294,7 +2364,7 @@ function renderScheduleList(container, entries, { subtitle, onDelete }) {
 
     const text = document.createElement("div");
     text.className = "memory-item-text";
-    text.textContent = entry.message_prompt;
+    text.textContent = entry.message;
 
     const tag = document.createElement("div");
     tag.className = "memory-item-tag";
@@ -3033,20 +3103,41 @@ function renderUsageStats() {
 usageRangeStartInput.addEventListener("change", renderUsageStats);
 usageRangeEndInput.addEventListener("change", renderUsageStats);
 
-const usageBalanceRow = document.getElementById("usage-balance-row");
-const usageBalanceValue = document.getElementById("usage-balance-value");
+const usageBalanceListEl = document.getElementById("usage-balance-list");
 
+const PROVIDER_LABELS = {
+  openrouter: "OpenRouter",
+  google_ai_studio: "Google AI Studio",
+  custom: "Custom provider",
+};
+
+// Only OpenRouter exposes a real balance/credits API right now - Google AI Studio and custom
+// endpoints are fetched too (in case that changes) but silently omitted whenever unavailable,
+// same as today's single-provider behavior.
 async function fetchAndRenderBalance() {
-  usageBalanceRow.hidden = true;
-  const data = await fetch("/api/usage/balance").then((r) => r.json());
-  if (!data.available) return;
-  usageBalanceRow.hidden = false;
-  if (data.limit_usd !== null && data.limit_usd !== undefined) {
-    const remaining = data.remaining_usd ?? 0;
-    usageBalanceValue.textContent = `$${remaining.toFixed(4)} remaining of $${data.limit_usd.toFixed(2)} ($${data.spent_usd.toFixed(4)} spent)`;
-  } else {
-    const label = data.is_free_tier ? " (free tier)" : "";
-    usageBalanceValue.textContent = `$${data.spent_usd.toFixed(4)} spent${label} · no credit limit set`;
+  usageBalanceListEl.innerHTML = "";
+  const balances = await fetch("/api/usage/balance").then((r) => r.json());
+  for (const data of balances) {
+    const row = document.createElement("div");
+    row.className = "usage-balance-row";
+
+    const label = document.createElement("span");
+    label.className = "usage-balance-label";
+    label.textContent = `${PROVIDER_LABELS[data.provider] || data.provider} balance`;
+    row.appendChild(label);
+
+    const value = document.createElement("span");
+    value.className = "usage-balance-value";
+    if (data.limit_usd !== null && data.limit_usd !== undefined) {
+      const remaining = data.remaining_usd ?? 0;
+      value.textContent = `$${remaining.toFixed(4)} remaining of $${data.limit_usd.toFixed(2)} ($${data.spent_usd.toFixed(4)} spent)`;
+    } else {
+      const tierLabel = data.is_free_tier ? " (free tier)" : "";
+      value.textContent = `$${data.spent_usd.toFixed(4)} spent${tierLabel} · no credit limit set`;
+    }
+    row.appendChild(value);
+
+    usageBalanceListEl.appendChild(row);
   }
 }
 

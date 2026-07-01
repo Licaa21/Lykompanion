@@ -38,6 +38,15 @@ class CompanionConfig(BaseModel):
     user_display_name: str = "You"
     openrouter_model: str
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    llm_provider: str = "openrouter"
+    memory_extraction_provider: str = ""
+    game_state_provider: str = ""
+    game_state_training_provider: str = ""
+    google_ai_studio_api_key: str | None = None
+    google_ai_studio_api_key_set: bool = False
+    custom_openai_base_url: str = ""
+    custom_openai_api_key: str | None = None
+    custom_openai_api_key_set: bool = False
     memory_extraction_model: str | None = None
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
@@ -129,6 +138,7 @@ class ChatHistorySaveRequest(BaseModel):
 
 
 class AccountBalance(BaseModel):
+    provider: str = "openrouter"
     available: bool
     spent_usd: float | None = None
     limit_usd: float | None = None
@@ -159,7 +169,7 @@ class MemoryUpdate(BaseModel):
 
 class ReminderEntry(BaseModel):
     id: str
-    message_prompt: str
+    message: str
     process: str
     interval_minutes: int
     next_fire_at: str
@@ -167,7 +177,7 @@ class ReminderEntry(BaseModel):
 
 class AlarmEntry(BaseModel):
     id: str
-    message_prompt: str
+    message: str
     process: str
     fire_at: str
 
