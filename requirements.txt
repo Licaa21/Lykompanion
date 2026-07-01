@@ -26,3 +26,8 @@ winrt-Windows.Foundation
 
 # Optional: required only for Chirp 3 HD Voices (Google Cloud TTS).
 # google-auth[requests]
+
+# Per-application volume control (Windows Core Audio session API) - lets the companion turn a
+# specific app/game up or down in the Windows volume mixer, separate from its own narration volume.
+pycaw
+

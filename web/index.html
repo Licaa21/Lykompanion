@@ -465,6 +465,8 @@
         <nav class="modal-tabs">
           <button type="button" class="tab-btn active" data-tab="instructions">Instructions</button>
           <button type="button" class="tab-btn" data-tab="memory">Memory</button>
+          <button type="button" class="tab-btn" data-tab="reminders">Reminders</button>
+          <button type="button" class="tab-btn" data-tab="alarms">Alarms</button>
         </nav>
         <div class="modal-main modal-body">
 
@@ -507,6 +509,24 @@
                 <button type="submit" class="secondary-btn">Add</button>
               </div>
             </form>
+          </section>
+
+          <section class="tab-panel" data-tab="reminders" hidden>
+            <p class="modal-hint">
+              Recurring nudges the companion set up during conversation - each fires with a fresh spoken
+              message every N minutes while its game is the one being played, and pauses automatically
+              otherwise. Set these by asking your companion, e.g. "remind me to save every 5 minutes".
+            </p>
+            <div id="reminder-list" class="memory-list"></div>
+          </section>
+
+          <section class="tab-panel" data-tab="alarms" hidden>
+            <p class="modal-hint">
+              One-time nudges the companion set up during conversation - each fires once, at a specific
+              time, while its game is the one being played. Set these by asking your companion, e.g. "in
+              20 minutes remind me to check the auction house".
+            </p>
+            <div id="alarm-list" class="memory-list"></div>
           </section>
 
         </div>

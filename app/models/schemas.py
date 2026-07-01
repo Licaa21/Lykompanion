@@ -157,6 +157,26 @@ class MemoryUpdate(BaseModel):
     process: str | None = None
 
 
+class ReminderEntry(BaseModel):
+    id: str
+    message_prompt: str
+    process: str
+    interval_minutes: int
+    next_fire_at: str
+
+
+class AlarmEntry(BaseModel):
+    id: str
+    message_prompt: str
+    process: str
+    fire_at: str
+
+
+class PendingNotification(BaseModel):
+    id: str
+    text: str
+
+
 class UsageRecord(BaseModel):
     timestamp: str
     source: str

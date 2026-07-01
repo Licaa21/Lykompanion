@@ -18,10 +18,12 @@ from app.services.llm.client import (
     chat_completion_message,
     stream_chat_completion_deltas,
 )
+from app.services.llm.app_volume_tool import APP_VOLUME_TOOLS, execute_set_application_volume
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
 from app.services.llm.memory_extraction import extract_and_apply_memory
 from app.services.llm.process_tool import PROCESS_TOOLS, execute_fetch_active_process
+from app.services.llm.reminder_tool import REMINDER_TOOLS, execute_reminder_tool
 from app.services.llm.screenshot_tool import SCREENSHOT_TOOLS, execute_take_screenshot, format_monitors_for_prompt
 from app.services.llm.steam_tool import STEAM_TOOLS, execute_fetch_steam_library, execute_lookup_steam_game
 from app.services.llm.system_info_tool import SYSTEM_INFO_TOOLS, execute_fetch_system_info
@@ -43,7 +45,11 @@ ALL_TOOLS = (
     + IGDB_TOOLS
     + STEAM_TOOLS
     + SYSTEM_INFO_TOOLS
+    + REMINDER_TOOLS
+    + APP_VOLUME_TOOLS
 )
+
+REMINDER_TOOL_NAMES = {"add_reminder", "remove_reminder", "add_alarm", "cancel_alarm"}
 MAX_TOOL_ITERATIONS = 8
 
 
@@ -140,6 +146,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
     if name == "stop_listening":
         message = execute_stop_listening(arguments)
         return message, None, {"type": "stop_listening"}
+    if name == "set_application_volume":
+        return execute_set_application_volume(arguments), None, None
     if name == "fetch_active_process":
         return execute_fetch_active_process(arguments), None, None
     if name == "web_search":
@@ -152,6 +160,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return await execute_fetch_steam_library(arguments), None, None
     if name == "fetch_system_info":
         return execute_fetch_system_info(arguments), None, None
+    if name in REMINDER_TOOL_NAMES:
+        return execute_reminder_tool(name, arguments), None, None
     return execute_tool_call(name, arguments), None, None
 
 
