@@ -44,7 +44,7 @@ A typical turn looks like:
 
 - **Hands-free voice loop** — a live mic mode using voice-activity detection (with pre-roll buffering so the first word isn't clipped) automatically records your utterance and sends it, no push-to-talk needed. Narration is interrupted ("barge-in") if you start talking over it.
 - **Wake word** — once hands-free is off (manually, or because the agent stopped it), say a configurable phrase (default "Hey Buddy") to turn it back on without touching the keyboard/mouse. Runs entirely in-browser via the Web Speech API.
-- **Streaming spoken replies** — text streams in and is narrated sentence-by-sentence as it's generated, not after the full reply finishes.
+- **Streaming spoken replies** — text streams in and is narrated sentence-by-sentence as it's generated, not after the full reply finishes. Voice-mode replies stream identically to text replies — the transcript appears word-by-word in the chat log as the model speaks it.
 - **Persistent memory with three scopes** — the agent proactively saves and forgets facts about you across sessions without being asked. Facts are tagged at three granularities: **user** (your name, preferences — always visible), **game** (applies to all runs of a specific game — e.g. preferred class), or **session** (specific to the current playthrough — character level, quest progress, decisions). A dedicated background LLM pass also analyzes every exchange for things worth remembering. Memory is viewable/editable/removable directly in the UI.
 - **Named game sessions** — each time you start a game, a session is created. You can name sessions ("first playthrough", "NG+"), switch between them, and create new ones — all inline in the floating Game State panel. Facts saved during a session are scoped to it, so starting a new run doesn't pollute the context with the last one's progress.
 - **Crash/rollback recovery** — if the companion notices a stat regression (health dropped, level went down), it brings it up naturally in conversation. Once you confirm you loaded an older save or the game crashed, the agent can roll back the memories it saved during the lost window so they don't contradict your actual current state.
@@ -53,7 +53,7 @@ A typical turn looks like:
 - **Passive game-state awareness** *(opt-in, Windows-only, off by default)* — periodically OCRs your screen in the background and keeps a live snapshot of your current quest/location/character, injected into every conversation automatically. New/unfamiliar processes require explicit one-time approval through the notification center before anything gets read. See [Passive game-state awareness](#passive-game-state-awareness).
 - **Web search & game databases** — web search via OpenRouter's plugin or a self-hosted [SearXNG](https://github.com/searxng/searxng) instance, IGDB (structured game data), and Steam (store info + your own library/playtime) are all available as agent tools.
 - **Profile pictures & display name** — set your own name (shown on your messages in the sidebar) and an avatar image for yourself and the companion, uploaded via Settings.
-- **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), wake word, live-mic sensitivity, screenshot quality, all from a Settings UI, persisted to `.env`.
+- **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), wake word, live-mic sensitivity, screenshot quality, all from a Settings UI, persisted to `.env`. All API credentials live in a single dedicated **API Keys** tab with ✕ clear buttons so stored server-side keys can be wiped without re-entering them.
 - **Cost tracking & debugging** — per-call usage records (tokens, cost, which feature triggered it) with time-range filtering and a per-feature breakdown, optional OpenRouter account balance display, and a Debug panel showing the last 10 raw LLM requests/responses for troubleshooting.
 - **Multiple chat sessions** — sidebar with per-chat history, auto-titled by the LLM after the first exchange. Persisted server-side (survives clearing browser data), along with replayable voice message recordings.
 - **Native desktop app** — `RUN.cmd` launches Lykompanion in its own window (via `pywebview`/EdgeWebView2) instead of a browser tab, with the server running invisibly underneath. See [Native desktop app](#native-desktop-app).
@@ -101,9 +101,14 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `USER_DISPLAY_NAME` | Your name as shown on your chat messages. Default `"You"`. |
 | `WEB_SEARCH_PROVIDER` | `openrouter` (default, billed via OpenRouter) or `searxng` (self-hosted, free). |
 | `SEARXNG_BASE_URL` | Base URL of a running SearXNG instance when `WEB_SEARCH_PROVIDER=searxng`. Default `http://localhost:8080`. |
-| `TTS_PROVIDER` | `kokoro` (local) or `openrouter` (cloud Speech models). |
+| `TTS_PROVIDER` | `kokoro` (local), `openrouter` (cloud Speech models), or `chirp3` (Google Cloud Text-to-Speech Chirp 3 HD). |
 | `KOKORO_BASE_URL` | Where your local Kokoro server is running. |
 | `KOKORO_VOICE`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_VOICE` | TTS voice selection per provider. |
+| `GOOGLE_TTS_API_KEY` | Optional. Google Cloud API key for Chirp 3 HD. Leave blank to use Application Default Credentials (`gcloud auth application-default login`) instead — ADC works as long as you run that command once and the Cloud Text-to-Speech API is enabled for your project. |
+| `GOOGLE_TTS_VOICE` | Chirp 3 HD voice name, e.g. `en-US-Chirp3-HD-Aoede`. Voice list populates in Settings → Voice & Narration once credentials are valid. |
+| `GOOGLE_AI_STUDIO_API_KEY` | Optional. Gemini API key from Google AI Studio — used for any LLM feature (main chat, memory extraction, game-state, training) set to the Google AI Studio provider. |
+| `CUSTOM_OPENAI_BASE_URL` | Base URL of any OpenAI-compatible API (self-hosted model, alternative aggregator). |
+| `CUSTOM_OPENAI_API_KEY` | API key for the custom provider above. |
 | `TTS_SPEED`, `TTS_VOLUME` | Narration speed/volume (the agent can also change these itself mid-conversation). |
 | `CONTEXT_WINDOW_MESSAGES` | How many of the most recent messages to send as context. `0` = unlimited. |
 | `WAKE_WORD_ENABLED`, `WAKE_WORD_PHRASE` | Enables the wake phrase (default `false`) and what to listen for (default `"Hey Buddy"`). |
@@ -121,6 +126,16 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 
 No API key is needed for web search — it goes through OpenRouter's own `web` plugin, billed via your existing OpenRouter account.
 
+### Setting up Chirp 3 HD
+
+Chirp 3 HD is Google Cloud Text-to-Speech — the highest quality TTS option. To enable it:
+
+1. Log in with `gcloud auth application-default login` (install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) first if needed).
+2. Enable the Cloud Text-to-Speech API for your project: visit the activation URL shown in Settings after clicking Refresh Model Lists, or go to Google Cloud Console → APIs & Services → Library and search "Text-to-Speech".
+3. In Settings → TTS Provider, choose **Chirp 3 HD (Google)** and click **Refresh Model Lists** — the voice dropdown will populate.
+
+Alternatively, skip `gcloud` entirely by creating an API key in Google Cloud Console (APIs & Services → Credentials) and pasting it into Settings → API Keys → Cloud TTS Key.
+
 ## Project structure
 
 ```
@@ -132,7 +147,7 @@ app/
   prompts/              System/task prompt templates (Markdown, loaded at runtime)
   services/
     llm/                OpenRouter client + one module per agent tool, plus the memory/game-state background extraction passes
-    tts/                 Kokoro / OpenRouter TTS backends
+    tts/                 Kokoro / OpenRouter / Chirp 3 HD (Google Cloud TTS) backends
     screenshot/          Multi-monitor capture (mss/GDI for on-demand vision screenshots, Windows Graphics Capture for the game-state poller)
     ocr/                 Windows OCR (Windows.Media.Ocr) wrapper, used by passive game-state awareness
     system/              Process/system-info lookups
@@ -204,6 +219,8 @@ Once hands-free is off, optionally say the configured **wake word** (Settings �
 
 Replies are split into sentences as they stream in, and each sentence is sent to TTS and queued for playback as soon as it's ready — synthesis for the next sentence starts immediately on enqueue, overlapping with current playback, rather than waiting for the full reply before saying anything.
 
+Three TTS backends are supported: **Kokoro** (local, free, fast — needs the Kokoro-FastAPI server running separately), **OpenRouter Speech** (any Speech-category model on OpenRouter, billed per character), and **Chirp 3 HD** (Google Cloud Text-to-Speech — highest quality, requires a Google Cloud project with the TTS API enabled and either an API key or ADC credentials). All three use the same sentence-streaming pipeline.
+
 ### Native desktop app
 
 `run_app.py` starts the FastAPI server in a background thread, waits for it to come up, then opens it in a native `pywebview` window (EdgeWebView2 on Windows 11) instead of a browser tab — `RUN.cmd` runs this by default. It also: pre-seeds the WebView2 profile so microphone permission and download behavior (auto-save to your real Downloads folder, no Save-As dialog) work from the very first launch without any manual prompts, disables dev-tools/right-click to keep it feeling like a real app rather than an obviously embedded browser, and exposes a small JS-callable API so voice-message downloads are copied directly by Python rather than going through WebView2's flakier download handling.
@@ -222,7 +239,9 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 |---|---|
 | `POST /api/chat` | Non-streaming chat completion (tool loop included). |
 | `POST /api/chat/stream` | Streaming chat completion (SSE) — primary path used by the UI. |
-| `POST /api/chat/voice` | Send raw audio directly to an audio-capable model (no local STT). |
+| `POST /api/chat/voice` | Send raw audio directly to an audio-capable model (no local STT). Non-streaming; returns full reply JSON. |
+| `POST /api/chat/voice/stream` | Streaming (SSE) voice chat — same as `/voice` but streams `delta`/`stop_listening`/`done` events; used by the UI so the voice-reply transcript appears live. |
+| `GET /api/proxy/image` | Server-side image proxy (`?url=...`). Fetches external images with browser-like headers to bypass hotlink protection — all SearXNG image results are routed through this. |
 | `POST /api/chat/title` | Generate a short chat title from the first exchange. |
 | `GET/PUT /api/config` | Read/update all settings. |
 | `GET/POST /api/memory`, `PUT/DELETE /api/memory/{id}` | Memory CRUD. |
