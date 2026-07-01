@@ -13,9 +13,16 @@ websockets
 # Desktop launcher (run_app.py) — native app window via OS WebView (EdgeWebView2 on Windows 11).
 pywebview
 
-# Passive game-state OCR. Also requires the Tesseract OCR engine binary installed separately
-# (https://github.com/UB-Mannheim/tesseract/wiki on Windows) - pip only installs the Python wrapper.
-pytesseract
+# Passive game-state OCR: GPU-based capture via the Windows Graphics Capture API (avoids the
+# desktop-compositor stalls that GDI/BitBlt capture - what "mss" uses - causes in games) and
+# text recognition via the built-in Windows OCR engine (Windows.Media.Ocr) - no external OCR
+# binary to install separately, unlike the old Tesseract-based approach.
+windows-capture
+winrt-runtime
+winrt-Windows.Media.Ocr
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Storage.Streams
+winrt-Windows.Foundation
 
 # Optional: required only for Chirp 3 HD Voices (Google Cloud TTS).
 # google-auth[requests]

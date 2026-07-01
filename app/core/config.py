@@ -6,13 +6,22 @@ ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 def persist_env_value(key: str, value: str) -> None:
-    """Write a KEY=value pair into the .env file, updating it in place if already present."""
+    """Write a single KEY=value pair into the .env file. For multiple keys, prefer
+    persist_env_values to avoid a read/write round-trip per key."""
+    persist_env_values({key: value})
+
+
+def persist_env_values(values: dict[str, str]) -> None:
+    """Write multiple KEY=value pairs into the .env file in a single read/write pass."""
     lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
+    remaining = dict(values)
     for i, line in enumerate(lines):
-        if line.startswith(f"{key}="):
-            lines[i] = f"{key}={value}"
-            break
-    else:
+        for key, value in list(remaining.items()):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}"
+                del remaining[key]
+                break
+    for key, value in remaining.items():
         lines.append(f"{key}={value}")
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -27,7 +36,6 @@ class Settings(BaseSettings):
     openrouter_management_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "anthropic/claude-3.5-sonnet"
-    openrouter_voice_model: str = ""
 
     tts_provider: str = "kokoro"
     kokoro_base_url: str = "http://localhost:8880/v1"
@@ -70,10 +78,17 @@ class Settings(BaseSettings):
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
+    # How often (seconds) the poller captures+OCRs a frame locally while building up the batch
+    # sent to the LLM once per poll interval. Cheap - no LLM call happens per capture.
+    game_state_capture_interval_seconds: int = 1
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
-    # Full path to tesseract.exe, only needed if it's not on PATH after installing Tesseract OCR.
-    tesseract_cmd: str = ""
+    # Game-state "trainer" pass - re-interprets low-confidence OCR frames (screenshot + OCR text)
+    # with a vision-capable model to build per-process training data (a document of interpretation
+    # notes), fed into future extraction passes for that process. Falls back to openrouter_model
+    # if empty.
+    game_state_training_enabled: bool = False
+    game_state_training_model: str = ""
 
     google_tts_api_key: str = ""
     google_tts_voice: str = "en-US-Chirp3-HD-Aoede"
@@ -82,6 +97,10 @@ class Settings(BaseSettings):
     igdb_client_secret: str = ""
     steam_api_key: str = ""
     steam_id: str = ""
+
+    # Gates app/core/debug_log.py recording - off by default so full, untruncated prompts/replies
+    # (which can be large) aren't kept in memory unless the user is actively debugging.
+    debug_mode_enabled: bool = False
 
 
 settings = Settings()

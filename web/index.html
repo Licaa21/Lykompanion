@@ -92,6 +92,7 @@
           <button type="button" class="tab-btn active" data-tab="general">General</button>
           <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
           <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
+          <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
           <button type="button" class="tab-btn" data-tab="third-party">Integrations</button>
         </nav>
         <div class="modal-main modal-body">
@@ -101,7 +102,6 @@
           <div class="subtab-bar">
             <button type="button" class="subtab-btn active" data-subtab="core">Core</button>
             <button type="button" class="subtab-btn" data-subtab="vision">Vision</button>
-            <button type="button" class="subtab-btn" data-subtab="game-awareness">Game Awareness</button>
             <button type="button" class="subtab-btn" data-subtab="web-search">Web Search</button>
           </div>
 
@@ -170,50 +170,6 @@
             </div>
           </div>
 
-          <div class="subtab-panel" data-subtab="game-awareness" hidden>
-            <label class="checkbox">
-              <input id="cfg-game-state-enabled" type="checkbox" />
-              Background OCR awareness (Windows only) — track quest/location/character automatically
-              <button type="button" class="cfg-help" data-tip="Periodically OCR-scans your screen in the background so the companion knows your current quest/location/character without being told. Windows only.">?</button>
-            </label>
-
-            <label>
-              <span class="cfg-label">Blacklisted Processes <button type="button" class="cfg-help" data-tip="Processes the OCR poller should never scan, and the companion's take_screenshot tool should never capture, even if you ask it to. Applies regardless of whether background OCR is enabled.">?</button></span>
-              <p class="modal-hint">Blocks both background OCR and the companion's take_screenshot tool for these processes — e.g. add your code editor so it never captures your code.</p>
-            </label>
-            <div id="game-state-blacklist" class="memory-list"></div>
-            <form id="game-state-blacklist-form" class="memory-add-form">
-              <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
-              <button type="submit" class="secondary-btn">Add</button>
-            </form>
-
-            <div id="game-state-dependent">
-              <div class="cfg-row">
-                <label>
-                  <span class="cfg-label">Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>
-                  <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
-                </label>
-                <label>
-                  <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Model used to interpret OCR text into quest/location/character fields. Leave blank to reuse the main chat model.">?</button></span>
-                  <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
-                  <select id="cfg-game-state-model"></select>
-                </label>
-              </div>
-              <details class="cfg-advanced">
-                <summary>Advanced</summary>
-                <label>
-                  <span class="cfg-label">Tesseract Path Override <button type="button" class="cfg-help" data-tip="Full path to tesseract.exe. Only needed if Tesseract OCR isn't discoverable on your system PATH.">?</button></span>
-                  <input id="cfg-tesseract-cmd" type="text" placeholder="Auto-detected from PATH" autocomplete="off" />
-                </label>
-              </details>
-              <label>
-                <span class="cfg-label">Approved Processes <button type="button" class="cfg-help" data-tip="Processes you've allowed the OCR poller to scan. New, unrecognized processes prompt you before being added here.">?</button></span>
-                <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
-              </label>
-              <div id="game-state-whitelist" class="memory-list"></div>
-            </div>
-          </div>
-
           <div class="subtab-panel" data-subtab="web-search" hidden>
             <label>
               <span class="cfg-label">Web Search Provider <button type="button" class="cfg-help" data-tip="Which service the web_search tool uses. OpenRouter's web plugin only grounds text answers with citations - it can't reliably find real images. SearXNG is a self-hosted metasearch engine with a real image-search endpoint.">?</button></span>
@@ -233,12 +189,6 @@
 
         <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
-          <div class="subtab-bar">
-            <button type="button" class="subtab-btn active" data-subtab="narration">Narration</button>
-            <button type="button" class="subtab-btn" data-subtab="voice-input">Voice Input</button>
-          </div>
-
-          <div class="subtab-panel" data-subtab="narration">
             <label>
               <span class="cfg-label">TTS Provider <button type="button" class="cfg-help" data-tip="Which text-to-speech engine narrates the companion's replies.">?</button></span>
               <select id="cfg-tts-provider">
@@ -298,16 +248,6 @@
               Narrate replies (TTS)
               <button type="button" class="cfg-help" data-tip="Automatically read replies aloud using the selected TTS provider.">?</button>
             </label>
-          </div>
-
-          <div class="subtab-panel" data-subtab="voice-input" hidden>
-            <p class="modal-hint">Speech is always sent directly to an audio-capable LLM (no local transcription).</p>
-            <label>
-              <span class="cfg-label">OpenRouter Voice Model <button type="button" class="cfg-help" data-tip="Audio-capable model used to transcribe/understand your spoken messages. Leave blank to reuse the main chat model.">?</button></span>
-              <input id="cfg-openrouter-voice-model-search" type="text" class="model-search" placeholder="Search models…" />
-              <select id="cfg-openrouter-voice-model"></select>
-            </label>
-          </div>
         </section>
 
         <!-- LIVE MIC tab -->
@@ -366,6 +306,99 @@
                 <div id="wake-word-transcript" class="wake-word-transcript"></div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- GAME AWARENESS tab -->
+        <section class="tab-panel" data-tab="game-awareness" hidden>
+          <div class="subtab-bar">
+            <button type="button" class="subtab-btn active" data-subtab="ga-awareness">Awareness</button>
+            <button type="button" class="subtab-btn" data-subtab="ga-processes">Tracked Processes</button>
+            <button type="button" class="subtab-btn" data-subtab="ga-trackers">Trackers</button>
+            <button type="button" class="subtab-btn" data-subtab="ga-training-data">Training Data</button>
+          </div>
+
+          <div class="subtab-panel" data-subtab="ga-awareness">
+            <label class="checkbox">
+              <input id="cfg-game-state-enabled" type="checkbox" />
+              Background OCR awareness (Windows only) — track quest/location/character automatically
+              <button type="button" class="cfg-help" data-tip="Periodically OCR-scans your screen in the background so the companion knows your current quest/location/character without being told. Windows only.">?</button>
+            </label>
+            <label class="checkbox">
+              <input id="cfg-game-state-training-enabled" type="checkbox" />
+              Game-state training
+              <button type="button" class="cfg-help" data-tip="When the Game-State Model reports low confidence in an OCR frame, re-examines it with a vision-capable Training Model and saves what it learns as per-process training data, fed into future extraction passes for that game. See the Training Data tab.">?</button>
+            </label>
+
+            <div id="game-state-dependent">
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>
+                  <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
+                </label>
+              </div>
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Model used to interpret OCR text into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
+                  <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
+                  <select id="cfg-game-state-model"></select>
+                </label>
+                <label>
+                  <span class="cfg-label">Training Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to re-interpret low-confidence OCR frames for the game-state training pass. Leave blank to reuse the main chat model.">?</button></span>
+                  <input id="cfg-game-state-training-model-search" type="text" class="model-search" placeholder="Search models…" />
+                  <select id="cfg-game-state-training-model"></select>
+                </label>
+              </div>
+              <details class="cfg-advanced">
+                <summary>Advanced</summary>
+                <label>
+                  <span class="cfg-label">Capture Interval: <span id="cfg-game-state-capture-interval-value">1</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the poller captures+OCRs a frame locally while building up the batch sent to the model once per Poll Interval. This step is free - no LLM call happens per capture.">?</button></span>
+                  <input id="cfg-game-state-capture-interval" type="range" min="1" max="10" step="1" value="1" />
+                </label>
+              </details>
+            </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab="ga-processes" hidden>
+            <label>
+              <span class="cfg-label">Blacklisted Processes <button type="button" class="cfg-help" data-tip="Processes the OCR poller should never scan, and the companion's take_screenshot tool should never capture, even if you ask it to. Applies regardless of whether background OCR is enabled.">?</button></span>
+              <p class="modal-hint">Blocks both background OCR and the companion's take_screenshot tool for these processes — e.g. add your code editor so it never captures your code.</p>
+            </label>
+            <div id="game-state-blacklist" class="memory-list"></div>
+            <form id="game-state-blacklist-form" class="memory-add-form">
+              <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
+              <button type="submit" class="secondary-btn">Add</button>
+            </form>
+
+            <label>
+              <span class="cfg-label">Approved Processes <button type="button" class="cfg-help" data-tip="Processes you've allowed the OCR poller to scan. New, unrecognized processes prompt you before being added here.">?</button></span>
+              <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
+            </label>
+            <div id="game-state-whitelist" class="memory-list"></div>
+          </div>
+
+          <div class="subtab-panel" data-subtab="ga-trackers" hidden>
+            <label>
+              <span class="cfg-label">Custom Trackers <button type="button" class="cfg-help" data-tip="The fields the Game-State Model fills in each poll window for a given process. Edit labels/descriptions or add/remove your own (e.g. for Rocket League: &quot;1v1 Rank&quot;, &quot;Goals scored this session&quot;). &quot;Current Activity&quot; always stays - it can't be edited or removed.">?</button></span>
+              <p class="modal-hint">Per-process fields the model tracks. Pick an approved process below to edit its trackers.</p>
+            </label>
+            <select id="game-state-tracker-process"></select>
+            <div id="game-state-trackers-list" class="memory-list"></div>
+            <form id="game-state-tracker-add-form" class="memory-add-form">
+              <input id="game-state-tracker-add-label" type="text" placeholder="Label, e.g. 1v1 Rank" autocomplete="off" />
+              <input id="game-state-tracker-add-desc" type="text" placeholder="What should the model look for?" autocomplete="off" />
+              <button type="submit" class="secondary-btn">Add</button>
+            </form>
+            <button type="button" id="game-state-tracker-reset" class="secondary-btn">Reset to Defaults</button>
+          </div>
+
+          <div class="subtab-panel" data-subtab="ga-training-data" hidden>
+            <label>
+              <span class="cfg-label">Training Data <button type="button" class="cfg-help" data-tip="A living reference document the training pass maintains per process, explaining how to interpret that game's OCR output. Fed into every future extraction pass for that process. Edit it directly if something's wrong or stale.">?</button></span>
+              <p class="modal-hint">Reference document the Training Model maintains for a process. Pick one below to review or edit.</p>
+            </label>
+            <select id="game-state-training-data-process"></select>
+            <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - it'll be written automatically once a training pass runs."></textarea>
           </div>
         </section>
 
@@ -457,20 +490,22 @@
             </p>
             <div id="memory-filters" class="memory-filters"></div>
             <div id="memory-list" class="memory-list"></div>
-            <form id="memory-add-form" class="memory-add-form">
+            <form id="memory-add-form" class="memory-add-form memory-add-form--stacked">
               <textarea id="memory-add-input" rows="1" placeholder="Add a memory…" autocomplete="off"></textarea>
-              <select id="memory-add-process">
-                <option value="">General</option>
-                <option value="__other__">Other…</option>
-              </select>
-              <input
-                id="memory-add-process-custom"
-                type="text"
-                placeholder="e.g. bg3.exe"
-                autocomplete="off"
-                hidden
-              />
-              <button type="submit" class="secondary-btn">Add</button>
+              <div class="memory-add-controls">
+                <select id="memory-add-process">
+                  <option value="">General</option>
+                  <option value="__other__">Other…</option>
+                </select>
+                <input
+                  id="memory-add-process-custom"
+                  type="text"
+                  placeholder="e.g. bg3.exe"
+                  autocomplete="off"
+                  hidden
+                />
+                <button type="submit" class="secondary-btn">Add</button>
+              </div>
             </form>
           </section>
 
@@ -534,6 +569,11 @@
           </section>
 
           <section class="tab-panel" data-tab="debug" hidden>
+            <label class="checkbox">
+              <input id="cfg-debug-mode-enabled" type="checkbox" />
+              Enable debug capture
+              <button type="button" class="cfg-help" data-tip="Records the last 50 LLM requests/tool calls below, in full (no truncation). Off by default since captured prompts can be large.">?</button>
+            </label>
             <p class="modal-hint">
               The last 50 individual LLM requests and tool calls (one entry per API call or tool execution — a
               single reply can involve several), most recent first. Not persisted — resets on server restart.
@@ -554,6 +594,7 @@
       <button type="button" class="floating-panel-close" id="game-state-panel-close">&times;</button>
     </div>
     <div id="game-state-fields" class="game-state-fields"></div>
+    <div id="game-state-stats" class="game-state-stats"></div>
   </div>
 
   <audio id="narration-audio" hidden></audio>

@@ -19,6 +19,7 @@ const gameStatePanelHeader = document.getElementById("game-state-panel-header");
 const gameStatePanelDot = document.getElementById("game-state-panel-dot");
 const gameStatePanelCloseBtn = document.getElementById("game-state-panel-close");
 const gameStateFields = document.getElementById("game-state-fields");
+const gameStateStats = document.getElementById("game-state-stats");
 const settingsModal = document.getElementById("settings-modal");
 const personalDataModal = document.getElementById("personal-data-modal");
 const diagnosticsModal = document.getElementById("diagnostics-modal");
@@ -157,6 +158,72 @@ const _toasts = (() => {
 })();
 
 function showToast(id, opts) { _toasts.show(id, opts); }
+
+// Brief green "Saved" confirmation on a save button, e.g. after a PUT/POST resolves. Safe to
+// call repeatedly in quick succession - each call restarts the revert timer instead of stacking.
+const SAVED_CHECK_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 12 4 9"/></svg> Saved`;
+
+function flashSaved(button) {
+  if (button._savedOriginal === undefined) button._savedOriginal = button.innerHTML;
+  clearTimeout(button._savedTimeout);
+  button.innerHTML = SAVED_CHECK_ICON;
+  button.classList.add("btn-saved");
+  button._savedTimeout = setTimeout(() => {
+    button.innerHTML = button._savedOriginal;
+    button.classList.remove("btn-saved");
+  }, 1000);
+}
+
+// Floating help tooltip for .cfg-help buttons - positioned in JS (not pure CSS ::after) so it can
+// flip above/below the trigger and clamp horizontally, since a fixed "always open upward,
+// centered" popup gets clipped by the Settings modal's overflow:auto body or runs off-screen
+// near the top/edges of the viewport.
+const helpTooltipEl = document.createElement("div");
+helpTooltipEl.className = "help-tooltip";
+document.body.appendChild(helpTooltipEl);
+
+function showHelpTooltip(target) {
+  const tip = target.dataset.tip;
+  if (!tip) return;
+  helpTooltipEl.textContent = tip;
+  helpTooltipEl.classList.add("visible");
+
+  const margin = 8;
+  const rect = target.getBoundingClientRect();
+  const tipRect = helpTooltipEl.getBoundingClientRect();
+
+  const spaceAbove = rect.top;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openBelow = spaceAbove < tipRect.height + margin && spaceBelow > spaceAbove;
+  const top = openBelow ? rect.bottom + margin : rect.top - tipRect.height - margin;
+  helpTooltipEl.style.top = `${Math.max(margin, top)}px`;
+
+  const left = rect.left + rect.width / 2 - tipRect.width / 2;
+  const clampedLeft = Math.min(Math.max(left, margin), window.innerWidth - tipRect.width - margin);
+  helpTooltipEl.style.left = `${clampedLeft}px`;
+}
+
+function hideHelpTooltip() {
+  helpTooltipEl.classList.remove("visible");
+}
+
+document.addEventListener("mouseover", (e) => {
+  const target = e.target.closest(".cfg-help");
+  if (target) showHelpTooltip(target);
+});
+document.addEventListener("mouseout", (e) => {
+  if (e.target.closest(".cfg-help")) hideHelpTooltip();
+});
+document.addEventListener("focusin", (e) => {
+  const target = e.target.closest(".cfg-help");
+  if (target) showHelpTooltip(target);
+});
+document.addEventListener("focusout", (e) => {
+  if (e.target.closest(".cfg-help")) hideHelpTooltip();
+});
+// Scroll position isn't tracked live (fixed tooltip would otherwise drift from its trigger as the
+// modal body scrolls underneath it) - just dismiss it instead.
+document.addEventListener("scroll", hideHelpTooltip, true);
 
 function setVoiceStatus(text, variant) {
   voiceStatus.textContent = text;
@@ -1519,9 +1586,10 @@ function sortByLabel(options) {
 // boxes can re-filter without needing to re-fetch from the backend.
 const modelOptionsCache = {
   llm: [],
+  llmText: [],
+  llmVision: [],
   kokoroVoice: [],
   openrouterTts: [],
-  voiceInput: [],
   chirp3Voice: [],
 };
 
@@ -1558,36 +1626,37 @@ function setupModelSearch(searchInputId, selectId, cacheKey, pinnedOption) {
 }
 
 setupModelSearch("cfg-model-search", "cfg-model", "llm");
-setupModelSearch("cfg-memory-model-search", "cfg-memory-model", "llm", {
+setupModelSearch("cfg-memory-model-search", "cfg-memory-model", "llmText", {
   value: "",
   label: "(use main chat model)",
 });
-setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "llm", {
+setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "llmText", {
+  value: "",
+  label: "(use main chat model)",
+});
+setupModelSearch("cfg-game-state-training-model-search", "cfg-game-state-training-model", "llmVision", {
   value: "",
   label: "(use main chat model)",
 });
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
 setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
 setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", "openrouterTts");
-setupModelSearch("cfg-openrouter-voice-model-search", "cfg-openrouter-voice-model", "voiceInput", {
-  value: "",
-  label: "(use main chat model)",
-});
 
 async function loadModels(
   selectedLlm,
   selectedKokoroVoice,
   selectedOpenrouterTts,
-  selectedVoiceInputModel,
   selectedOpenrouterVoice,
   selectedMemoryModel,
   selectedChirp3Voice,
-  selectedGameStateModel
+  selectedGameStateModel,
+  selectedGameStateTrainingModel
 ) {
-  const [llmModels, ttsModels, voiceInputModels] = await Promise.all([
+  const [llmModels, llmTextModels, llmVisionModels, ttsModels] = await Promise.all([
     fetch("/api/models/llm").then((r) => r.json()),
+    fetch("/api/models/llm/text").then((r) => r.json()),
+    fetch("/api/models/llm/vision").then((r) => r.json()),
     fetch("/api/models/tts").then((r) => r.json()),
-    fetch("/api/models/voice-input").then((r) => r.json()),
   ]);
 
   const speechModels = ttsModels.openrouter_speech_models || [];
@@ -1597,23 +1666,29 @@ async function loadModels(
   }
 
   modelOptionsCache.llm = sortByLabel(llmModels.map((m) => ({ value: m.id, label: m.name })));
+  modelOptionsCache.llmText = sortByLabel(llmTextModels.map((m) => ({ value: m.id, label: m.name })));
+  modelOptionsCache.llmVision = sortByLabel(llmVisionModels.map((m) => ({ value: m.id, label: m.name })));
   modelOptionsCache.kokoroVoice = sortByLabel(
     (ttsModels.kokoro_voices || []).map((v) => ({ value: v.id, label: v.name }))
   );
   modelOptionsCache.openrouterTts = sortByLabel(speechModels.map((m) => ({ value: m.id, label: m.name })));
-  modelOptionsCache.voiceInput = sortByLabel(voiceInputModels.map((m) => ({ value: m.id, label: m.name })));
   modelOptionsCache.chirp3Voice = sortByLabel((ttsModels.chirp3_voices || []).map((v) => ({ value: v.id, label: v.name })));
 
   populateSelect(document.getElementById("cfg-model"), modelOptionsCache.llm, selectedLlm);
   populateSelect(
     document.getElementById("cfg-memory-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llm],
+    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmText],
     selectedMemoryModel
   );
   populateSelect(
     document.getElementById("cfg-game-state-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llm],
+    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmText],
     selectedGameStateModel
+  );
+  populateSelect(
+    document.getElementById("cfg-game-state-training-model"),
+    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.llmVision],
+    selectedGameStateTrainingModel
   );
   populateSelect(document.getElementById("cfg-kokoro-voice"), modelOptionsCache.kokoroVoice, selectedKokoroVoice);
   populateSelect(document.getElementById("cfg-chirp3-voice"), modelOptionsCache.chirp3Voice, selectedChirp3Voice);
@@ -1621,11 +1696,6 @@ async function loadModels(
     document.getElementById("cfg-openrouter-tts-model"),
     modelOptionsCache.openrouterTts,
     selectedOpenrouterTts
-  );
-  populateSelect(
-    document.getElementById("cfg-openrouter-voice-model"),
-    [{ value: "", label: "(use main chat model)" }, ...modelOptionsCache.voiceInput],
-    selectedVoiceInputModel
   );
   updateOpenrouterVoiceOptions(
     selectedOpenrouterTts || document.getElementById("cfg-openrouter-tts-model").value,
@@ -1682,6 +1752,13 @@ const gameStateIntervalValue = document.getElementById("cfg-game-state-interval-
 
 gameStateIntervalInput.addEventListener("input", () => {
   gameStateIntervalValue.textContent = gameStateIntervalInput.value;
+});
+
+const gameStateCaptureIntervalInput = document.getElementById("cfg-game-state-capture-interval");
+const gameStateCaptureIntervalValue = document.getElementById("cfg-game-state-capture-interval-value");
+
+gameStateCaptureIntervalInput.addEventListener("input", () => {
+  gameStateCaptureIntervalValue.textContent = gameStateCaptureIntervalInput.value;
 });
 
 const avatarPreviewEl = document.getElementById("cfg-avatar-preview");
@@ -1799,9 +1876,11 @@ function updateWebSearchProviderVisibility() {
 
 document.getElementById("cfg-web-search-provider").addEventListener("change", updateWebSearchProviderVisibility);
 
-async function loadConfig() {
-  const response = await fetch("/api/config");
-  const cfg = await response.json();
+// Applies a CompanionConfig payload (from GET /api/config or the PUT response) to the Settings
+// form. Split out from loadConfig() so saving can re-apply the server's response directly instead
+// of re-fetching config and re-loading the full OpenRouter model catalog (a slow external API
+// call) on every save - the model list can't have changed just because settings were saved.
+function applyConfigToForm(cfg) {
   userDisplayName = cfg.user_display_name || "You";
   userNameInput.value = userDisplayName;
   renderAvatarPreview();
@@ -1834,12 +1913,16 @@ async function loadConfig() {
 
   gameStateEnabledInput.checked = cfg.game_state_ocr_enabled;
   updateGameStateDependentVisibility();
-  document.getElementById("cfg-tesseract-cmd").value = cfg.tesseract_cmd || "";
+  document.getElementById("cfg-game-state-training-enabled").checked = cfg.game_state_training_enabled;
   document.getElementById("cfg-openrouter-base-url").value = cfg.openrouter_base_url || "";
   document.getElementById("cfg-kokoro-base-url").value = cfg.kokoro_base_url || "";
   gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
   gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
+  gameStateCaptureIntervalInput.value = cfg.game_state_capture_interval_seconds;
+  gameStateCaptureIntervalValue.textContent = cfg.game_state_capture_interval_seconds;
   restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
+
+  document.getElementById("cfg-debug-mode-enabled").checked = cfg.debug_mode_enabled;
 
   wakeWordEnabled = cfg.wake_word_enabled;
   wakeWordPhrase = cfg.wake_word_phrase || "Hey Buddy";
@@ -1878,16 +1961,21 @@ async function loadConfig() {
     : "Not set";
   document.getElementById("cfg-steam-api-key").placeholder = cfg.steam_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-steam-id").value = cfg.steam_id || "";
+}
 
+async function loadConfig() {
+  const response = await fetch("/api/config");
+  const cfg = await response.json();
+  applyConfigToForm(cfg);
   await loadModels(
     cfg.openrouter_model,
     cfg.kokoro_voice,
     cfg.openrouter_tts_model,
-    cfg.openrouter_voice_model,
     cfg.openrouter_voice,
     cfg.memory_extraction_model,
     cfg.google_tts_voice,
-    cfg.game_state_model
+    cfg.game_state_model,
+    cfg.game_state_training_model
   );
 }
 
@@ -1896,15 +1984,16 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-model").value,
     document.getElementById("cfg-kokoro-voice").value,
     document.getElementById("cfg-openrouter-tts-model").value,
-    document.getElementById("cfg-openrouter-voice-model").value,
     document.getElementById("cfg-openrouter-voice").value,
     document.getElementById("cfg-memory-model").value,
     document.getElementById("cfg-chirp3-voice").value,
-    document.getElementById("cfg-game-state-model").value
+    document.getElementById("cfg-game-state-model").value,
+    document.getElementById("cfg-game-state-training-model").value
   );
 });
 
-document.getElementById("cfg-save").addEventListener("click", async () => {
+document.getElementById("cfg-save").addEventListener("click", async (event) => {
+  const saveButton = event.currentTarget;
   const apiKeyInput = document.getElementById("cfg-api-key");
   const igdbSecretInput = document.getElementById("cfg-igdb-client-secret");
   const steamApiKeyInput = document.getElementById("cfg-steam-api-key");
@@ -1926,7 +2015,6 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     openrouter_management_key: document.getElementById("cfg-management-key").value || null,
     narration_speed: parseFloat(narrationSpeedInput.value),
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
-    openrouter_voice_model: document.getElementById("cfg-openrouter-voice-model").value,
     context_window_messages: parseInt(contextWindowInput.value, 10),
     screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
     screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
@@ -1936,8 +2024,10 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     steam_id: document.getElementById("cfg-steam-id").value,
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
+    game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
-    tesseract_cmd: document.getElementById("cfg-tesseract-cmd").value,
+    game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
+    game_state_training_model: document.getElementById("cfg-game-state-training-model").value,
     wake_word_enabled: wakeWordEnabledInput.checked,
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
     wake_word_max_failures: wakeWordMaxFailures,
@@ -1946,17 +2036,20 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
     vad_min_speech_ms: vadMinSpeechMs,
     pre_roll_ms: preRollMs,
     post_roll_ms: postRollMs,
+    debug_mode_enabled: document.getElementById("cfg-debug-mode-enabled").checked,
   };
-  await fetch("/api/config", {
+  const response = await fetch("/api/config", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  const updatedCfg = await response.json();
   apiKeyInput.value = "";
   document.getElementById("cfg-management-key").value = "";
   igdbSecretInput.value = "";
   steamApiKeyInput.value = "";
-  await loadConfig();
+  applyConfigToForm(updatedCfg);
+  flashSaved(saveButton);
 });
 
 // --- Personal Data modal (Instructions + Memory) ---
@@ -1970,13 +2063,15 @@ personalDataBtn.addEventListener("click", async () => {
   await loadMemories();
 });
 
-document.getElementById("instructions-save").addEventListener("click", async () => {
+document.getElementById("instructions-save").addEventListener("click", async (event) => {
+  const saveButton = event.currentTarget;
   const text = document.getElementById("instructions-text").value;
   await fetch("/api/instructions", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions: text }),
   });
+  flashSaved(saveButton);
 });
 
 // --- Memory modal ---
@@ -2189,11 +2284,7 @@ function renderGameStateFields(data) {
   gameStateFields.innerHTML = "";
   const rows = [
     ["Process", data.process],
-    ["Currently", data.activity],
-    ["Location", data.location],
-    ["Quest", data.quest],
-    ["Character", data.character],
-    ["Recent choice", data.notable_choice],
+    ...data.trackers.map((t) => [t.label, t.value]),
   ];
   for (const [label, value] of rows) {
     const row = document.createElement("div");
@@ -2207,6 +2298,27 @@ function renderGameStateFields(data) {
     row.appendChild(labelEl);
     row.appendChild(valueEl);
     gameStateFields.appendChild(row);
+  }
+}
+
+function renderGameStateStats(data) {
+  gameStateStats.innerHTML = "";
+  const rows = [
+    ["Extraction calls", data.extraction_call_count],
+    ["Extraction cost", `$${data.extraction_cost_usd.toFixed(4)}`],
+    ["Training calls", data.training_call_count],
+    ["Training cost", `$${data.training_cost_usd.toFixed(4)}`],
+  ];
+  for (const [label, value] of rows) {
+    const row = document.createElement("div");
+    row.className = "game-state-stats-row";
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    const valueEl = document.createElement("span");
+    valueEl.textContent = value;
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    gameStateStats.appendChild(row);
   }
 }
 
@@ -2229,6 +2341,7 @@ function updateGameStatePanel(data) {
   gameStatePanelDot.classList.add("active");
   gameStatePanelDot.title = `Tracking: ${data.process}`;
   renderGameStateFields(data);
+  renderGameStateStats(data);
   gameStatePanel.hidden = gameStatePanelClosed;
 }
 
@@ -2307,6 +2420,8 @@ async function loadGameStateProcessLists() {
   ]);
   renderGameStateBlacklist(blacklist);
   renderGameStateWhitelist(whitelist);
+  await populateTrackerProcessOptions(whitelist);
+  await populateTrainingDataProcessOptions(whitelist);
 }
 
 function renderGameStateBlacklist(blacklist) {
@@ -2376,6 +2491,246 @@ function renderGameStateWhitelist(whitelist) {
     gameStateWhitelistEl.appendChild(item);
   }
 }
+
+// --- Custom trackers (Settings > Game Awareness) ---
+// Per-process, user-editable list of fields the Game-State Model fills in each poll window.
+// "activity" (Current Activity) is locked server-side - always present, never editable/removable.
+
+const gameStateTrackerProcessEl = document.getElementById("game-state-tracker-process");
+const gameStateTrackersListEl = document.getElementById("game-state-trackers-list");
+const gameStateTrackerAddForm = document.getElementById("game-state-tracker-add-form");
+const gameStateTrackerAddLabel = document.getElementById("game-state-tracker-add-label");
+const gameStateTrackerAddDesc = document.getElementById("game-state-tracker-add-desc");
+const gameStateTrackerResetBtn = document.getElementById("game-state-tracker-reset");
+
+let currentTrackers = [];
+
+// The locked "activity" tracker's real description (sent to the model) is long and detailed by
+// design - shown here instead since it's never editable anyway, so there's no risk of this
+// display-only text drifting from what actually gets saved/sent.
+const ACTIVITY_TRACKER_SHORT_DESC = "What's happening on screen right now - refreshed every check, never a sticky fact.";
+
+async function populateTrackerProcessOptions(whitelist) {
+  const previousValue = gameStateTrackerProcessEl.value;
+  gameStateTrackerProcessEl.innerHTML = "";
+
+  if (whitelist.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No approved processes yet";
+    gameStateTrackerProcessEl.appendChild(option);
+    gameStateTrackerProcessEl.disabled = true;
+    currentTrackers = [];
+    renderTrackersList();
+    return;
+  }
+
+  gameStateTrackerProcessEl.disabled = false;
+  for (const process of whitelist) {
+    const option = document.createElement("option");
+    option.value = process;
+    option.textContent = process;
+    gameStateTrackerProcessEl.appendChild(option);
+  }
+  if (whitelist.includes(previousValue)) {
+    gameStateTrackerProcessEl.value = previousValue;
+  }
+  await loadTrackersForSelectedProcess();
+}
+
+async function loadTrackersForSelectedProcess() {
+  const process = gameStateTrackerProcessEl.value;
+  if (!process) {
+    currentTrackers = [];
+    renderTrackersList();
+    return;
+  }
+  currentTrackers = await fetch(`/api/game-state/trackers/${encodeURIComponent(process)}`).then((r) => r.json());
+  renderTrackersList();
+}
+
+async function saveTrackers() {
+  const process = gameStateTrackerProcessEl.value;
+  if (!process) return;
+  const body = currentTrackers
+    .filter((t) => !t.locked)
+    .map((t) => ({ id: t.id, label: t.label, description: t.description }));
+  currentTrackers = await fetch(`/api/game-state/trackers/${encodeURIComponent(process)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.json());
+  renderTrackersList();
+}
+
+function renderTrackersList() {
+  gameStateTrackersListEl.innerHTML = "";
+
+  if (currentTrackers.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "Select an approved process to edit its trackers.";
+    gameStateTrackersListEl.appendChild(hint);
+    return;
+  }
+
+  for (const tracker of currentTrackers) {
+    const item = document.createElement("div");
+    item.className = "tracker-item";
+
+    const header = document.createElement("div");
+    header.className = "tracker-item-header";
+
+    const label = document.createElement("div");
+    label.className = "tracker-item-label";
+    label.textContent = tracker.label;
+
+    const desc = document.createElement("div");
+    desc.className = "tracker-item-desc";
+    desc.textContent = tracker.locked ? ACTIVITY_TRACKER_SHORT_DESC : tracker.description || "";
+
+    if (tracker.locked) {
+      label.title = "Always tracked - can't be edited or removed";
+    } else {
+      label.contentEditable = "true";
+      desc.contentEditable = "true";
+      desc.title = "What the model should look for";
+
+      label.addEventListener("blur", () => {
+        const text = label.textContent.trim();
+        if (!text) {
+          label.textContent = tracker.label;
+          return;
+        }
+        if (text === tracker.label) return;
+        tracker.label = text;
+        saveTrackers();
+      });
+
+      desc.addEventListener("blur", () => {
+        const text = desc.textContent.trim();
+        if (text === tracker.description) return;
+        tracker.description = text;
+        saveTrackers();
+      });
+
+      for (const el of [label, desc]) {
+        el.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            el.blur();
+          }
+        });
+      }
+    }
+
+    header.appendChild(label);
+
+    if (!tracker.locked) {
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "memory-item-delete";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "Remove tracker";
+      deleteBtn.addEventListener("click", () => {
+        currentTrackers = currentTrackers.filter((t) => t.id !== tracker.id);
+        saveTrackers();
+      });
+      header.appendChild(deleteBtn);
+    }
+
+    item.appendChild(header);
+    item.appendChild(desc);
+
+    gameStateTrackersListEl.appendChild(item);
+  }
+}
+
+gameStateTrackerProcessEl.addEventListener("change", loadTrackersForSelectedProcess);
+
+gameStateTrackerAddForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const label = gameStateTrackerAddLabel.value.trim();
+  if (!label || !gameStateTrackerProcessEl.value) return;
+  const description = gameStateTrackerAddDesc.value.trim();
+  currentTrackers.push({ id: "", label, description, locked: false });
+  gameStateTrackerAddLabel.value = "";
+  gameStateTrackerAddDesc.value = "";
+  await saveTrackers();
+});
+
+gameStateTrackerResetBtn.addEventListener("click", async () => {
+  const process = gameStateTrackerProcessEl.value;
+  if (!process) return;
+  currentTrackers = await fetch(`/api/game-state/trackers/${encodeURIComponent(process)}/reset`, {
+    method: "POST",
+  }).then((r) => r.json());
+  renderTrackersList();
+});
+
+// --- Training Data (Settings > Game Awareness > Training Data) ---
+// A single living reference document per process, maintained by the training pass - editable
+// directly, but not user-created here, since it's meant to reflect what training actually produced.
+
+const gameStateTrainingDataProcessEl = document.getElementById("game-state-training-data-process");
+const gameStateTrainingDataContentEl = document.getElementById("game-state-training-data-content");
+
+let currentTrainingDataContent = "";
+
+async function populateTrainingDataProcessOptions(whitelist) {
+  const previousValue = gameStateTrainingDataProcessEl.value;
+  gameStateTrainingDataProcessEl.innerHTML = "";
+
+  if (whitelist.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No approved processes yet";
+    gameStateTrainingDataProcessEl.appendChild(option);
+    gameStateTrainingDataProcessEl.disabled = true;
+    gameStateTrainingDataContentEl.value = "";
+    gameStateTrainingDataContentEl.disabled = true;
+    return;
+  }
+
+  gameStateTrainingDataProcessEl.disabled = false;
+  gameStateTrainingDataContentEl.disabled = false;
+  for (const process of whitelist) {
+    const option = document.createElement("option");
+    option.value = process;
+    option.textContent = process;
+    gameStateTrainingDataProcessEl.appendChild(option);
+  }
+  if (whitelist.includes(previousValue)) {
+    gameStateTrainingDataProcessEl.value = previousValue;
+  }
+  await loadTrainingDataForSelectedProcess();
+}
+
+async function loadTrainingDataForSelectedProcess() {
+  const process = gameStateTrainingDataProcessEl.value;
+  if (!process) {
+    currentTrainingDataContent = "";
+    gameStateTrainingDataContentEl.value = "";
+    return;
+  }
+  const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(process)}`).then((r) => r.json());
+  currentTrainingDataContent = data.content;
+  gameStateTrainingDataContentEl.value = currentTrainingDataContent;
+}
+
+gameStateTrainingDataProcessEl.addEventListener("change", loadTrainingDataForSelectedProcess);
+
+gameStateTrainingDataContentEl.addEventListener("blur", async () => {
+  const process = gameStateTrainingDataProcessEl.value;
+  if (!process) return;
+  const content = gameStateTrainingDataContentEl.value;
+  if (content === currentTrainingDataContent) return;
+  const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(process)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  }).then((r) => r.json());
+  currentTrainingDataContent = data.content;
+});
 
 gameStateBlacklistForm.addEventListener("submit", async (event) => {
   event.preventDefault();

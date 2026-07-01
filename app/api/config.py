@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.core.config import persist_env_value, settings
+from app.core.config import persist_env_values, settings
 from app.models.schemas import CompanionConfig
 from app.services.llm import client as llm_client
 
@@ -13,12 +13,13 @@ async def get_config() -> CompanionConfig:
         user_display_name=settings.user_display_name,
         openrouter_model=settings.openrouter_model,
         openrouter_base_url=settings.openrouter_base_url,
-        openrouter_voice_model=settings.openrouter_voice_model,
         memory_extraction_model=settings.memory_extraction_model or None,
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
+        game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
         game_state_model=settings.game_state_model or None,
-        tesseract_cmd=settings.tesseract_cmd or None,
+        game_state_training_enabled=settings.game_state_training_enabled,
+        game_state_training_model=settings.game_state_training_model or None,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
         web_search_provider=settings.web_search_provider,
@@ -47,120 +48,132 @@ async def get_config() -> CompanionConfig:
         igdb_client_secret_set=bool(settings.igdb_client_secret),
         steam_api_key_set=bool(settings.steam_api_key),
         steam_id=settings.steam_id,
+        debug_mode_enabled=settings.debug_mode_enabled,
     )
 
 
 @router.put("", response_model=CompanionConfig)
 async def update_config(config: CompanionConfig) -> CompanionConfig:
+    env_updates: dict[str, str] = {}
+
     settings.user_display_name = config.user_display_name.strip() or "You"
-    persist_env_value("USER_DISPLAY_NAME", settings.user_display_name)
+    env_updates["USER_DISPLAY_NAME"] = settings.user_display_name
 
     settings.openrouter_model = config.openrouter_model
-    persist_env_value("OPENROUTER_MODEL", config.openrouter_model)
+    env_updates["OPENROUTER_MODEL"] = config.openrouter_model
 
     if config.openrouter_base_url:
         settings.openrouter_base_url = config.openrouter_base_url
-        persist_env_value("OPENROUTER_BASE_URL", config.openrouter_base_url)
+        env_updates["OPENROUTER_BASE_URL"] = config.openrouter_base_url
 
     settings.web_search_provider = config.web_search_provider
-    persist_env_value("WEB_SEARCH_PROVIDER", config.web_search_provider)
+    env_updates["WEB_SEARCH_PROVIDER"] = config.web_search_provider
     if config.searxng_base_url:
         settings.searxng_base_url = config.searxng_base_url
-        persist_env_value("SEARXNG_BASE_URL", config.searxng_base_url)
+        env_updates["SEARXNG_BASE_URL"] = config.searxng_base_url
 
     settings.tts_provider = config.tts_provider
-    persist_env_value("TTS_PROVIDER", config.tts_provider)
+    env_updates["TTS_PROVIDER"] = config.tts_provider
 
     if config.kokoro_base_url:
         settings.kokoro_base_url = config.kokoro_base_url
-        persist_env_value("KOKORO_BASE_URL", config.kokoro_base_url)
+        env_updates["KOKORO_BASE_URL"] = config.kokoro_base_url
     if config.kokoro_voice is not None:
         settings.kokoro_voice = config.kokoro_voice
-        persist_env_value("KOKORO_VOICE", config.kokoro_voice)
+        env_updates["KOKORO_VOICE"] = config.kokoro_voice
     if config.openrouter_tts_model is not None:
         settings.openrouter_tts_model = config.openrouter_tts_model
-        persist_env_value("OPENROUTER_TTS_MODEL", config.openrouter_tts_model)
+        env_updates["OPENROUTER_TTS_MODEL"] = config.openrouter_tts_model
     if config.openrouter_voice is not None:
         settings.openrouter_voice = config.openrouter_voice
-        persist_env_value("OPENROUTER_VOICE", config.openrouter_voice)
+        env_updates["OPENROUTER_VOICE"] = config.openrouter_voice
     if config.openrouter_api_key:
         settings.openrouter_api_key = config.openrouter_api_key
         llm_client.client.api_key = config.openrouter_api_key
-        persist_env_value("OPENROUTER_API_KEY", config.openrouter_api_key)
+        env_updates["OPENROUTER_API_KEY"] = config.openrouter_api_key
     if config.openrouter_management_key:
         settings.openrouter_management_key = config.openrouter_management_key
-        persist_env_value("OPENROUTER_MANAGEMENT_KEY", config.openrouter_management_key)
-    if config.openrouter_voice_model is not None:
-        settings.openrouter_voice_model = config.openrouter_voice_model
-        persist_env_value("OPENROUTER_VOICE_MODEL", config.openrouter_voice_model)
+        env_updates["OPENROUTER_MANAGEMENT_KEY"] = config.openrouter_management_key
     if config.memory_extraction_model is not None:
         settings.memory_extraction_model = config.memory_extraction_model
-        persist_env_value("MEMORY_EXTRACTION_MODEL", config.memory_extraction_model)
+        env_updates["MEMORY_EXTRACTION_MODEL"] = config.memory_extraction_model
 
     settings.game_state_ocr_enabled = config.game_state_ocr_enabled
-    persist_env_value("GAME_STATE_OCR_ENABLED", str(config.game_state_ocr_enabled))
+    env_updates["GAME_STATE_OCR_ENABLED"] = str(config.game_state_ocr_enabled)
 
     settings.game_state_poll_interval_seconds = config.game_state_poll_interval_seconds
-    persist_env_value("GAME_STATE_POLL_INTERVAL_SECONDS", str(config.game_state_poll_interval_seconds))
+    env_updates["GAME_STATE_POLL_INTERVAL_SECONDS"] = str(config.game_state_poll_interval_seconds)
+
+    settings.game_state_capture_interval_seconds = config.game_state_capture_interval_seconds
+    env_updates["GAME_STATE_CAPTURE_INTERVAL_SECONDS"] = str(config.game_state_capture_interval_seconds)
 
     if config.game_state_model is not None:
         settings.game_state_model = config.game_state_model
-        persist_env_value("GAME_STATE_MODEL", config.game_state_model)
-    if config.tesseract_cmd is not None:
-        settings.tesseract_cmd = config.tesseract_cmd
-        persist_env_value("TESSERACT_CMD", config.tesseract_cmd)
+        env_updates["GAME_STATE_MODEL"] = config.game_state_model
+
+    settings.game_state_training_enabled = config.game_state_training_enabled
+    env_updates["GAME_STATE_TRAINING_ENABLED"] = str(config.game_state_training_enabled)
+    if config.game_state_training_model is not None:
+        settings.game_state_training_model = config.game_state_training_model
+        env_updates["GAME_STATE_TRAINING_MODEL"] = config.game_state_training_model
+
     if config.google_tts_api_key:
         settings.google_tts_api_key = config.google_tts_api_key
-        persist_env_value("GOOGLE_TTS_API_KEY", config.google_tts_api_key)
+        env_updates["GOOGLE_TTS_API_KEY"] = config.google_tts_api_key
     if config.google_tts_voice is not None:
         settings.google_tts_voice = config.google_tts_voice
-        persist_env_value("GOOGLE_TTS_VOICE", config.google_tts_voice)
+        env_updates["GOOGLE_TTS_VOICE"] = config.google_tts_voice
 
     settings.tts_speed = config.narration_speed
-    persist_env_value("TTS_SPEED", str(config.narration_speed))
+    env_updates["TTS_SPEED"] = str(config.narration_speed)
 
     settings.tts_volume = config.narration_volume
-    persist_env_value("TTS_VOLUME", str(config.narration_volume))
+    env_updates["TTS_VOLUME"] = str(config.narration_volume)
 
     settings.context_window_messages = config.context_window_messages
-    persist_env_value("CONTEXT_WINDOW_MESSAGES", str(config.context_window_messages))
+    env_updates["CONTEXT_WINDOW_MESSAGES"] = str(config.context_window_messages)
 
     settings.wake_word_enabled = config.wake_word_enabled
-    persist_env_value("WAKE_WORD_ENABLED", str(config.wake_word_enabled))
+    env_updates["WAKE_WORD_ENABLED"] = str(config.wake_word_enabled)
     settings.wake_word_phrase = config.wake_word_phrase
-    persist_env_value("WAKE_WORD_PHRASE", config.wake_word_phrase)
+    env_updates["WAKE_WORD_PHRASE"] = config.wake_word_phrase
     settings.wake_word_max_failures = config.wake_word_max_failures
-    persist_env_value("WAKE_WORD_MAX_FAILURES", str(config.wake_word_max_failures))
+    env_updates["WAKE_WORD_MAX_FAILURES"] = str(config.wake_word_max_failures)
 
     settings.vad_threshold = config.vad_threshold
-    persist_env_value("VAD_THRESHOLD", str(config.vad_threshold))
+    env_updates["VAD_THRESHOLD"] = str(config.vad_threshold)
     settings.vad_silence_ms = config.vad_silence_ms
-    persist_env_value("VAD_SILENCE_MS", str(config.vad_silence_ms))
+    env_updates["VAD_SILENCE_MS"] = str(config.vad_silence_ms)
     settings.vad_min_speech_ms = config.vad_min_speech_ms
-    persist_env_value("VAD_MIN_SPEECH_MS", str(config.vad_min_speech_ms))
+    env_updates["VAD_MIN_SPEECH_MS"] = str(config.vad_min_speech_ms)
 
     settings.pre_roll_ms = config.pre_roll_ms
-    persist_env_value("PRE_ROLL_MS", str(config.pre_roll_ms))
+    env_updates["PRE_ROLL_MS"] = str(config.pre_roll_ms)
     settings.post_roll_ms = config.post_roll_ms
-    persist_env_value("POST_ROLL_MS", str(config.post_roll_ms))
+    env_updates["POST_ROLL_MS"] = str(config.post_roll_ms)
 
     settings.screenshot_max_width = config.screenshot_max_width
-    persist_env_value("SCREENSHOT_MAX_WIDTH", str(config.screenshot_max_width))
+    env_updates["SCREENSHOT_MAX_WIDTH"] = str(config.screenshot_max_width)
 
     settings.screenshot_jpeg_quality = config.screenshot_jpeg_quality
-    persist_env_value("SCREENSHOT_JPEG_QUALITY", str(config.screenshot_jpeg_quality))
+    env_updates["SCREENSHOT_JPEG_QUALITY"] = str(config.screenshot_jpeg_quality)
 
     if config.igdb_client_id is not None:
         settings.igdb_client_id = config.igdb_client_id
-        persist_env_value("IGDB_CLIENT_ID", config.igdb_client_id)
+        env_updates["IGDB_CLIENT_ID"] = config.igdb_client_id
     if config.igdb_client_secret:
         settings.igdb_client_secret = config.igdb_client_secret
-        persist_env_value("IGDB_CLIENT_SECRET", config.igdb_client_secret)
+        env_updates["IGDB_CLIENT_SECRET"] = config.igdb_client_secret
     if config.steam_api_key:
         settings.steam_api_key = config.steam_api_key
-        persist_env_value("STEAM_API_KEY", config.steam_api_key)
+        env_updates["STEAM_API_KEY"] = config.steam_api_key
     if config.steam_id is not None:
         settings.steam_id = config.steam_id
-        persist_env_value("STEAM_ID", config.steam_id)
+        env_updates["STEAM_ID"] = config.steam_id
+
+    settings.debug_mode_enabled = config.debug_mode_enabled
+    env_updates["DEBUG_MODE_ENABLED"] = str(config.debug_mode_enabled)
+
+    persist_env_values(env_updates)
 
     return await get_config()

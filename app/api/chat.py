@@ -304,9 +304,8 @@ async def chat_voice(
         }
     )
 
-    model = settings.openrouter_voice_model or settings.openrouter_model
     try:
-        reply, stop_listening = await _run_chat_with_tools(messages, model=model, source="chat_voice")
+        reply, stop_listening = await _run_chat_with_tools(messages, model=settings.openrouter_model, source="chat_voice")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
 

@@ -1,5 +1,5 @@
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import httpx
 from openai import AsyncOpenAI
@@ -65,8 +65,14 @@ def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
 
 
 async def chat_completion(
-    messages: list[dict], model: str | None = None, response_format: dict | None = None, source: str = "unknown"
+    messages: list[dict],
+    model: str | None = None,
+    response_format: dict | None = None,
+    source: str = "unknown",
+    on_usage: Callable[[float], None] | None = None,
 ) -> str:
+    """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
+    callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log."""
     resolved_model = model or settings.openrouter_model
     start = time.monotonic()
     response = await client.chat.completions.create(
@@ -87,6 +93,8 @@ async def chat_completion(
         tool_calls=None,
         duration_ms=duration_ms,
     )
+    if on_usage:
+        on_usage(getattr(response.usage, "cost", 0) or 0)
     return content
 
 

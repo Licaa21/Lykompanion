@@ -29,7 +29,7 @@ It's built to be used **hands-free while playing** — not as a chat app you sit
 
 ## How it works
 
-Lykompanion is a small FastAPI backend serving a vanilla HTML/CSS/JS frontend (no build step, no framework). All LLM calls go through [OpenRouter](https://openrouter.ai), so you can pick any chat-capable model OpenRouter offers, swap models per-purpose (text chat vs. voice-input vs. TTS), and OpenRouter handles billing/routing across providers.
+Lykompanion is a small FastAPI backend serving a vanilla HTML/CSS/JS frontend (no build step, no framework). All LLM calls go through [OpenRouter](https://openrouter.ai), so you can pick any audio-capable chat model OpenRouter offers (voice messages are sent straight to it), swap the TTS model separately, and OpenRouter handles billing/routing across providers.
 
 A typical turn looks like:
 
@@ -61,7 +61,7 @@ A typical turn looks like:
 - Python 3.11+
 - An [OpenRouter](https://openrouter.ai/keys) API key (required — this is the only LLM provider Lykompanion talks to)
 - (Optional) [Kokoro](https://github.com/remsky/Kokoro-FastAPI) running locally for free, fast local TTS — or use OpenRouter's own Speech models instead
-- (Optional, Windows-only) the [Tesseract OCR engine](https://github.com/UB-Mannheim/tesseract/wiki) installed separately (e.g. `winget install UB-Mannheim.TesseractOCR`) if you want passive game-state awareness — `pip install` only gets the Python wrapper, not the engine itself
+- (Optional, Windows 10/11 only, a recent-enough build for the Windows Graphics Capture API) an OCR-capable language pack installed for passive game-state awareness — the built-in Windows OCR engine is used, no separate binary to install, but it needs a language added via Settings → Time & Language → Language & region → Add a language, with "Optical character recognition" included for it
 
 ### Install
 
@@ -93,8 +93,7 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 |---|---|
 | `OPENROUTER_API_KEY` | Required. Your OpenRouter key (used for all LLM/TTS calls). |
 | `OPENROUTER_MANAGEMENT_KEY` | Optional. A separate OpenRouter [Provisioning API key](https://openrouter.ai/settings/provisioning-keys) (not your regular inference key) used only to display your account's credit balance in the Consumption view. Everything else works fine without it. |
-| `OPENROUTER_MODEL` | Main chat model. |
-| `OPENROUTER_VOICE_MODEL` | Model used for voice messages (audio-capable). Falls back to `OPENROUTER_MODEL` if unset. |
+| `OPENROUTER_MODEL` | Main chat model. Must support audio input — voice messages are sent to it directly. |
 | `TTS_PROVIDER` | `kokoro` (local) or `openrouter` (cloud Speech models). |
 | `KOKORO_BASE_URL` | Where your local Kokoro server is running. |
 | `KOKORO_VOICE`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_VOICE` | TTS voice selection per provider. |
@@ -106,10 +105,12 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `SCREENSHOT_JPEG_QUALITY` | JPEG quality (1-95) for screenshots sent to the LLM. Default `70`. |
 | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` | Twitch Developer app credentials for the IGDB game-database tool. IGDB auth runs entirely through Twitch — register a free app at [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) (any placeholder OAuth Redirect URL like `https://localhost` works, since it's never actually used — only the client-credentials grant is used). |
 | `STEAM_API_KEY`, `STEAM_ID` | Optional. Enables the agent checking your owned games/playtime. Get a free key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey); `STEAM_ID` is your numeric SteamID64. Steam *store* lookups (price, description, etc.) work without these. |
-| `GAME_STATE_OCR_ENABLED` | `false` by default. Turns on passive game-state OCR (see [Passive game-state awareness](#passive-game-state-awareness)). Windows only, and requires the Tesseract engine to be installed separately. |
-| `GAME_STATE_POLL_INTERVAL_SECONDS` | How often (seconds) to capture/OCR the screen while a game is focused. Default `90`. |
+| `GAME_STATE_OCR_ENABLED` | `false` by default. Turns on passive game-state OCR (see [Passive game-state awareness](#passive-game-state-awareness)). Windows only, and requires an OCR-capable language pack installed for the built-in Windows OCR engine. |
+| `GAME_STATE_POLL_INTERVAL_SECONDS` | How often (seconds) a batch of captured/OCR'd frames is sent to the model while a game is focused. Default `90`. |
+| `GAME_STATE_CAPTURE_INTERVAL_SECONDS` | How often (seconds) the poller captures+OCRs a frame locally while building up that batch - free, no LLM call per capture. Default `1`. |
 | `GAME_STATE_MODEL` | Dedicated model for the background game-state structuring pass. Falls back to `OPENROUTER_MODEL` if unset. |
-| `TESSERACT_CMD` | Full path to `tesseract.exe`, only needed if it's installed somewhere other than the default `C:\Program Files\Tesseract-OCR\` and isn't on `PATH`. |
+| `GAME_STATE_TRAINING_ENABLED` | `false` by default. Turns on the game-state training pass (see [Passive game-state awareness](#passive-game-state-awareness)). |
+| `GAME_STATE_TRAINING_MODEL` | Dedicated vision-capable model for the training pass. Falls back to `OPENROUTER_MODEL` if unset. |
 
 No API key is needed for web search — it goes through OpenRouter's own `web` plugin, billed via your existing OpenRouter account.
 
@@ -125,8 +126,8 @@ app/
   services/
     llm/                OpenRouter client + one module per agent tool, plus the memory/game-state background extraction passes
     tts/                 Kokoro / OpenRouter TTS backends
-    screenshot/          Multi-monitor capture
-    ocr/                 Tesseract OCR wrapper, used by passive game-state awareness
+    screenshot/          Multi-monitor capture (mss/GDI for on-demand vision screenshots, Windows Graphics Capture for the game-state poller)
+    ocr/                 Windows OCR (Windows.Media.Ocr) wrapper, used by passive game-state awareness
     system/              Process/system-info lookups
 web/
   index.html, css/, js/app.js   Static frontend, no build step
@@ -153,17 +154,18 @@ The second path exists because relying purely on the conversational model's own 
 
 ### Passive game-state awareness
 
-*Opt-in, off by default (`GAME_STATE_OCR_ENABLED=false`), Windows-only.* A long-lived background task (`app/services/llm/game_state_extraction.py`, started via FastAPI's `lifespan` in `app/main.py`) wakes up every `GAME_STATE_POLL_INTERVAL_SECONDS` and:
+*Opt-in, off by default (`GAME_STATE_OCR_ENABLED=false`), Windows-only.* A long-lived background task (`app/services/llm/game_state_extraction.py`, started via FastAPI's `lifespan` in `app/main.py`) ticks every `GAME_STATE_CAPTURE_INTERVAL_SECONDS` (default 1s) and:
 
 1. Checks the foreground process (`fetch_active_process`'s underlying lookup) and skips the tick entirely if it's not focused, or looks like an obviously non-game app (browser, terminal, IDE, etc. — a hardcoded denylist, not exhaustive).
-2. If the process is neither denylisted nor already approved, it's added to a **pending queue** (`data/game_state_pending.json`, survives restarts) — the poller does *not* OCR it yet. It shows up in the notification bell (🔔 in the sidebar, with an unread-count badge) asking you to **Allow** or **Blacklist** each one. Nothing gets captured/read until you decide — this is the consent gate for an otherwise-automatic screen-reading feature. Decisions persist to `data/game_state_whitelist.json` / `data/game_state_blacklist.json`, both reviewable/editable from Settings → General (an "Approved Processes" list with revoke buttons, and a "Blacklisted Processes" list with add/remove).
-3. For an approved process, captures a full-resolution screenshot and runs it through the local [Tesseract OCR engine](https://github.com/UB-Mannheim/tesseract/wiki) (`app/services/ocr/tesseract_ocr.py`) — free and local, no LLM tokens spent on this step.
-4. Diffs the recognized text against the last poll. If nothing changed, it stops there — this is what keeps the feature cheap, since the next step is the only one that costs tokens.
-5. If the text changed, a dedicated LLM pass (model configurable via `GAME_STATE_MODEL`, same fallback pattern as memory extraction) gets the raw OCR text *and* the current known-facts memory list (so it can recognize updates vs. duplicates, e.g. a level-up replacing an old level fact instead of stacking). It returns structured `activity`/`location`/`quest`/`character`/`notable_choice` fields (keeping previously-known fields if they're not visible in this particular OCR pass — `activity` is always refreshed fresh, since it describes the current moment), and can save/remove durable facts in the regular memory store, tagged to that process — not just stats, but narrative moments read straight from on-screen dialogue (e.g. "The player rejected Shadowheart's romantic advances in Baldur's Gate 3").
+2. If the process is neither denylisted nor already approved, it's added to a **pending queue** (`data/game_state_pending.json`, survives restarts) — the poller does *not* OCR it yet. It shows up in the notification bell (🔔 in the sidebar, with an unread-count badge) asking you to **Allow** or **Blacklist** each one. Nothing gets captured/read until you decide — this is the consent gate for an otherwise-automatic screen-reading feature. Decisions persist to `data/game_state_whitelist.json` / `data/game_state_blacklist.json`, both reviewable/editable from Settings → Game Awareness → Tracked Processes (an "Approved Processes" list with revoke buttons, and a "Blacklisted Processes" list with add/remove).
+3. For an approved process, captures the screen every tick via the **Windows Graphics Capture** API (`app/services/screenshot/wgc_capture.py`, GPU-based — chosen specifically because the older GDI/BitBlt capture method used elsewhere in the app causes visible desktop-compositor stalls in games, most noticeable as stutter on cursor movement, when called this frequently) and runs it through the built-in **Windows OCR engine** (`app/services/ocr/windows_ocr.py`, `Windows.Media.Ocr` — free, local, no separate binary to install, just an OCR-capable language pack) — no LLM tokens spent on this step. Frames whose text is near-identical to the last kept frame (an unchanging HUD/menu) are dropped before ever reaching the LLM.
+4. Once `GAME_STATE_POLL_INTERVAL_SECONDS` worth of ticks has accumulated, the surviving frames for that window are batched into **one** dedicated LLM pass (model configurable via `GAME_STATE_MODEL`, same fallback pattern as memory extraction), each labeled with how many seconds before the most recent frame it was captured — giving the model a short timeline instead of a single isolated snapshot, so it can better tell a transient UI flash from an actual state change. If every frame in the window got deduped away (nothing changed), the LLM pass is skipped entirely — this is what keeps the feature cheap. The pass also gets the current known-facts memory list (so it can recognize updates vs. duplicates, e.g. a level-up replacing an old level fact instead of stacking) and the **per-process tracker list** (`app/core/game_state_trackers.py`, persisted to `data/game_state_trackers.json`) telling it exactly which fields to fill and what each one means — every process starts out with the same defaults (Current Activity, Location, Quest, Character, Recent Choice, Known Stats, Game Completion), fully editable/removable from Settings → Game Awareness → Trackers per approved process (e.g. swap them out for "1v1 Rank"/"Goals scored this session" in Rocket League), except **Current Activity**, which always stays and can't be edited or removed since the extraction pass depends on it being refreshed every time. Previously-known field values are kept when a field isn't visible in a given window (Current Activity is the exception — always refreshed fresh, since it describes the current moment), and the pass can save/remove durable facts in the regular memory store, tagged to that process — not just stats, but narrative moments read straight from on-screen dialogue (e.g. "The player rejected Shadowheart's romantic advances in Baldur's Gate 3").
 
 The structured snapshot is purely ephemeral (`app/core/game_state.py`, in-memory only, not written to disk — it resets on restart, unlike `memory.json`) and gets injected into the system prompt on every chat request, right after the memory block. You can inspect what's currently being tracked from the **Game State** button in the sidebar, which also shows a live status dot (gray = disabled, yellow = enabled but idle, green = actively tracking).
 
-Because Tesseract's accuracy on stylized/low-contrast in-game fonts varies a lot by game, this is best-effort — treat it as a nice-to-have ambient signal, not a guaranteed-accurate game-state tracker.
+**Game-state training** *(opt-in, off by default)* — the extraction pass also self-reports a `confidence` score (0–1) for how well it understood the OCR text (never explained inline in a field's value — the prompt explicitly forbids meta-commentary like "the text is unclear" from leaking into `activity` etc., since that's what `confidence` is for). When training is enabled (Settings → Game Awareness → Awareness) and confidence drops below a threshold, a second, vision-capable "trainer" model (configurable separately via `GAME_STATE_TRAINING_MODEL`, falls back to the main chat model) is sent a fresh screenshot, the OCR text, and the process's **current training data document**, and asked to return a *revised* version of that document — e.g. explaining that on this game's HUD, a string like `02122` means home score, minutes:seconds remaining, away score. Rather than appending a new note per training pass, the trainer maintains one coherent living reference document per process (`app/core/game_state_training_data.py`, persisted to `data/game_state_training_data.json`), revising existing sections in place when they already cover the same UI element instead of piling up overlapping notes, and never describing the screenshot's visual content — only how to decode the OCR text. A per-process in-flight guard ensures only one training pass runs at a time for a given process, so two passes can never race to read-then-write the same document. Every future extraction pass for that process gets the current training data document in its prompt, so it can lean on what training already figured out instead of re-guessing. Training runs as a fire-and-forget background task so it never blocks the next poll tick. The training data document is reviewable/editable directly (a plain textarea, saved on blur) from Settings → Game Awareness → Training Data, per process.
+
+Because OCR accuracy on stylized/low-contrast in-game fonts varies a lot by game, this is best-effort — treat it as a nice-to-have ambient signal, not a guaranteed-accurate game-state tracker. If a game runs in exclusive fullscreen and captures come back consistently empty, try borderless/windowed mode — some exclusive-fullscreen/protected-content surfaces aren't capturable even via Windows Graphics Capture.
 
 ### Live mic / hands-free mode
 
@@ -205,7 +207,7 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `GET /api/usage/records`, `DELETE /api/usage` | Per-call usage records (timestamp, source, tokens, cost) and clearing them. The Consumption view aggregates these client-side by time range and feature. |
 | `GET /api/usage/balance` | OpenRouter account credit balance (requires `OPENROUTER_MANAGEMENT_KEY`; returns `available: false` otherwise). |
 | `GET /api/debug/requests` | Last 10 individual LLM API calls (not persisted) - full messages, tool calls, tokens, cost, duration. Powers the Debug panel. |
-| `GET /api/models/llm` `/tts` `/voice-input` | Model lists for Settings dropdowns. |
+| `GET /api/models/llm` `/tts` | Model lists for Settings dropdowns. |
 | `GET /api/screenshot` | One-off screenshot capture (used by the manual screenshot toggle). |
 | `POST /api/tts` | Synthesize speech for arbitrary text. |
 | `GET /api/game-state` | Current passive game-state snapshot (read-only) — powers the Game State sidebar indicator/modal. |

@@ -1,26 +1,20 @@
 """In-memory ring buffer of the last 50 individual LLM API calls and tool executions, for live
 debugging via the Debug panel. Restart-scoped on purpose (not persisted) - this reflects "what
-just happened", not a historical record (that's what app/core/usage.py is for)."""
+just happened", not a historical record (that's what app/core/usage.py is for).
+
+Recording is gated behind settings.debug_mode_enabled (off by default) - entries are kept
+full/untruncated, which can be large, so this is opt-in rather than always-on."""
 
 import json
 import uuid
 from collections import deque
 from datetime import datetime, timezone
 
+from app.core.config import settings
+
 _MAX_ENTRIES = 50
-_MAX_FIELD_LEN = 2000
 
 _entries: deque[dict] = deque(maxlen=_MAX_ENTRIES)
-
-
-def _truncate(value):
-    if isinstance(value, str) and len(value) > _MAX_FIELD_LEN:
-        return value[:_MAX_FIELD_LEN] + f"... [truncated, {len(value)} chars total]"
-    if isinstance(value, dict):
-        return {k: _truncate(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_truncate(v) for v in value]
-    return value
 
 
 def record_request(
@@ -36,15 +30,17 @@ def record_request(
     cost_usd: float,
     duration_ms: float | None,
 ) -> None:
+    if not settings.debug_mode_enabled:
+        return
     entry = {
         "id": uuid.uuid4().hex[:8],
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": source,
         "model": model,
-        "messages": _truncate(messages),
+        "messages": messages,
         "tools": tools,
-        "reply": _truncate(reply),
-        "tool_calls": _truncate(tool_calls),
+        "reply": reply,
+        "tool_calls": tool_calls,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "cost_usd": cost_usd,

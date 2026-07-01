@@ -38,12 +38,13 @@ class CompanionConfig(BaseModel):
     user_display_name: str = "You"
     openrouter_model: str
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_voice_model: str | None = None
     memory_extraction_model: str | None = None
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
+    game_state_capture_interval_seconds: int = 1
     game_state_model: str | None = None
-    tesseract_cmd: str | None = None
+    game_state_training_enabled: bool = False
+    game_state_training_model: str | None = None
     web_search_provider: Literal["openrouter", "searxng"] = "openrouter"
     searxng_base_url: str = "http://localhost:8080"
     tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"
@@ -79,16 +80,36 @@ class CompanionConfig(BaseModel):
     steam_api_key_set: bool = False
     steam_id: str | None = None
 
+    debug_mode_enabled: bool = False
+
+
+class GameStateTracker(BaseModel):
+    id: str
+    label: str
+    description: str = ""
+    locked: bool = False
+    value: str | None = None
+
+
+class TrackerInput(BaseModel):
+    id: str | None = None
+    label: str
+    description: str = ""
+
+
+class TrainingDataDocument(BaseModel):
+    content: str = ""
+
 
 class GameStateResponse(BaseModel):
     enabled: bool
     tracking: bool
     process: str | None = None
-    activity: str | None = None
-    location: str | None = None
-    quest: str | None = None
-    character: str | None = None
-    notable_choice: str | None = None
+    trackers: list[GameStateTracker] = []
+    extraction_call_count: int = 0
+    extraction_cost_usd: float = 0.0
+    training_call_count: int = 0
+    training_cost_usd: float = 0.0
 
 
 class ProcessEntry(BaseModel):

@@ -1,7 +1,7 @@
 import json
 import logging
 
-from app.core import game_state_processes, memory
+from app.core import game_state, game_state_processes, memory
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
@@ -21,13 +21,15 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     must never raise into the caller.
     """
     known_facts = memory.format_memories_for_prompt() or "Known facts about the user: none yet."
+    game_state_text = game_state.format_game_state_for_prompt()
     messages = [
         {"role": "system", "content": load_prompt("memory_extraction")},
         {
             "role": "user",
             "content": (
                 f"{current_datetime_context()}\n\n{known_facts}\n\n"
-                f"Latest exchange:\nUser: {user_message}\nCompanion: {assistant_message}"
+                + (f"{game_state_text}\n\n" if game_state_text else "")
+                + f"Latest exchange:\nUser: {user_message}\nCompanion: {assistant_message}"
             ),
         },
     ]
