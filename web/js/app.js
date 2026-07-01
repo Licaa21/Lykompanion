@@ -11,20 +11,17 @@ const voiceStatus = document.getElementById("voice-status");
 
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
-const instructionsBtn = document.getElementById("instructions-btn");
-const memoryBtn = document.getElementById("memory-btn");
-const usageBtn = document.getElementById("usage-btn");
+const personalDataBtn = document.getElementById("personal-data-btn");
+const diagnosticsBtn = document.getElementById("diagnostics-btn");
 const settingsBtn = document.getElementById("settings-btn");
-const gameStateBtn = document.getElementById("game-state-btn");
-const gameStateDot = document.getElementById("game-state-dot");
+const gameStatePanel = document.getElementById("game-state-panel");
+const gameStatePanelHeader = document.getElementById("game-state-panel-header");
+const gameStatePanelDot = document.getElementById("game-state-panel-dot");
+const gameStatePanelCloseBtn = document.getElementById("game-state-panel-close");
 const gameStateFields = document.getElementById("game-state-fields");
 const settingsModal = document.getElementById("settings-modal");
-const instructionsModal = document.getElementById("instructions-modal");
-const memoryModal = document.getElementById("memory-modal");
-const usageModal = document.getElementById("usage-modal");
-const gameStateModal = document.getElementById("game-state-modal");
-const debugModal = document.getElementById("debug-modal");
-const notifModal = document.getElementById("notif-modal");
+const personalDataModal = document.getElementById("personal-data-modal");
+const diagnosticsModal = document.getElementById("diagnostics-modal");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
@@ -605,9 +602,12 @@ function appendMessage(role, content, audioId, isNew = false) {
       memBtn.className = "msg-action-btn";
       memBtn.title = "Add to Memory";
       memBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
-      memBtn.addEventListener("click", () => {
+      memBtn.addEventListener("click", async () => {
         document.getElementById("memory-add-input").value = contentDiv.textContent.trim().slice(0, 300);
-        openModal(document.getElementById("memory-modal"));
+        openModal(personalDataModal);
+        personalDataModal.querySelector('.tab-btn[data-tab="memory"]').click();
+        await populateMemoryProcessOptions();
+        await loadMemories();
       });
       actionsEl.appendChild(memBtn);
     }
@@ -1457,18 +1457,21 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, instructionsModal, memoryModal, usageModal, gameStateModal, debugModal, notifModal].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
 });
 
+// Scoped to the closest .modal so two open-at-different-times modals with their own tab sets
+// (Settings, Personal Data, Diagnostics) don't clobber each other's hidden state.
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    const modal = btn.closest(".modal");
+    modal.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const tab = btn.dataset.tab;
-    document.querySelectorAll(".tab-panel").forEach((panel) => {
+    modal.querySelectorAll(".tab-panel").forEach((panel) => {
       panel.hidden = panel.dataset.tab !== tab;
     });
   });
@@ -1956,13 +1959,15 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
   await loadConfig();
 });
 
-// --- Personal Instructions modal ---
+// --- Personal Data modal (Instructions + Memory) ---
 
-instructionsBtn.addEventListener("click", async () => {
+personalDataBtn.addEventListener("click", async () => {
+  openModal(personalDataModal);
   const response = await fetch("/api/instructions");
   const data = await response.json();
   document.getElementById("instructions-text").value = data.instructions;
-  openModal(instructionsModal);
+  await populateMemoryProcessOptions();
+  await loadMemories();
 });
 
 document.getElementById("instructions-save").addEventListener("click", async () => {
@@ -1972,7 +1977,6 @@ document.getElementById("instructions-save").addEventListener("click", async () 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions: text }),
   });
-  closeModal(instructionsModal);
 });
 
 // --- Memory modal ---
@@ -1987,6 +1991,22 @@ const memoryAddForm = document.getElementById("memory-add-form");
 const memoryAddInput = document.getElementById("memory-add-input");
 const memoryAddProcess = document.getElementById("memory-add-process");
 const memoryAddProcessCustom = document.getElementById("memory-add-process-custom");
+
+// Auto-grow the add-memory textarea between its CSS min/max-height as the user types, instead
+// of a fixed single-line input that scrolled long facts sideways.
+memoryAddInput.addEventListener("input", () => {
+  memoryAddInput.style.height = "auto";
+  memoryAddInput.style.height = `${memoryAddInput.scrollHeight}px`;
+});
+
+// Textareas don't submit their form on Enter like a single-line input did - restore that,
+// keeping Shift+Enter free for an actual newline in a longer fact.
+memoryAddInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    memoryAddForm.requestSubmit();
+  }
+});
 
 let allMemories = [];
 let memoryFilter = "all"; // "all" | "general" | a specific process name
@@ -2135,12 +2155,6 @@ async function loadMemories() {
   renderMemoryList();
 }
 
-memoryBtn.addEventListener("click", async () => {
-  openModal(memoryModal);
-  await populateMemoryProcessOptions();
-  await loadMemories();
-});
-
 memoryAddForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const content = memoryAddInput.value.trim();
@@ -2150,6 +2164,7 @@ memoryAddForm.addEventListener("submit", async (event) => {
     process = memoryAddProcessCustom.value.trim();
   }
   memoryAddInput.value = "";
+  memoryAddInput.style.height = "auto";
   memoryAddProcessCustom.value = "";
   await fetch("/api/memory", {
     method: "POST",
@@ -2159,44 +2174,19 @@ memoryAddForm.addEventListener("submit", async (event) => {
   await loadMemories();
 });
 
-// --- Consumption modal ---
-
-// --- Game State modal ---
+// --- Game State floating panel ---
 // Ephemeral, background-OCR-derived snapshot of what's happening in-game right now. Distinct
-// from Memory: this never gets written to disk, it just reflects the current session.
+// from Memory: this never gets written to disk, it just reflects the current session. Shown
+// automatically while a game is being tracked, hidden otherwise - no manual toggle button.
 
-function updateGameStateDot(data) {
-  gameStateDot.classList.remove("active", "idle");
-  if (!data.enabled) {
-    gameStateDot.title = "Game-state awareness disabled (enable in Settings > Behavior)";
-  } else if (data.tracking) {
-    gameStateDot.classList.add("active");
-    gameStateDot.title = `Tracking: ${data.process}`;
-  } else {
-    gameStateDot.classList.add("idle");
-    gameStateDot.title = "Enabled, not currently tracking a game";
-  }
-}
+const GAME_STATE_POS_KEY = "lyko-game-state-panel-pos";
+const GAME_STATE_CLOSED_KEY = "lyko-game-state-panel-closed";
+
+let gameStatePanelClosed = localStorage.getItem(GAME_STATE_CLOSED_KEY) === "true";
+let lastTrackedProcess = null;
 
 function renderGameStateFields(data) {
   gameStateFields.innerHTML = "";
-
-  if (!data.enabled) {
-    const hint = document.createElement("div");
-    hint.className = "memory-empty-hint";
-    hint.textContent = "OCR awareness is disabled. Enable it in Settings > Behavior to turn this on.";
-    gameStateFields.appendChild(hint);
-    return;
-  }
-
-  if (!data.tracking) {
-    const hint = document.createElement("div");
-    hint.className = "memory-empty-hint";
-    hint.textContent = "Enabled, but not currently tracking anything — focus a game window and wait for the next poll.";
-    gameStateFields.appendChild(hint);
-    return;
-  }
-
   const rows = [
     ["Process", data.process],
     ["Currently", data.activity],
@@ -2220,21 +2210,87 @@ function renderGameStateFields(data) {
   }
 }
 
+function updateGameStatePanel(data) {
+  gameStatePanelDot.classList.remove("active", "idle");
+
+  if (data.tracking && data.process !== lastTrackedProcess) {
+    // A new tracking session started (first game, or switched games) - re-show the panel even
+    // if the user previously dismissed it for a prior session.
+    gameStatePanelClosed = false;
+    localStorage.setItem(GAME_STATE_CLOSED_KEY, "false");
+  }
+  lastTrackedProcess = data.tracking ? data.process : null;
+
+  if (!data.tracking) {
+    gameStatePanel.hidden = true;
+    return;
+  }
+
+  gameStatePanelDot.classList.add("active");
+  gameStatePanelDot.title = `Tracking: ${data.process}`;
+  renderGameStateFields(data);
+  gameStatePanel.hidden = gameStatePanelClosed;
+}
+
 async function fetchGameState() {
   const response = await fetch("/api/game-state");
   return response.json();
 }
 
-gameStateBtn.addEventListener("click", async () => {
-  openModal(gameStateModal);
-  const data = await fetchGameState();
-  updateGameStateDot(data);
-  renderGameStateFields(data);
+gameStatePanelCloseBtn.addEventListener("click", () => {
+  gameStatePanelClosed = true;
+  localStorage.setItem(GAME_STATE_CLOSED_KEY, "true");
+  gameStatePanel.hidden = true;
 });
 
-fetchGameState().then(updateGameStateDot);
+// Restore a dragged position, or fall back to the default top-right CSS anchor.
+(() => {
+  const saved = JSON.parse(localStorage.getItem(GAME_STATE_POS_KEY) || "null");
+  if (saved) {
+    gameStatePanel.style.top = `${saved.top}px`;
+    gameStatePanel.style.left = `${saved.left}px`;
+    gameStatePanel.style.right = "auto";
+  }
+})();
+
+(() => {
+  let dragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  gameStatePanelHeader.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".floating-panel-close")) return;
+    dragging = true;
+    const rect = gameStatePanel.getBoundingClientRect();
+    offsetX = event.clientX - rect.left;
+    offsetY = event.clientY - rect.top;
+    event.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (!dragging) return;
+    const maxLeft = window.innerWidth - gameStatePanel.offsetWidth;
+    const maxTop = window.innerHeight - gameStatePanel.offsetHeight;
+    const left = Math.min(Math.max(0, event.clientX - offsetX), maxLeft);
+    const top = Math.min(Math.max(0, event.clientY - offsetY), maxTop);
+    gameStatePanel.style.left = `${left}px`;
+    gameStatePanel.style.top = `${top}px`;
+    gameStatePanel.style.right = "auto";
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    localStorage.setItem(
+      GAME_STATE_POS_KEY,
+      JSON.stringify({ top: parseFloat(gameStatePanel.style.top), left: parseFloat(gameStatePanel.style.left) })
+    );
+  });
+})();
+
+fetchGameState().then(updateGameStatePanel);
 setInterval(() => {
-  fetchGameState().then(updateGameStateDot);
+  fetchGameState().then(updateGameStatePanel);
 }, 20000);
 
 // --- Game-state process blacklist / whitelist (Settings > General) ---
@@ -2337,71 +2393,9 @@ gameStateBlacklistForm.addEventListener("submit", async (event) => {
 settingsBtn.addEventListener("click", loadGameStateProcessLists);
 loadGameStateProcessLists();
 
-// --- Notification bell ---
-// Extensible notification tray in the sidebar. Currently used for game-state process approvals.
-
-const notifBellBtn = document.getElementById("notif-bell-btn");
-const notifBadge = document.getElementById("notif-badge");
-const notifList = document.getElementById("notif-list");
-const notifEmpty = document.getElementById("notif-empty");
-
-notifBellBtn.addEventListener("click", () => openModal(notifModal));
-
-function renderNotifications(pendingProcesses) {
-  notifList.innerHTML = "";
-  const count = pendingProcesses.length;
-
-  notifBadge.hidden = count === 0;
-  notifBadge.textContent = count;
-
-  if (count === 0) {
-    notifEmpty.hidden = false;
-    return;
-  }
-  notifEmpty.hidden = true;
-
-  for (const process of pendingProcesses) {
-    const item = document.createElement("div");
-    item.className = "notif-item";
-
-    const text = document.createElement("div");
-    text.className = "notif-item-text";
-    text.innerHTML = `<strong>${process}</strong><span class="notif-item-sub">Allow game-state OCR tracking?</span>`;
-
-    const actions = document.createElement("div");
-    actions.className = "notif-item-actions";
-
-    const allowBtn = document.createElement("button");
-    allowBtn.className = "secondary-btn notif-action-btn";
-    allowBtn.textContent = "Allow";
-    allowBtn.addEventListener("click", async () => {
-      await fetch("/api/game-state/whitelist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ process }),
-      });
-      await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
-    });
-
-    const blacklistBtn = document.createElement("button");
-    blacklistBtn.className = "secondary-btn notif-action-btn";
-    blacklistBtn.textContent = "Blacklist";
-    blacklistBtn.addEventListener("click", async () => {
-      await fetch("/api/game-state/blacklist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ process }),
-      });
-      await Promise.all([checkPendingApprovals(), loadGameStateProcessLists()]);
-    });
-
-    actions.appendChild(allowBtn);
-    actions.appendChild(blacklistBtn);
-    item.appendChild(text);
-    item.appendChild(actions);
-    notifList.appendChild(item);
-  }
-}
+// --- Pending process approvals ---
+// Surfaced entirely via persistent toasts (bottom-right, stay until acted on, "+N more" when
+// there are several) - see _toasts near the top of this file. No separate bell/badge/modal.
 
 const _shownProcessToasts = new Set();
 
@@ -2409,7 +2403,6 @@ async function checkPendingApprovals() {
   const response = await fetch("/api/game-state/pending");
   const data = await response.json();
   const processes = data.processes || [];
-  renderNotifications(processes);
 
   for (const proc of processes) {
     if (_shownProcessToasts.has(proc)) continue;
@@ -2588,13 +2581,15 @@ async function fetchAndRenderBalance() {
   }
 }
 
-usageBtn.addEventListener("click", async () => {
-  openModal(usageModal);
+diagnosticsBtn.addEventListener("click", async () => {
+  openModal(diagnosticsModal);
   renderUsageRangePills();
   usageCustomRangeEl.hidden = usageRange !== "custom";
   const [recordsRes] = await Promise.all([fetch("/api/usage/records"), fetchAndRenderBalance()]);
   usageRecordsCache = await recordsRes.json();
   renderUsageStats();
+  const debugRes = await fetch("/api/debug/requests");
+  renderDebugRequests(await debugRes.json());
 });
 
 let usageClearConfirming = false;
@@ -2623,11 +2618,10 @@ usageClearBtn.addEventListener("click", async () => {
   renderUsageStats();
 });
 
-// --- Debug modal ---
-// Last 10 individual LLM API calls (not persisted, resets on server restart) - lets the user
-// inspect exactly what was sent/received for each request, including tool round-trips.
+// --- Debug tab (Usage & Debug modal) ---
+// Last 50 individual LLM API calls and tool executions (not persisted, resets on server restart) -
+// lets the user inspect exactly what was sent/received for each request, including tool round-trips.
 
-const debugBtn = document.getElementById("debug-btn");
 const debugRequestsListEl = document.getElementById("debug-requests-list");
 
 function formatDebugMessage(message) {
@@ -2725,12 +2719,6 @@ function renderDebugRequests(entries) {
   }
 }
 
-debugBtn.addEventListener("click", async () => {
-  openModal(debugModal);
-  const response = await fetch("/api/debug/requests");
-  const entries = await response.json();
-  renderDebugRequests(entries);
-});
 
 // Release the Speech Recognition DLL before pywebview cleans up its temp profile folder,
 // otherwise Windows locks the file and pywebview logs a WinError 5 access-denied warning.

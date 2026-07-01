@@ -1,13 +1,14 @@
 import asyncio
 import base64
 import json
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openai import APIError
 
-from app.core import game_state, memory
+from app.core import debug_log, game_state, memory
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -116,6 +117,17 @@ def _tool_calls_to_dict(tool_calls: dict[int, dict]) -> dict:
 
 
 async def _execute_tool(name: str, arguments: dict) -> tuple[str, list[dict] | None, dict | None]:
+    """Times and debug-logs every tool dispatch, then delegates to _execute_tool_impl. A single
+    choke point so no call site can forget to record it - the debug panel otherwise only sees
+    that the model *asked* to call a tool (via tool_calls on the parent chat entry), never what
+    the tool actually returned."""
+    start = time.monotonic()
+    message, extra_messages, side_effect = await _execute_tool_impl(name, arguments)
+    debug_log.record_tool_call(name, arguments, message, (time.monotonic() - start) * 1000)
+    return message, extra_messages, side_effect
+
+
+async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict] | None, dict | None]:
     """Returns (tool_message, extra_messages, side_effect). extra_messages are appended to the
     conversation (e.g. an image for the LLM to see); side_effect is an out-of-band event the
     frontend needs to react to immediately (e.g. a volume or listening-state change)."""

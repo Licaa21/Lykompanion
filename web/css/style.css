@@ -312,7 +312,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-radius: var(--r2);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--t3);
+  color: var(--t2);
   cursor: pointer;
   transition: background var(--ease), color var(--ease), border-color var(--ease), box-shadow var(--ease);
 }
@@ -321,44 +321,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-color: var(--glass-border);
   color: var(--t1);
   box-shadow: 0 0 12px rgba(91,95,199,0.15);
-}
-
-.tool-btn .notif-badge {
-  position: absolute;
-  top: 4px; right: 4px;
-  min-width: 14px; height: 14px;
-  padding: 0 3px;
-  border-radius: var(--pill);
-  background: var(--red);
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  pointer-events: none;
-  animation: badge-pulse 2.5s ease-in-out infinite;
-}
-.tool-btn .notif-badge[hidden] { display: none; }
-
-@keyframes badge-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--red-glow); }
-  50%       { box-shadow: 0 0 0 4px rgba(224,92,92,0); }
-}
-
-.tool-btn .status-dot {
-  position: absolute;
-  top: 6px; right: 6px;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--t3);
-  pointer-events: none;
-}
-.tool-btn .status-dot.idle   { background: var(--amber); }
-.tool-btn .status-dot.active {
-  background: var(--green);
-  animation: dot-pulse 2s ease-in-out infinite;
 }
 
 @keyframes dot-pulse {
@@ -718,7 +680,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-radius: var(--r2);
   border: none;
   background: transparent;
-  color: var(--t3);
+  color: var(--t2);
   cursor: pointer;
   transition: background var(--ease), color var(--ease), box-shadow var(--ease);
 }
@@ -1009,6 +971,12 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
+/* Used inside a tab-panel instead of pinned to the modal bottom, for modals where only one tab
+   needs a save action (e.g. Personal Data's Instructions tab, not its Memory tab). */
+.modal-footer--inline {
+  padding: 0; margin-top: 4px;
+  border-top: none;
+}
 
 /* ════════════════════════════════════════════════════
    FORM CONTROLS
@@ -1154,6 +1122,63 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .secondary-btn.confirming { background: linear-gradient(135deg, #e05c5c, #c94949); color: #fff; border-color: transparent; box-shadow: 0 2px 14px var(--red-glow); }
 
 /* ════════════════════════════════════════════════════
+   FLOATING PANEL — draggable, e.g. Game State
+════════════════════════════════════════════════════ */
+.floating-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  background: rgba(14, 15, 25, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-top-color: var(--glass-bright);
+  border-radius: var(--r3);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03) inset;
+  z-index: 150;
+  overflow: hidden;
+}
+.floating-panel[hidden] { display: none; }
+
+.floating-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 8px 9px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  background: linear-gradient(180deg, rgba(91,95,199,0.08) 0%, transparent 100%);
+  cursor: grab;
+  user-select: none;
+}
+.floating-panel-header:active { cursor: grabbing; }
+
+.floating-panel-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--t2);
+}
+
+.floating-panel-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--r1);
+  border: none;
+  background: transparent;
+  color: var(--t3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.floating-panel-close:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+
+.floating-panel .game-state-fields { padding: 10px 12px; }
+
+/* ════════════════════════════════════════════════════
    TOASTS
 ════════════════════════════════════════════════════ */
 .toast-container {
@@ -1236,33 +1261,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .toast-btn-default { background: rgba(255,255,255,0.06); color: var(--t2); }
 .toast-btn-default:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
 
-/* ════════════════════════════════════════════════════
-   NOTIFICATION BADGE (standalone)
-════════════════════════════════════════════════════ */
-.notif-badge {
-  min-width: 18px; height: 18px;
-  padding: 0 4px; border-radius: var(--pill);
-  background: var(--red); color: #fff;
-  font-size: 10px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center; line-height: 1;
-}
-.notif-badge[hidden] { display: none; }
-
-/* ════════════════════════════════════════════════════
-   NOTIFICATION MODAL
-════════════════════════════════════════════════════ */
-.notif-list { display: flex; flex-direction: column; }
-.notif-item {
-  display: flex; flex-direction: column; gap: 10px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--glass-border);
-}
-.notif-item:last-child { border-bottom: none; }
-.notif-item-text  { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
-.notif-item-sub   { font-size: 12px; color: var(--t2); }
-.notif-item-actions { display: flex; gap: 8px; }
-.notif-action-btn { flex: 1; font-size: 12px; padding: 6px 10px; }
-.notif-empty { font-size: 13px; color: var(--t3); margin: 0; padding: 12px 0; text-align: center; }
 
 /* ════════════════════════════════════════════════════
    CONSUMPTION MODAL
@@ -1376,6 +1374,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .memory-empty-hint { font-size: 13px; color: var(--t3); text-align: center; padding: 12px 0; }
 .memory-add-form { display: flex; gap: 8px; margin-top: 4px; }
 .memory-add-form input[type="text"],
+.memory-add-form textarea,
 .memory-add-form select {
   padding: 8px 10px; border-radius: var(--r2);
   border: 1px solid rgba(255,255,255,0.08);
@@ -1385,9 +1384,19 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   transition: border-color var(--ease);
 }
 .memory-add-form input[type="text"] { flex: 1; }
-.memory-add-form input[type="text"]::placeholder { color: var(--t3); }
+.memory-add-form input[type="text"]::placeholder,
+.memory-add-form textarea::placeholder { color: var(--t3); }
 .memory-add-form input:focus,
+.memory-add-form textarea:focus,
 .memory-add-form select:focus { border-color: rgba(91,95,199,0.5); }
+.memory-add-form textarea {
+  flex: 1;
+  resize: none;
+  line-height: 1.4;
+  min-height: 34px;
+  max-height: 160px;
+  overflow-y: auto;
+}
 .memory-add-form select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23565669'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
