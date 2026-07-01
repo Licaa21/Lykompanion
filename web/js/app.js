@@ -30,10 +30,30 @@ let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
 let includeScreenshot = false;
 
-// User's uploaded profile picture (shown in chat in place of the "Y" initial). Cache-busted
-// with a version stamp each time it's changed, since the URL itself never changes.
+// User's uploaded profile picture (shown in chat in place of the initial-letter fallback).
+// Cache-busted with a version stamp each time it's changed, since the URL itself never changes.
 let hasUserAvatar = false;
 let avatarVersion = Date.now();
+let userDisplayName = "You";
+
+function userAvatarFallback() {
+  return (userDisplayName.trim().charAt(0) || "Y").toUpperCase();
+}
+
+function userAvatarMarkup() {
+  return hasUserAvatar ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />` : userAvatarFallback();
+}
+
+// Already-rendered messages don't re-run appendMessage when the user changes their picture or
+// name, so update the DOM in place instead of requiring a chat switch to pick up the change.
+function refreshVisibleUserIdentity() {
+  document.querySelectorAll(".message.user").forEach((el) => {
+    const avatarEl = el.querySelector(".msg-avatar");
+    if (avatarEl) avatarEl.innerHTML = userAvatarMarkup();
+    const nameEl = el.querySelector(".msg-role-name");
+    if (nameEl) nameEl.textContent = userDisplayName;
+  });
+}
 
 async function refreshAvatarStatus() {
   const res = await fetch("/api/profile/avatar/status");
@@ -480,6 +500,23 @@ function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// The companion sometimes embeds an image URL that turns out to be dead/hallucinated - without
+// this, a failed load falls back to the browser's native broken-image icon with the alt text
+// squished next to it inline, rather than a clean placeholder. "error" doesn't bubble, but it
+// does fire during the capture phase, so one delegated listener covers every image.
+chatLog.addEventListener(
+  "error",
+  (event) => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains("chat-inline-image")) return;
+    const placeholder = document.createElement("span");
+    placeholder.className = "chat-image-broken";
+    placeholder.textContent = img.alt ? `[image unavailable: ${img.alt}]` : "[image unavailable]";
+    img.replaceWith(placeholder);
+  },
+  true
+);
+
 function renderMessageMarkup(text) {
   let html = escapeHtml(text);
 
@@ -516,17 +553,12 @@ function appendMessage(role, content, audioId, isNew = false) {
 
   const avatar = document.createElement("span");
   avatar.className = "msg-avatar";
-  avatar.innerHTML =
-    role === "assistant"
-      ? `<img src="img/logo.png" alt="" />`
-      : hasUserAvatar
-      ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />`
-      : "Y";
+  avatar.innerHTML = role === "assistant" ? `<img src="img/logo.png" alt="" />` : userAvatarMarkup();
   meta.appendChild(avatar);
 
   const roleName = document.createElement("span");
   roleName.className = "msg-role-name";
-  roleName.textContent = role === "user" ? "You" : "Lykompanion";
+  roleName.textContent = role === "user" ? userDisplayName : "Lykompanion";
   meta.appendChild(roleName);
 
   // ── Action buttons (hidden for pure voice bubbles) ────────
@@ -1643,7 +1675,7 @@ const avatarUploadBtn = document.getElementById("cfg-avatar-upload-btn");
 const avatarRemoveBtn = document.getElementById("cfg-avatar-remove-btn");
 
 function renderAvatarPreview() {
-  avatarPreviewEl.innerHTML = hasUserAvatar ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />` : "Y";
+  avatarPreviewEl.innerHTML = userAvatarMarkup();
 }
 
 avatarUploadBtn.addEventListener("click", () => avatarInputEl.click());
@@ -1663,11 +1695,21 @@ avatarInputEl.addEventListener("change", async () => {
   hasUserAvatar = true;
   avatarVersion = Date.now();
   renderAvatarPreview();
+  refreshVisibleUserIdentity();
 });
 
 avatarRemoveBtn.addEventListener("click", async () => {
   await fetch("/api/profile/avatar", { method: "DELETE" });
   hasUserAvatar = false;
+  renderAvatarPreview();
+  refreshVisibleUserIdentity();
+});
+
+const userNameInput = document.getElementById("cfg-user-name");
+
+userNameInput.addEventListener("input", () => {
+  userDisplayName = userNameInput.value.trim() || "You";
+  refreshVisibleUserIdentity();
   renderAvatarPreview();
 });
 
@@ -1733,10 +1775,25 @@ function updateTtsProviderVisibility() {
 
 document.getElementById("cfg-tts-provider").addEventListener("change", updateTtsProviderVisibility);
 
+function updateWebSearchProviderVisibility() {
+  const provider = document.getElementById("cfg-web-search-provider").value;
+  document.querySelectorAll("[data-web-search-provider]").forEach((el) => {
+    el.hidden = el.dataset.webSearchProvider !== provider;
+  });
+}
+
+document.getElementById("cfg-web-search-provider").addEventListener("change", updateWebSearchProviderVisibility);
+
 async function loadConfig() {
   const response = await fetch("/api/config");
   const cfg = await response.json();
+  userDisplayName = cfg.user_display_name || "You";
+  userNameInput.value = userDisplayName;
   renderAvatarPreview();
+  refreshVisibleUserIdentity();
+  document.getElementById("cfg-web-search-provider").value = cfg.web_search_provider;
+  document.getElementById("cfg-searxng-base-url").value = cfg.searxng_base_url || "";
+  updateWebSearchProviderVisibility();
   document.getElementById("cfg-tts-provider").value = cfg.tts_provider;
   updateTtsProviderVisibility();
   document.getElementById("cfg-api-key").placeholder = cfg.openrouter_api_key_set
@@ -1837,9 +1894,12 @@ document.getElementById("cfg-save").addEventListener("click", async () => {
   const igdbSecretInput = document.getElementById("cfg-igdb-client-secret");
   const steamApiKeyInput = document.getElementById("cfg-steam-api-key");
   const body = {
+    user_display_name: userNameInput.value.trim() || "You",
     openrouter_model: document.getElementById("cfg-model").value,
     openrouter_base_url: document.getElementById("cfg-openrouter-base-url").value.trim() || "https://openrouter.ai/api/v1",
     memory_extraction_model: document.getElementById("cfg-memory-model").value,
+    web_search_provider: document.getElementById("cfg-web-search-provider").value,
+    searxng_base_url: document.getElementById("cfg-searxng-base-url").value.trim() || "http://localhost:8080",
     tts_provider: document.getElementById("cfg-tts-provider").value,
     google_tts_api_key: document.getElementById("cfg-google-tts-api-key").value || null,
     google_tts_voice: document.getElementById("cfg-chirp3-voice").value,

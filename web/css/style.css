@@ -426,14 +426,14 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .msg-meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
 }
 
 .msg-avatar {
-  width: 24px; height: 24px;
+  width: 32px; height: 32px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700;
+  font-size: 13px; font-weight: 700;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -450,11 +450,11 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .message.user .msg-avatar img { object-fit: cover; padding: 0; }
 
 .msg-role-name {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--t3);
+  color: var(--t2);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   flex: 1;
 }
 
@@ -493,6 +493,9 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .message.user .msg-meta {
   flex-direction: row-reverse;
 }
+.message.user .msg-role-name {
+  text-align: right;
+}
 .message.user .msg-content {
   align-self: flex-end;
   background: var(--blue-grad);
@@ -521,6 +524,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   margin: 8px 0;
   border: 1px solid var(--glass-border);
   object-fit: contain;
+}
+.chat-image-broken {
+  display: inline-block;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--t3);
+  padding: 2px 0;
 }
 
 /* ════════════════════════════════════════════════════

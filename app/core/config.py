@@ -20,6 +20,9 @@ def persist_env_value(key: str, value: str) -> None:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # Shown next to the user's own messages in chat, instead of the default "You".
+    user_display_name: str = "You"
+
     openrouter_api_key: str = ""
     openrouter_management_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
@@ -33,6 +36,11 @@ class Settings(BaseSettings):
     openrouter_voice: str = ""
     tts_speed: float = 1.0
     tts_volume: float = 1.0
+
+    # "openrouter" (web-grounded chat completion, text-only) or "searxng" (self-hosted
+    # metasearch with a real image-search endpoint).
+    web_search_provider: str = "openrouter"
+    searxng_base_url: str = "http://localhost:8080"
 
     host: str = "0.0.0.0"
     port: int = 8000

@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/config", tags=["config"])
 @router.get("", response_model=CompanionConfig)
 async def get_config() -> CompanionConfig:
     return CompanionConfig(
+        user_display_name=settings.user_display_name,
         openrouter_model=settings.openrouter_model,
         openrouter_base_url=settings.openrouter_base_url,
         openrouter_voice_model=settings.openrouter_voice_model,
@@ -20,6 +21,8 @@ async def get_config() -> CompanionConfig:
         tesseract_cmd=settings.tesseract_cmd or None,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
+        web_search_provider=settings.web_search_provider,
+        searxng_base_url=settings.searxng_base_url,
         tts_provider=settings.tts_provider,
         kokoro_base_url=settings.kokoro_base_url,
         kokoro_voice=settings.kokoro_voice,
@@ -49,12 +52,21 @@ async def get_config() -> CompanionConfig:
 
 @router.put("", response_model=CompanionConfig)
 async def update_config(config: CompanionConfig) -> CompanionConfig:
+    settings.user_display_name = config.user_display_name.strip() or "You"
+    persist_env_value("USER_DISPLAY_NAME", settings.user_display_name)
+
     settings.openrouter_model = config.openrouter_model
     persist_env_value("OPENROUTER_MODEL", config.openrouter_model)
 
     if config.openrouter_base_url:
         settings.openrouter_base_url = config.openrouter_base_url
         persist_env_value("OPENROUTER_BASE_URL", config.openrouter_base_url)
+
+    settings.web_search_provider = config.web_search_provider
+    persist_env_value("WEB_SEARCH_PROVIDER", config.web_search_provider)
+    if config.searxng_base_url:
+        settings.searxng_base_url = config.searxng_base_url
+        persist_env_value("SEARXNG_BASE_URL", config.searxng_base_url)
 
     settings.tts_provider = config.tts_provider
     persist_env_value("TTS_PROVIDER", config.tts_provider)

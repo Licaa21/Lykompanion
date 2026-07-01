@@ -1,3 +1,5 @@
+import httpx
+
 from app.core.config import settings
 from app.services.llm.client import client
 
@@ -23,10 +25,52 @@ WEB_SEARCH_TOOLS = [
 ]
 
 
+async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> str | None:
+    """Best-effort image lookup - a self-hosted SearXNG instance is a real image search engine,
+    unlike the OpenRouter web plugin, so this can return an actual direct image URL."""
+    try:
+        response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "images"})
+        response.raise_for_status()
+        results = response.json().get("results", [])
+    except Exception:
+        return None
+    for result in results:
+        image_url = result.get("img_src") or result.get("url")
+        if image_url:
+            return image_url
+    return None
+
+
+async def _execute_web_search_searxng(query: str) -> str:
+    async with httpx.AsyncClient(base_url=settings.searxng_base_url, timeout=15) as http_client:
+        try:
+            response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "general"})
+            response.raise_for_status()
+        except Exception as exc:
+            return f"Web search failed: {exc}"
+
+        results = response.json().get("results", [])[:5]
+        if not results:
+            text = f"No web search results found for '{query}'."
+        else:
+            text = "\n\n".join(
+                f"{r.get('title', '')}\n{r.get('url', '')}\n{r.get('content', '')}" for r in results
+            )
+
+        image_url = await _search_searxng_images(http_client, query)
+        if image_url:
+            text += f"\n\nImage: {image_url}"
+
+        return text
+
+
 async def execute_web_search(arguments: dict) -> str:
     query = (arguments.get("query") or "").strip()
     if not query:
         return "No search query given."
+
+    if settings.web_search_provider == "searxng":
+        return await _execute_web_search_searxng(query)
 
     try:
         response = await client.chat.completions.create(

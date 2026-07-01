@@ -120,6 +120,7 @@
             <button type="button" class="subtab-btn active" data-subtab="core">Core</button>
             <button type="button" class="subtab-btn" data-subtab="vision">Vision</button>
             <button type="button" class="subtab-btn" data-subtab="game-awareness">Game Awareness</button>
+            <button type="button" class="subtab-btn" data-subtab="web-search">Web Search</button>
           </div>
 
           <div class="subtab-panel" data-subtab="core">
@@ -134,6 +135,10 @@
                 <button type="button" id="cfg-avatar-remove-btn" class="secondary-btn">Remove</button>
               </div>
             </div>
+            <label>
+              <span class="cfg-label">Display Name <button type="button" class="cfg-help" data-tip="Your name, shown next to your messages in chat instead of 'You'.">?</button></span>
+              <input id="cfg-user-name" type="text" placeholder="You" autocomplete="off" />
+            </label>
             <div class="cfg-key-row">
               <label>
                 <span class="cfg-label">OpenRouter API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests.">?</button></span>
@@ -222,6 +227,22 @@
                 <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
               </label>
               <div id="game-state-whitelist" class="memory-list"></div>
+            </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab="web-search" hidden>
+            <label>
+              <span class="cfg-label">Web Search Provider <button type="button" class="cfg-help" data-tip="Which service the web_search tool uses. OpenRouter's web plugin only grounds text answers with citations - it can't reliably find real images. SearXNG is a self-hosted metasearch engine with a real image-search endpoint.">?</button></span>
+              <select id="cfg-web-search-provider">
+                <option value="openrouter">OpenRouter (web plugin)</option>
+                <option value="searxng">SearXNG (self-hosted)</option>
+              </select>
+            </label>
+            <div data-web-search-provider="searxng">
+              <label>
+                <span class="cfg-label">SearXNG Base URL <button type="button" class="cfg-help" data-tip="Address of your self-hosted SearXNG instance (e.g. via Docker). Must have JSON output format enabled in its settings.yml.">?</button></span>
+                <input id="cfg-searxng-base-url" type="text" placeholder="http://localhost:8080" autocomplete="off" />
+              </label>
             </div>
           </div>
         </section>

@@ -35,6 +35,7 @@ class TTSRequest(BaseModel):
 
 
 class CompanionConfig(BaseModel):
+    user_display_name: str = "You"
     openrouter_model: str
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_voice_model: str | None = None
@@ -43,6 +44,8 @@ class CompanionConfig(BaseModel):
     game_state_poll_interval_seconds: int = 90
     game_state_model: str | None = None
     tesseract_cmd: str | None = None
+    web_search_provider: Literal["openrouter", "searxng"] = "openrouter"
+    searxng_base_url: str = "http://localhost:8080"
     tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"
     kokoro_base_url: str = "http://localhost:8880/v1"
     kokoro_voice: str | None = None
