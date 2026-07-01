@@ -2401,10 +2401,16 @@ gameStatePanelCloseBtn.addEventListener("click", () => {
   });
 })();
 
+// Fast enough that the panel feels immediate when tracking starts/stops (the backend itself
+// flips tracking via game_state.start_tracking() the moment it notices, via game_state_extraction.
+// _capture_tick()) without hammering the endpoint - a slow fixed interval here would reintroduce
+// the "state changed, but the panel doesn't show it yet" lag even though the backend is instant.
+const GAME_STATE_PANEL_POLL_MS = 2000;
+
 fetchGameState().then(updateGameStatePanel);
 setInterval(() => {
   fetchGameState().then(updateGameStatePanel);
-}, 20000);
+}, GAME_STATE_PANEL_POLL_MS);
 
 // --- Game-state process blacklist / whitelist (Settings > General) ---
 
