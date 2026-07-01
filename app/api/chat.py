@@ -122,10 +122,10 @@ def _schedule_memory_extraction(user_message: str, assistant_message: str) -> No
     task.add_done_callback(_background_tasks.discard)
 
 
-def _tool_calls_to_dict(tool_calls: dict[int, dict]) -> dict:
+def _tool_calls_to_dict(tool_calls: dict[int, dict], content: str | None = None) -> dict:
     return {
         "role": "assistant",
-        "content": None,
+        "content": content,
         "tool_calls": [
             {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
             for tc in tool_calls.values()
@@ -223,13 +223,20 @@ async def _stream_chat_with_tools(
     events like {"type": "volume", ...} or {"type": "stop_listening", ...} the moment a tool
     changes something the frontend needs to react to immediately, rather than only after the
     full reply finishes."""
+    prior_round_had_text = False
     for _ in range(MAX_TOOL_ITERATIONS):
         tool_calls: dict[int, dict] = {}
+        round_text = ""
 
         async for delta in stream_chat_completion_deltas(
             messages, model=model, tools=ALL_TOOLS, source=source, provider=settings.llm_provider
         ):
             if delta.content:
+                # Separate this round's text from the previous round's, so segments emitted
+                # around a tool call don't fuse into one run-on sentence in the UI.
+                if prior_round_had_text and not round_text:
+                    yield {"type": "delta", "text": "\n\n"}
+                round_text += delta.content
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -244,7 +251,12 @@ async def _stream_chat_with_tools(
         if not tool_calls:
             return
 
-        messages.append(_tool_calls_to_dict(tool_calls))
+        if round_text:
+            prior_round_had_text = True
+        # Keep the text the model emitted alongside its tool calls - dropping it means the next
+        # iteration can't see what it already said and restarts the reply from scratch, so the
+        # user gets the same greeting stacked 3-4 times in one bubble.
+        messages.append(_tool_calls_to_dict(tool_calls, round_text or None))
         tc_list = list(tool_calls.values())
         parsed = []
         for tc in tc_list:

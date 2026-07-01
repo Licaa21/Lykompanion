@@ -9,12 +9,14 @@ import time
 import threading
 from pathlib import Path
 
-# WebView2 white-screen-on-maximize fix: disable the GPU compositing path that
-# causes the renderer to blank out when the window is resized/maximized on some
-# Windows 11 + driver combinations.
+# WebView2 white-screen-on-maximize fix: the blank-out on resize/maximize comes from
+# Chromium's native window occlusion tracker wrongly deciding the window is covered and
+# suspending the renderer. Disabling just that tracker fixes it while keeping GPU
+# compositing on — the previous fix (--disable-gpu-compositing) forced the whole UI into
+# software rendering and made everything sluggish.
 os.environ.setdefault(
     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    "--disable-gpu-compositing",
+    "--disable-features=CalculateNativeWinOcclusion",
 )
 
 PORT = 6692
