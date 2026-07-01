@@ -20,6 +20,12 @@ const gameStatePanelDot = document.getElementById("game-state-panel-dot");
 const gameStatePanelCloseBtn = document.getElementById("game-state-panel-close");
 const gameStateFields = document.getElementById("game-state-fields");
 const gameStateStats = document.getElementById("game-state-stats");
+const gameStateSessionBar = document.getElementById("game-state-session-bar");
+const gameStateSessionToggle = document.getElementById("game-state-session-toggle");
+const gameStateSessionNameEl = document.getElementById("game-state-session-name");
+const gameStateSessionChevron = document.getElementById("game-state-session-chevron");
+const gameStateNewSessionBtn = document.getElementById("game-state-new-session-btn");
+const gameStateSessionList = document.getElementById("game-state-session-list");
 const settingsModal = document.getElementById("settings-modal");
 const personalDataModal = document.getElementById("personal-data-modal");
 const diagnosticsModal = document.getElementById("diagnostics-modal");
@@ -611,7 +617,7 @@ function renderMessageMarkup(text) {
   return html;
 }
 
-function appendMessage(role, content, audioId, isNew = false) {
+function appendMessage(role, content, audioId, isNew = false, audioBlob = null) {
   const el = document.createElement("div");
   el.className = `message ${role}`;
   if (isNew) el.classList.add("message-enter");
@@ -693,7 +699,10 @@ function appendMessage(role, content, audioId, isNew = false) {
 
   // ── Voice player — styled as the message bubble ───────────
   if (audioId) {
-    const audio = new Audio(`/api/voice/${audioId}`);
+    // Use a local blob URL for immediate playback on new messages so the player
+    // works instantly without waiting for the server upload to complete.
+    const audioSrc = audioBlob ? URL.createObjectURL(audioBlob) : `/api/voice/${audioId}`;
+    const audio = new Audio(audioSrc);
 
     const player = document.createElement("div");
     // voice-bubble class makes it look like the role's message bubble
@@ -1011,7 +1020,7 @@ async function sendDirectVoice(wavBlob) {
   stopNarration();
   awaitingReply = true;
   try {
-    appendMessage("user", "🎤 (voice message)", audioId, true);
+    appendMessage("user", "🎤 (voice message)", audioId, true, wavBlob);
     setVoiceStatus("Sending voice message...");
 
     const formData = new FormData();
@@ -1019,7 +1028,7 @@ async function sendDirectVoice(wavBlob) {
     formData.append("history", JSON.stringify(chat.messages));
     formData.append("include_screenshot", String(includeScreenshot));
 
-    const response = await fetch("/api/chat/voice", { method: "POST", body: formData });
+    const response = await fetch("/api/chat/voice/stream", { method: "POST", body: formData });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -1028,21 +1037,54 @@ async function sendDirectVoice(wavBlob) {
       return;
     }
 
-    const data = await response.json();
-    appendMessage("assistant", data.reply, null, true);
+    const assistantEl = appendMessage("assistant", "", null, true);
+    let fullReply = "";
+    let stopListening = false;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (!rawEvent.startsWith("data: ")) continue;
+
+        const payload = JSON.parse(rawEvent.slice(6));
+
+        if (payload.error) {
+          assistantEl.innerHTML = renderMessageMarkup(`⚠️ ${payload.error}`);
+          return;
+        }
+        if (payload.delta) {
+          fullReply += payload.delta;
+          assistantEl.innerHTML = renderMessageMarkup(fullReply);
+          chatLog.scrollTop = chatLog.scrollHeight;
+        }
+        if (payload.volume !== undefined) applyNarrationVolume(payload.volume);
+        if (payload.stop_listening) { stopListening = true; agentStopListening(); }
+        if (payload.done) applyNarrationVolume(payload.narration_volume);
+      }
+    }
+
     addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
-    addMessageToChat(chat, "assistant", data.reply);
-    maybeGenerateTitle(chat, "(voice message)", data.reply);
-    applyNarrationVolume(data.narration_volume);
+    addMessageToChat(chat, "assistant", fullReply);
+    maybeGenerateTitle(chat, "(voice message)", fullReply);
 
     awaitingReply = false;
-    if (data.stop_listening) {
+    if (stopListening) {
       agentStopListening();
     } else {
       setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     }
     if (document.getElementById("cfg-narrate").checked) {
-      await narrate(data.reply);
+      await narrate(fullReply);
     }
   } catch (err) {
     setVoiceStatus("Voice chat failed", "error");
@@ -2280,6 +2322,153 @@ const GAME_STATE_CLOSED_KEY = "lyko-game-state-panel-closed";
 let gameStatePanelClosed = localStorage.getItem(GAME_STATE_CLOSED_KEY) === "true";
 let lastTrackedProcess = null;
 
+// Session selector state - updated by updateGameStatePanel on every poll
+let _sessionProcess = null;
+let _sessionActiveId = null;
+let _sessionListOpen = false;
+
+function closeSessionList() {
+  gameStateSessionList.hidden = true;
+  gameStateSessionChevron.classList.remove("open");
+  _sessionListOpen = false;
+}
+
+async function openSessionList(focusNewInput = false) {
+  await _renderSessionList();
+  gameStateSessionList.hidden = false;
+  gameStateSessionChevron.classList.add("open");
+  _sessionListOpen = true;
+  if (focusNewInput) _showNewSessionInput();
+}
+
+async function _renderSessionList() {
+  if (!_sessionProcess) return;
+  const sessions = await fetch(`/api/game-state/sessions/${encodeURIComponent(_sessionProcess)}`).then((r) => r.json());
+  gameStateSessionList.innerHTML = "";
+  for (const session of sessions) {
+    gameStateSessionList.appendChild(_makeSessionItem(session));
+  }
+}
+
+function _makeSessionItem(session) {
+  const item = document.createElement("div");
+  item.className = "gs-session-item" + (session.session_id === _sessionActiveId ? " active" : "");
+
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "gs-session-item-name";
+  nameSpan.textContent = session.name;
+  item.appendChild(nameSpan);
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "gs-session-rename-btn";
+  renameBtn.title = "Rename";
+  renameBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+  item.appendChild(renameBtn);
+
+  nameSpan.addEventListener("click", async () => {
+    if (session.session_id === _sessionActiveId) { closeSessionList(); return; }
+    await fetch(`/api/game-state/sessions/${encodeURIComponent(_sessionProcess)}/${session.session_id}/active`, { method: "PUT" });
+    const data = await fetchGameState();
+    updateGameStatePanel(data);
+    closeSessionList();
+  });
+
+  renameBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "gs-session-item-name-input";
+    input.value = session.name;
+    item.replaceChild(input, nameSpan);
+    input.focus();
+    input.select();
+
+    const restore = () => { if (item.contains(input)) item.replaceChild(nameSpan, input); };
+    const save = async () => {
+      const newName = input.value.trim();
+      if (newName && newName !== session.name) {
+        const res = await fetch(`/api/game-state/sessions/${encodeURIComponent(_sessionProcess)}/${session.session_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName }),
+        });
+        if (res.ok) {
+          session.name = newName;
+          nameSpan.textContent = newName;
+          if (session.session_id === _sessionActiveId) gameStateSessionNameEl.textContent = newName;
+        }
+      }
+      restore();
+    };
+    input.addEventListener("blur", save);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+      if (e.key === "Escape") { input.removeEventListener("blur", save); restore(); }
+    });
+  });
+
+  return item;
+}
+
+function _showNewSessionInput() {
+  if (gameStateSessionList.querySelector(".gs-session-new-row")) {
+    gameStateSessionList.querySelector(".gs-session-new-input")?.focus();
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "gs-session-new-row";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "gs-session-new-input";
+  input.placeholder = "Session name…";
+  row.appendChild(input);
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.className = "gs-session-new-confirm";
+  confirmBtn.textContent = "Create";
+  row.appendChild(confirmBtn);
+
+  const create = async () => {
+    const name = input.value.trim();
+    if (!name) return;
+    const res = await fetch(`/api/game-state/sessions/${encodeURIComponent(_sessionProcess)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (res.ok) {
+      const data = await fetchGameState();
+      updateGameStatePanel(data);
+      closeSessionList();
+    }
+  };
+  confirmBtn.addEventListener("click", create);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); create(); }
+    if (e.key === "Escape") row.remove();
+  });
+
+  gameStateSessionList.appendChild(row);
+  input.focus();
+}
+
+gameStateSessionToggle.addEventListener("click", () => {
+  if (_sessionListOpen) closeSessionList();
+  else openSessionList();
+});
+
+gameStateNewSessionBtn.addEventListener("click", () => {
+  if (_sessionListOpen) _showNewSessionInput();
+  else openSessionList(true);
+});
+
+document.addEventListener("click", (e) => {
+  if (_sessionListOpen && !gameStatePanel.contains(e.target)) closeSessionList();
+});
+
 function renderGameStateFields(data) {
   gameStateFields.innerHTML = "";
   const rows = [
@@ -2353,8 +2542,16 @@ function updateGameStatePanel(data) {
 
   if (!data.tracking) {
     gameStatePanel.hidden = true;
+    gameStateSessionBar.hidden = true;
+    closeSessionList();
     return;
   }
+
+  // Update session bar (don't re-render the open list to avoid disrupting in-progress renames)
+  _sessionProcess = data.process;
+  _sessionActiveId = data.session_id;
+  gameStateSessionBar.hidden = false;
+  gameStateSessionNameEl.textContent = data.session_name || "Default";
 
   gameStatePanelDot.classList.add("active");
   gameStatePanelDot.title = `Tracking: ${data.process}`;

@@ -101,10 +101,26 @@ class TrainingDataDocument(BaseModel):
     content: str = ""
 
 
+class GameSession(BaseModel):
+    session_id: str
+    name: str
+    updated_at: str | None = None
+
+
+class GameSessionCreate(BaseModel):
+    name: str
+
+
+class GameSessionRename(BaseModel):
+    name: str
+
+
 class GameStateResponse(BaseModel):
     enabled: bool
     tracking: bool
     process: str | None = None
+    session_id: str | None = None
+    session_name: str | None = None
     trackers: list[GameStateTracker] = []
     extraction_call_count: int = 0
     extraction_cost_usd: float = 0.0
@@ -145,6 +161,8 @@ class MemoryEntry(BaseModel):
     id: str
     content: str
     process: str | None = None
+    session_id: str | None = None
+    saved_at: str | None = None
 
 
 class MemoryCreate(BaseModel):

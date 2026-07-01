@@ -16,6 +16,7 @@ It's built to be used **hands-free while playing** — not as a chat app you sit
 - [Architecture notes](#architecture-notes)
   - [The agentic tool loop](#the-agentic-tool-loop)
   - [Memory](#memory)
+  - [Game sessions](#game-sessions)
   - [Passive game-state awareness](#passive-game-state-awareness)
   - [Live mic / hands-free mode](#live-mic--hands-free-mode)
   - [Narration](#narration)
@@ -44,11 +45,14 @@ A typical turn looks like:
 - **Hands-free voice loop** — a live mic mode using voice-activity detection (with pre-roll buffering so the first word isn't clipped) automatically records your utterance and sends it, no push-to-talk needed. Narration is interrupted ("barge-in") if you start talking over it.
 - **Wake word** — once hands-free is off (manually, or because the agent stopped it), say a configurable phrase (default "Hey Buddy") to turn it back on without touching the keyboard/mouse. Runs entirely in-browser via the Web Speech API.
 - **Streaming spoken replies** — text streams in and is narrated sentence-by-sentence as it's generated, not after the full reply finishes.
-- **Persistent memory** — the agent proactively saves and forgets facts about you (preferences, what you're playing, life context) across sessions, without being explicitly told to, and can tag a fact as specific to the game currently being played (so it only resurfaces while that game is active). A dedicated background LLM pass also analyzes every exchange for things worth remembering, so this doesn't depend on the main chat model reliably deciding to call a memory tool mid-conversation. Memory is viewable/editable/removable directly in the UI.
+- **Persistent memory with three scopes** — the agent proactively saves and forgets facts about you across sessions without being asked. Facts are tagged at three granularities: **user** (your name, preferences — always visible), **game** (applies to all runs of a specific game — e.g. preferred class), or **session** (specific to the current playthrough — character level, quest progress, decisions). A dedicated background LLM pass also analyzes every exchange for things worth remembering. Memory is viewable/editable/removable directly in the UI.
+- **Named game sessions** — each time you start a game, a session is created. You can name sessions ("first playthrough", "NG+"), switch between them, and create new ones — all inline in the floating Game State panel. Facts saved during a session are scoped to it, so starting a new run doesn't pollute the context with the last one's progress.
+- **Crash/rollback recovery** — if the companion notices a stat regression (health dropped, level went down), it brings it up naturally in conversation. Once you confirm you loaded an older save or the game crashed, the agent can roll back the memories it saved during the lost window so they don't contradict your actual current state.
 - **Vision** — the agent can take a screenshot of your screen itself (auto-detecting which monitor you're actively using on multi-monitor setups), or you can manually attach one to a message.
 - **Awareness of real-world context** — it can check which game/app is currently focused, your system specs, and can pause/resume its own hands-free listening (e.g. if you say you're stepping away, or it notices the mic is picking up audio not meant for it).
 - **Passive game-state awareness** *(opt-in, Windows-only, off by default)* — periodically OCRs your screen in the background and keeps a live snapshot of your current quest/location/character, injected into every conversation automatically. New/unfamiliar processes require explicit one-time approval through the notification center before anything gets read. See [Passive game-state awareness](#passive-game-state-awareness).
-- **Web search & game databases** — OpenRouter's web search plugin, IGDB (structured game data), and Steam (store info + your own library/playtime) are all available as agent tools.
+- **Web search & game databases** — web search via OpenRouter's plugin or a self-hosted [SearXNG](https://github.com/searxng/searxng) instance, IGDB (structured game data), and Steam (store info + your own library/playtime) are all available as agent tools.
+- **Profile pictures & display name** — set your own name (shown on your messages in the sidebar) and an avatar image for yourself and the companion, uploaded via Settings.
 - **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), wake word, live-mic sensitivity, screenshot quality, all from a Settings UI, persisted to `.env`.
 - **Cost tracking & debugging** — per-call usage records (tokens, cost, which feature triggered it) with time-range filtering and a per-feature breakdown, optional OpenRouter account balance display, and a Debug panel showing the last 10 raw LLM requests/responses for troubleshooting.
 - **Multiple chat sessions** — sidebar with per-chat history, auto-titled by the LLM after the first exchange. Persisted server-side (survives clearing browser data), along with replayable voice message recordings.
@@ -94,6 +98,9 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `OPENROUTER_API_KEY` | Required. Your OpenRouter key (used for all LLM/TTS calls). |
 | `OPENROUTER_MANAGEMENT_KEY` | Optional. A separate OpenRouter [Provisioning API key](https://openrouter.ai/settings/provisioning-keys) (not your regular inference key) used only to display your account's credit balance in the Consumption view. Everything else works fine without it. |
 | `OPENROUTER_MODEL` | Main chat model. Must support audio input — voice messages are sent to it directly. |
+| `USER_DISPLAY_NAME` | Your name as shown on your chat messages. Default `"You"`. |
+| `WEB_SEARCH_PROVIDER` | `openrouter` (default, billed via OpenRouter) or `searxng` (self-hosted, free). |
+| `SEARXNG_BASE_URL` | Base URL of a running SearXNG instance when `WEB_SEARCH_PROVIDER=searxng`. Default `http://localhost:8080`. |
 | `TTS_PROVIDER` | `kokoro` (local) or `openrouter` (cloud Speech models). |
 | `KOKORO_BASE_URL` | Where your local Kokoro server is running. |
 | `KOKORO_VOICE`, `OPENROUTER_TTS_MODEL`, `OPENROUTER_VOICE` | TTS voice selection per provider. |
@@ -145,12 +152,30 @@ Some tools have side effects the *frontend* needs to react to immediately rather
 
 ### Memory
 
-Memory is a flat JSON list of `{id, content, process}` entries (`data/memory.json`), injected into the system prompt as "Known facts about the user" on every request. `process` is optional — when set (e.g. `"bg3.exe"`), that fact is treated as specific to whatever's currently being played and is only included in the prompt while that same process is the active foreground app; general facts (`process: null`) always show up. There are two independent paths that can write to memory:
+Memory is a flat JSON list of `{id, content, process, session_id, saved_at}` entries (`data/memory.json`), injected into the system prompt as "Known facts about the user" on every request. Facts are filtered to three tiers based on what's currently being played:
 
-1. **Explicit tools** (`save_memory`, `remove_memory`) — available to the main chat model, used when it decides mid-conversation to remember/forget something. `save_memory` takes a `game_specific` flag the model sets when the fact is tied to the current playthrough rather than generally true.
-2. **A dedicated background extraction pass** (`app/services/llm/memory_extraction.py`) — after every text exchange, a separate, single-purpose LLM call analyzes the exchange against current memory and decides what to save/remove, applying it automatically. This runs as a fire-and-forget `asyncio` task so it never adds latency to the visible reply.
+- **User scope** (`process: null`) — about the person regardless of game: name, preferences, life context. Always shown.
+- **Game scope** (`process` set, `session_id: null`) — specific to one game but true across all its runs: preferred class style, how they approach this title. Shown only while that game is active.
+- **Session scope** (`process` + `session_id` both set) — specific to the current playthrough: character level, quest progress, decisions made this run. Shown only in that named session.
+
+`saved_at` is an ISO timestamp written at creation (never updated on edit) — used by the rollback tool to find which memories fall within a lost-progress window.
+
+There are two independent paths that can write to memory:
+
+1. **Explicit tools** — available to the main chat model: `save_user_memory`, `save_game_memory`, `save_session_memory` (each maps to the appropriate scope automatically using the tracked game state), `remove_memory`, and `rollback_session_memories(hours_lost)` (removes session-scoped memories saved within the specified window — used after the player confirms a crash or loaded an older save; never touches global or other-session memories).
+2. **A dedicated background extraction pass** (`app/services/llm/memory_extraction.py`) — after every text exchange, a separate, single-purpose LLM call analyzes the exchange against current memory and decides what to save/remove, applying it automatically. This also uses three scopes (`"user"` / `"game"` / `"session"`) and is filtered to the active session so it can't accidentally overwrite facts from a different playthrough. Runs as a fire-and-forget `asyncio` task, never adding latency to the visible reply.
 
 The second path exists because relying purely on the conversational model's own initiative to call memory tools turned out to be unreliable in practice, especially with smaller/cheaper models — they tend to only act on explicit instructions rather than proactively managing memory as a background habit. Forcing a dedicated pass every turn makes memory capture deterministic regardless of which model is handling the conversation.
+
+### Game sessions
+
+Each time a game is tracked, Lykompanion creates a named **session** for it (default name "default", auto-created on first track). Sessions are stored per-process in `data/game_state_sessions.json`, keyed `process::session_id`. The active session for a given game is remembered across restarts.
+
+You can manage sessions from the **floating Game State panel** (bottom-right when a game is tracked): an inline expandable list shows all sessions for the current game, lets you rename any of them in place, switch to a different one, or create a new one. The panel grows to fit — no dropdown clipping issues.
+
+Session facts (scope `"session"`) only appear in the system prompt while that specific session is active. Switching to a new session gives the companion a clean slate for playthrough-specific context while all user-scoped and game-scoped facts remain visible.
+
+**Divergence detection** — the game-state extraction pass compares each update against the previous snapshot. If it spots stat regressions (e.g. health dropped dramatically, level went down) that can't be explained by normal gameplay, it emits a `divergence_warning`. On the next chat turn the companion mentions this naturally and asks what happened (crash? loaded an older save?). Once you confirm how much progress was lost, the agent calls `rollback_session_memories(hours_lost)` to remove session memories from the affected window so they no longer contradict your actual current state.
 
 ### Passive game-state awareness
 
@@ -210,22 +235,30 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `GET /api/models/llm` `/tts` | Model lists for Settings dropdowns. |
 | `GET /api/screenshot` | One-off screenshot capture (used by the manual screenshot toggle). |
 | `POST /api/tts` | Synthesize speech for arbitrary text. |
-| `GET /api/game-state` | Current passive game-state snapshot (read-only) — powers the Game State sidebar indicator/modal. |
+| `GET /api/game-state` | Current passive game-state snapshot including active session id/name — powers the floating Game State panel. |
 | `GET /api/game-state/pending` | Foreground processes currently awaiting allow/blacklist approval (a persisted queue, not just one) — powers the notification bell. |
 | `GET/POST /api/game-state/whitelist`, `DELETE /api/game-state/whitelist/{process}` | Processes approved for game-state OCR. |
 | `GET/POST /api/game-state/blacklist`, `DELETE /api/game-state/blacklist/{process}` | Processes the poller should never OCR. |
+| `GET /api/sessions/{process}` | List all named sessions for a game process. |
+| `POST /api/sessions/{process}` | Create a new session for a game process. |
+| `PUT /api/sessions/{process}/{id}/active` | Switch the active session for a process. |
+| `PATCH /api/sessions/{process}/{id}` | Rename a session. |
 
 ## Tools available to the agent
 
 | Tool | What it does | Requires setup? |
 |---|---|---|
-| `save_memory` / `remove_memory` | Persist or forget a fact about the user, optionally tagged to the current game (`game_specific`). | No |
+| `save_user_memory` | Persist a fact about the user regardless of any game (name, preferences, life context). Always visible. | No |
+| `save_game_memory` | Persist a fact about the currently tracked game that applies across all playthroughs (preferred class, how they approach the game). Visible only while that game is active. | No |
+| `save_session_memory` | Persist a fact specific to the current playthrough (character level, quest progress, decisions this run). Only visible in the active session. | No |
+| `remove_memory` | Forget a saved fact by id. | No |
+| `rollback_session_memories` | Remove session-scoped memories saved within a recent time window — called after the player confirms a crash or loaded an older save, so lost progress doesn't contradict actual game state. | No |
 | `take_screenshot` | Capture a monitor (defaults to the active one). | No |
 | `set_narration_volume` | Adjust its own TTS volume. | No |
 | `stop_listening` | Disable hands-free mic indefinitely — on a sign-off, an explicit request, or unwanted overheard audio. Re-enable via the wake word or the mic toggle. | No |
 | `fetch_active_process` | Check which app/game is currently focused. | No |
 | `fetch_system_info` | Check OS/CPU/RAM. | No |
-| `web_search` | Search the web (OpenRouter `web` plugin). | No (billed via OpenRouter) |
+| `web_search` | Search the web via OpenRouter's plugin or a self-hosted SearXNG instance (controlled by `WEB_SEARCH_PROVIDER`). | No (OpenRouter path billed via OpenRouter) |
 | `lookup_game_info` | IGDB game data (genre, platforms, release date, rating). | Twitch app credentials |
 | `lookup_steam_game` | Steam store page details. | No |
 | `fetch_steam_library` | User's owned games / playtime. | Steam API key + SteamID64 |

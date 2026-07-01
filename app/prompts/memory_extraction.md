@@ -8,14 +8,15 @@ You'll be given the current date/time, the current known facts (each with an id,
 
 **The game session snapshot, if given, is only for disambiguating the exchange — never a source of facts on its own.** Use it to turn a vague reference in the conversation into something specific and useful (e.g. the user says "finally got him" while the snapshot shows a boss fight in a named arena → save what the conversation actually reveals, grounded in where/what that was). **Never save the snapshot itself, or a restatement of it, as a memory** — "the player is in a boss fight right now" or "the player is on the Colosseum map" describe the current moment only, not something worth remembering afterward, no matter how specific or complete they sound. Only save something the *conversation* actually reveals (a decision, an outcome, a preference, a milestone); if the exchange doesn't reveal anything beyond what the snapshot already shows, there's nothing to save from it.
 
-**Tag each saved fact as `game_specific: true` or `false`:**
-- `true` — tied to *this playthrough* of *the game the user is actively playing right now, in this session*: character build/class/race, quest/story progress, in-game relationships, current obstacle. These only get shown back to the companion while that same game is active, so don't undertag them — a vague/general fact for one game is still useless context while playing a different one.
-- `false` — true regardless of what they're playing right now: name/how to address them, life context, and *recurring cross-game* tastes/habits (see below). These always show up.
-- **Merely discussing or mentioning a game is not the same as playing it right now.** A game they're considering buying, planning to start, used to play, or are just chatting about — while actually playing something else (or not playing anything, e.g. just typing to the companion app) — is a general fact (`false`), not game-specific. Tagging is anchored to what's actually running this moment, never to the subject of conversation.
+**Tag each saved fact with a `scope` — one of `"user"`, `"game"`, or `"session"`:**
+- `"user"` — about the person regardless of any game: name, age, life context, how they want to be addressed, and *recurring cross-game* tastes/habits (genres, playstyle patterns, difficulty preferences — see below). Always shown to the companion no matter what game is running.
+- `"game"` — about the specific game they're actively playing right now, and true across **all** their runs of it: preferred build style or class tendency for this title, how they typically approach this game, meta-preferences specific to it. Ask yourself: *would this fact still be true if they wiped their save and started a brand new playthrough?* If yes, use `"game"`. If not, use `"session"`.
+- `"session"` — specific to this playthrough only: current character level, quest/story progress, decisions made this run, in-game relationships built so far. Would NOT carry over to a new playthrough.
+- **Merely discussing or mentioning a game is not the same as playing it right now.** A game they're considering buying, planning to start, used to play, or are just chatting about — while actually playing something else (or not playing anything) — is `"user"` scope, not `"game"` or `"session"`. Tagging is anchored to what's actually running this moment, never to the subject of conversation.
 
 **Resolve relative dates/times using the given current date before saving.** If the user says "tomorrow," "next Friday," "in two weeks," etc., convert it to an absolute date (e.g. "tomorrow" on Monday, June 29 → "June 30") so the fact still makes sense whenever it's read back later. Never save a bare relative reference on its own.
 
-**Build a real gaming profile of the user, not just per-session notes.** Beyond what they're currently playing, watch for recurring tastes and habits across games, and save them as standalone preference facts (always `game_specific: false`, since they hold regardless of the current game):
+**Build a real gaming profile of the user, not just per-session notes.** Beyond what they're currently playing, watch for recurring tastes and habits across games, and save them as standalone preference facts (always `scope: "user"`, since they hold regardless of the current game):
 - Favorite genres, settings, or franchises (e.g. fantasy RPGs, roguelikes, competitive FPS).
 - Classes/archetypes/playstyles they gravitate toward (e.g. stealth/rogue builds, glass-cannon mages, support roles, aggressive rushdown).
 - Habits and tastes: completionist vs. speedrunner, prefers easy/hard difficulty, loves/hates puzzles, co-op vs. solo, spoiler tolerance, sense of humor.
@@ -25,6 +26,6 @@ If a new instance reinforces a pattern you already have saved (e.g. they pick a 
 When in doubt about whether something is worth saving, save it — a human friend would remember it, so should you.
 
 Respond with strict JSON only, no commentary, no markdown fences, in exactly this shape:
-{"save": [{"content": "fact one", "game_specific": false}, {"content": "fact two", "game_specific": true}], "remove": ["id1", "id2"]}
+{"save": [{"content": "fact one", "scope": "user"}, {"content": "fact two", "scope": "game"}, {"content": "fact three", "scope": "session"}], "remove": ["id1", "id2"]}
 
 If there's nothing to save or remove, respond with {"save": [], "remove": []}.

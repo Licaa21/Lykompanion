@@ -1,4 +1,4 @@
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import httpx
 
@@ -28,8 +28,6 @@ WEB_SEARCH_TOOLS = [
 
 
 async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> str | None:
-    """Best-effort image lookup - a self-hosted SearXNG instance is a real image search engine,
-    unlike the OpenRouter web plugin, so this can return an actual direct image URL."""
     try:
         response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "images"})
         response.raise_for_status()
@@ -37,12 +35,24 @@ async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> 
     except Exception:
         return None
     for result in results:
-        image_url = result.get("img_src") or result.get("url")
-        if image_url:
-            # With image_proxy enabled, SearXNG returns a path relative to itself
-            # (e.g. "/image_proxy?url=...") rather than the original external URL.
-            return urljoin(settings.searxng_base_url, image_url)
+        image_url = result.get("img_src")
+        if not image_url:
+            continue
+        # Resolve relative SearXNG proxy paths to absolute before proxying through FastAPI.
+        absolute = urljoin(settings.searxng_base_url, image_url)
+        return f"/api/proxy/image?url={quote(absolute, safe='')}"
     return None
+
+
+async def execute_image_search(query: str) -> str | None:
+    """Image-only SearXNG lookup — returns a single image URL or None. No LLM call, no
+    result text; used for cheap auto-injection where the model already knows the answer."""
+    if settings.web_search_provider != "searxng":
+        return None
+    async with httpx.AsyncClient(
+        base_url=settings.searxng_base_url, timeout=10, headers=SEARXNG_HEADERS
+    ) as http_client:
+        return await _search_searxng_images(http_client, query)
 
 
 SEARXNG_HEADERS = {

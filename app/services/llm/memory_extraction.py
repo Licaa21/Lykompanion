@@ -20,7 +20,13 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     handling the conversation. Runs as a fire-and-forget background task, so failures here
     must never raise into the caller.
     """
-    known_facts = memory.format_memories_for_prompt() or "Known facts about the user: none yet."
+    # Filter to current session so the extraction LLM only sees facts relevant here — without
+    # this, it could see level-20 memories from another BG3 session and "fix" them based on
+    # what it sees in the current conversation, corrupting the other session's facts.
+    gs = game_state.get_game_state()
+    tracked_process = gs["process"] if gs else None
+    tracked_session = gs["session_id"] if gs else None
+    known_facts = memory.format_memories_for_prompt(tracked_process, tracked_session) or "Known facts about the user: none yet."
     game_state_text = game_state.format_game_state_for_prompt()
     messages = [
         {"role": "system", "content": load_prompt("memory_extraction")},
@@ -44,22 +50,32 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
         logger.exception("Memory extraction failed")
         return
 
-    process = None
+    fg_process = None
     for fact in data.get("save") or []:
         if not isinstance(fact, dict):
             continue
         content = (fact.get("content") or "").strip()
         if not content:
             continue
-        if fact.get("game_specific"):
-            if process is None:
-                process = get_foreground_process_name() or ""
-            # Don't trust the extraction model's game_specific flag blindly - it sometimes
-            # mismarks "discussed a game" as "playing it right now." Only tag if the foreground
-            # process is actually a plausible game (same check the OCR poller uses).
-            tag = process if process and game_state_processes.is_likely_game(process) else None
-            memory.add_memory(content, process=tag)
+        scope = (fact.get("scope") or "user").lower()
+        if scope in ("game", "session"):
+            # Resolve the game process — prefer the tracked game over raw foreground, since
+            # the user may have alt-tabbed to the companion window while still mid-session.
+            if fg_process is None:
+                fg_process = get_foreground_process_name() or ""
+            tag = fg_process if fg_process and game_state_processes.is_likely_game(fg_process) else None
+            if not tag and tracked_process:
+                tag = tracked_process
+            if scope == "session":
+                # Session-specific: only visible in this exact playthrough.
+                sess = tracked_session if (tag and tracked_process and tag.lower() == tracked_process.lower()) else None
+                memory.add_memory(content, process=tag, session_id=sess)
+            else:
+                # Game-level: visible across all sessions of this game, not just this run.
+                memory.add_memory(content, process=tag, session_id=None)
         else:
+            # "user" scope — general fact about the person, no process, no session,
+            # always visible regardless of what game is active.
             memory.add_memory(content)
 
     for memory_id in data.get("remove") or []:

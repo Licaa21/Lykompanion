@@ -2,11 +2,20 @@
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
 import json
+import os
 import socket
 import sys
 import time
 import threading
 from pathlib import Path
+
+# WebView2 white-screen-on-maximize fix: disable the GPU compositing path that
+# causes the renderer to blank out when the window is resized/maximized on some
+# Windows 11 + driver combinations.
+os.environ.setdefault(
+    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    "--disable-gpu-compositing",
+)
 
 PORT = 6692
 URL = f"http://localhost:{PORT}"

@@ -3,7 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Query
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
@@ -50,6 +52,26 @@ app.include_router(usage.router)
 app.include_router(game_state.router)
 app.include_router(debug.router)
 app.include_router(profile.router)
+
+_PROXY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.google.com/",
+}
+
+@app.get("/api/proxy/image")
+async def proxy_image(url: str = Query(...)) -> Response:
+    """Fetch an external image server-side and relay it to the browser.
+    Bypasses hotlink protection and SearXNG image proxy auth issues."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+            r = await client.get(url, headers=_PROXY_HEADERS)
+            content_type = r.headers.get("content-type", "image/jpeg")
+            return Response(content=r.content, media_type=content_type)
+    except Exception:
+        return Response(status_code=502)
+
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

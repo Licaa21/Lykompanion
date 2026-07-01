@@ -167,8 +167,9 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
     screenshot_b64 = capture_monitor_b64()
     previous = game_state.get_game_state()
     previous_values = (previous or {}).get("values", {})
+    active_session_id = (previous or {}).get("session_id")
     trackers = game_state_trackers.get_trackers(process)
-    known_facts = memory_store.format_memories_for_prompt() or "Known facts about the user: none yet."
+    known_facts = memory_store.format_memories_for_prompt(active_process=process, active_session_id=active_session_id) or "Known facts about the user: none yet."
     training_data = game_state_training_data.format_training_data_for_prompt(process)
     messages = [
         {"role": "system", "content": load_prompt("game_state_extraction")},
@@ -209,11 +210,16 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
 
     for fact in data.get("save_memories") or []:
         if isinstance(fact, str) and fact.strip():
-            memory_store.add_memory(fact.strip(), process=process)
+            memory_store.add_memory(fact.strip(), process=process, session_id=active_session_id)
 
     for memory_id in data.get("remove_memory_ids") or []:
         if isinstance(memory_id, str) and memory_id:
             memory_store.remove_memory(memory_id)
+
+    divergence = data.get("divergence_warning")
+    if isinstance(divergence, str) and divergence.strip():
+        logger.info("Game-state poll: divergence detected for process=%r session=%r: %s", process, active_session_id, divergence.strip())
+        game_state.set_pending_divergence(process, divergence.strip())
 
     _maybe_start_training_pass(process, data.get("confidence"), frames[-1][1], screenshot_b64)
 

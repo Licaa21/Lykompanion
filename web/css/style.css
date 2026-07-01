@@ -1336,7 +1336,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 ════════════════════════════════════════════════════ */
 .memory-list {
   display: flex; flex-direction: column; gap: 4px;
-  max-height: 44vh; overflow-y: auto;
 }
 .memory-item {
   display: flex; align-items: flex-start; gap: 8px;
@@ -1489,6 +1488,118 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .game-state-stats-row { display: flex; justify-content: space-between; gap: 12px; }
 .game-state-stats-row span:last-child { color: var(--t1); }
+
+/* Session selector bar */
+.game-state-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.game-state-session-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--t2);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  padding: 5px 6px;
+  border-radius: 5px;
+  transition: background var(--ease), color var(--ease);
+}
+.game-state-session-toggle:hover { background: rgba(255,255,255,0.05); color: var(--t1); }
+.game-state-session-toggle > svg:first-child { flex-shrink: 0; opacity: 0.45; }
+.game-state-session-toggle span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-chevron { flex-shrink: 0; opacity: 0.45; transition: transform 0.15s; }
+.gs-chevron.open { transform: rotate(180deg); }
+
+.game-state-new-session-btn {
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  background: none; border: none;
+  border-radius: 5px;
+  color: var(--t3); cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.game-state-new-session-btn:hover { background: rgba(255,255,255,0.07); color: var(--t1); }
+
+/* Session list (inline, between bar and fields) */
+.game-state-session-list {
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.12);
+}
+.game-state-session-list[hidden] { display: none; }
+
+.gs-session-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12px; color: var(--t2);
+  transition: background var(--ease);
+}
+.gs-session-item:hover { background: rgba(255,255,255,0.04); }
+.gs-session-item.active { color: var(--t1); }
+.gs-session-item.active::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent, #7b8cff);
+  flex-shrink: 0;
+}
+.gs-session-item-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gs-session-item-name-input {
+  flex: 1;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 4px;
+  color: var(--t1); font-size: 12px;
+  padding: 2px 6px; outline: none;
+}
+.gs-session-item-name-input:focus { border-color: rgba(255,255,255,0.35); }
+
+.gs-session-rename-btn {
+  display: none; align-items: center; justify-content: center;
+  background: none; border: none;
+  color: var(--t3); cursor: pointer;
+  padding: 2px 3px; border-radius: 3px;
+  transition: color var(--ease);
+  line-height: 1;
+}
+.gs-session-item:hover .gs-session-rename-btn { display: flex; }
+.gs-session-rename-btn:hover { color: var(--t1); }
+
+.gs-session-new-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.gs-session-new-input {
+  flex: 1;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  color: var(--t1); font-size: 12px;
+  padding: 4px 8px; outline: none;
+}
+.gs-session-new-input:focus { border-color: rgba(255,255,255,0.3); }
+.gs-session-new-confirm {
+  background: rgba(255,255,255,0.1);
+  border: none; border-radius: 4px;
+  color: var(--t1); font-size: 11px;
+  padding: 4px 8px; cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ease);
+}
+.gs-session-new-confirm:hover { background: rgba(255,255,255,0.18); }
 
 /* ════════════════════════════════════════════════════
    WAKE WORD DEBUG

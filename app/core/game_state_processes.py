@@ -20,9 +20,7 @@ PENDING_PATH = DATA_DIR / "game_state_pending.json"
 # Best-effort heuristic, not exhaustive - see TODO.md for smarter detection ideas.
 NON_GAME_PROCESSES = {
     "explorer.exe",
-    "chrome.exe",
-    "msedge.exe",
-    "firefox.exe",
+    "msedgewebview2.exe",     # pywebview shell — this is Lykompanion itself
     "discord.exe",
     "code.exe",
     "windowsterminal.exe",
@@ -35,6 +33,19 @@ NON_GAME_PROCESSES = {
     "slack.exe",
     "steam.exe",
     "steamwebhelper.exe",
+    # Windows shell / system processes
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "searchhost.exe",
+    "searchapp.exe",
+    "taskhostw.exe",
+    "sihost.exe",
+    "ctfmon.exe",
+    "textinputhost.exe",
+    "snippingtool.exe",
+    "screensketch.exe",
+    "lockapp.exe",
+    "logonui.exe",
 }
 
 
@@ -76,7 +87,16 @@ def _contains(path: Path, process: str) -> bool:
 
 
 # Pending processes are persisted so they survive server restarts.
-_pending_processes: list[str] = _load(PENDING_PATH)
+# Filter out anything now in the hardcoded denylist (e.g. after a denylist update) or
+# already on the user blacklist — no point asking the user to approve something we'd skip.
+def _load_pending() -> list[str]:
+    loaded = _load(PENDING_PATH)
+    cleaned = [p for p in loaded if p.lower() not in NON_GAME_PROCESSES and not _contains(BLACKLIST_PATH, p)]
+    if len(cleaned) != len(loaded):
+        _save(PENDING_PATH, cleaned)
+    return cleaned
+
+_pending_processes: list[str] = _load_pending()
 
 
 def load_blacklist() -> list[str]:

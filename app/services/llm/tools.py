@@ -1,17 +1,18 @@
-from app.core import game_state_processes, memory
-from app.services.system.processes import get_foreground_process_name
+from datetime import datetime, timedelta, timezone
+
+from app.core import game_state, memory
 
 MEMORY_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "save_memory",
+            "name": "save_user_memory",
             "description": (
-                "Save a fact to long-term memory, persisted across sessions and shown back to you as "
-                "'Known facts about the user' in future conversations. Call this proactively and silently "
-                "the moment you learn something worth remembering, without being asked to 'remember' or "
-                "'save' it - e.g. how the user wants to be addressed (name/nickname), what game they're "
-                "playing, their build/class/progress, or any stated preference (difficulty, spoilers, tone)."
+                "Save a fact about the user that is true regardless of any game: their name/nickname, "
+                "age, life context, how they want to be addressed, recurring cross-game preferences "
+                "(genres, playstyle patterns, difficulty habits), or anything they reveal about themselves "
+                "as a person. These facts are always shown to you no matter what game is running. "
+                "Call this proactively and silently the moment you learn something worth remembering."
             ),
             "parameters": {
                 "type": "object",
@@ -20,17 +21,50 @@ MEMORY_TOOLS = [
                         "type": "string",
                         "description": "The fact to remember, written as a short standalone sentence.",
                     },
-                    "game_specific": {
-                        "type": "boolean",
-                        "description": (
-                            "True ONLY if this fact is tied to the game the user is actively playing RIGHT NOW in "
-                            "this session (e.g. character build, quest progress, in-game relationships) - it gets "
-                            "tagged to whatever process is currently in the foreground, so only use true when that "
-                            "current process genuinely is the game the fact is about. Merely mentioning a game by "
-                            "name is NOT enough - a game they're not currently playing (wishlist/considering "
-                            "buying/used to play/heard about) is a general fact, false/omitted, even if the "
-                            "foreground process happens to be a game launcher like Steam at the time."
-                        ),
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_game_memory",
+            "description": (
+                "Save a fact that is specific to the game currently being tracked, but true across ALL "
+                "playthroughs of it — e.g. the user's preferred class type for this game, how they "
+                "typically approach it, game-wide meta-preferences. Ask yourself: would this still be true "
+                "if they wiped their save and started a new game? If yes, use this tool. "
+                "Only call this when a game is actively being tracked right now."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The fact to remember, written as a short standalone sentence.",
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_session_memory",
+            "description": (
+                "Save a fact specific to the user's current playthrough only — character level, quest "
+                "progress, decisions made this run, in-game relationships built so far. These facts belong "
+                "to this session and would NOT carry over to a new playthrough. "
+                "Only call this when a game and session are actively being tracked right now."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The fact to remember, written as a short standalone sentence.",
                     },
                 },
                 "required": ["content"],
@@ -60,26 +94,107 @@ MEMORY_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "rollback_session_memories",
+            "description": (
+                "Remove session memories saved during a recent time window, after the player confirms they "
+                "experienced a game crash or loaded an older save and lost progress. Only removes memories "
+                "from the current active game session — general user facts and other game sessions are "
+                "never touched. Call this only AFTER the player has confirmed what happened and how much "
+                "progress they lost. Do NOT call it preemptively just because a divergence was detected."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hours_lost": {
+                        "type": "number",
+                        "description": (
+                            "How many hours of progress the player lost. Derive from what they said "
+                            "(e.g. '2 hours', 'since this afternoon' → approximate hours elapsed). "
+                            "When uncertain, ask before calling."
+                        ),
+                    }
+                },
+                "required": ["hours_lost"],
+            },
+        },
+    },
 ]
 
 
+def _resolve_tracked_game() -> tuple[str | None, str | None]:
+    """Returns (process, session_id) from the currently tracked game state, or (None, None)."""
+    gs = game_state.get_game_state()
+    if not gs:
+        return None, None
+    return gs["process"], gs.get("session_id")
+
+
 def execute_tool_call(name: str, arguments: dict) -> str:
-    if name == "save_memory":
+    if name == "save_user_memory":
         content = (arguments.get("content") or "").strip()
         if not content:
             return "Nothing to save: content was empty."
-        process = get_foreground_process_name() if arguments.get("game_specific") else None
-        # Don't trust the LLM's game_specific flag blindly - it sometimes mismarks "mentioned a
-        # game" as "playing a game right now." Only tag if the foreground process is actually
-        # a plausible game (same check the OCR poller uses), otherwise fall back to a general fact.
-        if process and not game_state_processes.is_likely_game(process):
-            process = None
-        entry = memory.add_memory(content, process=process)
-        return f"Saved memory [{entry['id']}]: {entry['content']}"
+        entry = memory.add_memory(content, process=None, session_id=None)
+        return f"Saved user memory [{entry['id']}]: {entry['content']}"
+
+    if name == "save_game_memory":
+        content = (arguments.get("content") or "").strip()
+        if not content:
+            return "Nothing to save: content was empty."
+        process, _ = _resolve_tracked_game()
+        if not process:
+            return "No game is currently being tracked — saved as a general user memory instead."
+        entry = memory.add_memory(content, process=process, session_id=None)
+        return f"Saved game memory [{entry['id']}] (game: {process}): {entry['content']}"
+
+    if name == "save_session_memory":
+        content = (arguments.get("content") or "").strip()
+        if not content:
+            return "Nothing to save: content was empty."
+        process, session_id = _resolve_tracked_game()
+        if not process:
+            return "No game is currently being tracked — saved as a general user memory instead."
+        entry = memory.add_memory(content, process=process, session_id=session_id)
+        label = f"game: {process}" + (f", session: {session_id}" if session_id else "")
+        return f"Saved session memory [{entry['id']}] ({label}): {entry['content']}"
 
     if name == "remove_memory":
         memory_id = arguments.get("memory_id") or ""
         removed = memory.remove_memory(memory_id)
         return "Memory removed." if removed else "No memory found with that id."
+
+    if name == "rollback_session_memories":
+        hours_lost = arguments.get("hours_lost")
+        if not isinstance(hours_lost, (int, float)) or hours_lost <= 0:
+            return "Invalid hours_lost value — must be a positive number."
+        gs = game_state.get_game_state()
+        if not gs:
+            return "No game is currently being tracked — nothing to roll back."
+        process = gs["process"]
+        session_id = gs.get("session_id")
+        if not session_id:
+            return "No active session found for the current game."
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_lost)
+        all_memories = memory.load_memories()
+        to_remove = []
+        for m in all_memories:
+            if ((m.get("process") or "").lower() == process.lower()
+                    and m.get("session_id") == session_id
+                    and m.get("saved_at")):
+                try:
+                    if datetime.fromisoformat(m["saved_at"]) >= cutoff:
+                        to_remove.append(m)
+                except (ValueError, TypeError):
+                    pass
+        if not to_remove:
+            return f"No session memories found from the last {hours_lost:.1f} hour(s) — nothing removed."
+        for m in to_remove:
+            memory.remove_memory(m["id"])
+        removed_list = "\n".join(f"- {m['content']}" for m in to_remove)
+        n = len(to_remove)
+        return f"Rolled back {n} session {'memory' if n == 1 else 'memories'} from the last {hours_lost:.1f} hour(s):\n{removed_list}"
 
     return f"Unknown tool: {name}"

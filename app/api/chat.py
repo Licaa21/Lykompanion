@@ -47,6 +47,7 @@ ALL_TOOLS = (
 MAX_TOOL_ITERATIONS = 8
 
 
+
 def _build_base_messages(include_screenshot: bool) -> list[dict]:
     system_content = load_prompt("system_companion")
 
@@ -61,14 +62,22 @@ def _build_base_messages(include_screenshot: bool) -> list[dict]:
     # Variable content last — maximises cache hits on stable prefix above.
     system_content += "\n\n" + current_datetime_context()
 
-    active_process = get_foreground_process_name()
-    memories = memory.format_memories_for_prompt(active_process)
+    # Use the tracked game's process + session for memory filtering. The foreground process
+    # would be the companion window when the user alt-tabs to chat — game_state gives us the
+    # game that's actually being tracked regardless of what's in focus right now.
+    gs = game_state.get_game_state()
+    tracked_process = gs["process"] if gs else None
+    tracked_session = gs["session_id"] if gs else None
+    memories = memory.format_memories_for_prompt(tracked_process, tracked_session)
     if memories:
         system_content += "\n\n" + memories
 
     game_state_text = game_state.format_game_state_for_prompt()
+    divergence_warning = game_state.pop_pending_divergence(tracked_process) if tracked_process else None
     if game_state_text:
         system_content += "\n\n" + game_state_text
+    if divergence_warning:
+        system_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
 
     messages = [{"role": "system", "content": system_content}]
 
@@ -243,13 +252,13 @@ async def _stream_chat_with_tools(
 async def chat(request: ChatRequest) -> ChatResponse:
     messages = _build_base_messages(request.include_screenshot)
     messages.extend(_limit_history([m.model_dump() for m in request.messages]))
+    last_user_message = request.messages[-1].content if request.messages else ""
 
     try:
         reply, stop_listening = await _run_chat_with_tools(messages, source="chat")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}") from exc
 
-    last_user_message = request.messages[-1].content if request.messages else ""
     _schedule_memory_extraction(last_user_message, reply)
 
     return ChatResponse(
@@ -263,7 +272,6 @@ async def chat(request: ChatRequest) -> ChatResponse:
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     messages = _build_base_messages(request.include_screenshot)
     messages.extend(_limit_history([m.model_dump() for m in request.messages]))
-
     last_user_message = request.messages[-1].content if request.messages else ""
 
     async def event_generator():
@@ -309,13 +317,52 @@ async def chat_voice(
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
 
-    # No transcript of the spoken message is available (audio is sent straight to the LLM,
-    # skipping local STT), so there's nothing meaningful to feed the memory extraction pass.
     return ChatResponse(
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
     )
+
+
+@router.post("/voice/stream")
+async def chat_voice_stream(
+    audio: UploadFile,
+    history: str = Form("[]"),
+    include_screenshot: bool = Form(False),
+) -> StreamingResponse:
+    """Streaming variant of chat_voice — same audio-to-LLM flow but emits SSE deltas so the
+    reply types in live rather than appearing all at once."""
+    messages = _build_base_messages(include_screenshot)
+    messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
+
+    audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
+    messages.append(
+        {
+            "role": "user",
+            "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
+        }
+    )
+
+    async def event_generator():
+        full_reply = ""
+        stop_listening = False
+        try:
+            async for event in _stream_chat_with_tools(messages, model=settings.openrouter_model, source="chat_voice_stream"):
+                if event["type"] == "delta":
+                    full_reply += event["text"]
+                    yield f"data: {json.dumps({'delta': event['text']})}\n\n"
+                elif event["type"] == "volume":
+                    yield f"data: {json.dumps({'volume': event['value']})}\n\n"
+                elif event["type"] == "stop_listening":
+                    stop_listening = True
+                    yield f"data: {json.dumps({'stop_listening': True})}\n\n"
+        except APIError as exc:
+            yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
+            return
+
+        yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/title", response_model=ChatTitleResponse)
