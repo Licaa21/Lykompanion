@@ -16,6 +16,11 @@ SESSIONS_PATH = DATA_DIR / "game_state_sessions.json"
 # earlier sessions' values remain on disk for whenever that process is tracked again.
 _active_process: str | None = None
 
+# In-memory mirror of the active process's values — avoids a disk read on every chat message
+# (format_game_state_for_prompt is called per request). Invalidated by set_game_state and
+# stop_tracking; populated lazily on first get_game_state call after start_tracking.
+_cached_values: dict[str, str | None] | None = None
+
 # Session-scoped LLM usage counters for the game-state pipeline - reset on restart, not tied to
 # the current tracked process/game like the persisted values are.
 _extraction_call_count = 0
@@ -67,8 +72,9 @@ def start_tracking(process: str) -> None:
     this process has persisted values from an earlier session (this run or a previous one), those
     show up first instead of a blank slate, so nothing collected earlier gets lost just because
     the game lost focus, was closed, or the companion restarted."""
-    global _active_process
+    global _active_process, _cached_values
     _active_process = process
+    _cached_values = None  # load lazily on first get_game_state call
     data = _load_all()
     if process.lower() not in data:
         data[process.lower()] = {"values": {}, "updated_at": datetime.now(timezone.utc).isoformat()}
@@ -78,23 +84,30 @@ def start_tracking(process: str) -> None:
 def stop_tracking() -> None:
     """Stops showing an active session (the tracked process exited) without deleting its
     persisted values - they're still there next time that process is tracked."""
-    global _active_process
+    global _active_process, _cached_values
     _active_process = None
+    _cached_values = None
 
 
 def get_game_state() -> dict | None:
+    global _cached_values
     if _active_process is None:
         return None
-    return {"process": _active_process, "values": get_values(_active_process)}
+    if _cached_values is None:
+        _cached_values = get_values(_active_process)
+    return {"process": _active_process, "values": _cached_values}
 
 
 def set_game_state(process: str, values: dict[str, str | None]) -> None:
     """`values` maps tracker id -> extracted value, for whatever trackers are configured for this
     process (see app/core/game_state_trackers.py) - the set of keys isn't fixed. Persisted
     immediately so it survives a restart, not just an in-memory update."""
+    global _cached_values
     data = _load_all()
     data[process.lower()] = {"values": values, "updated_at": datetime.now(timezone.utc).isoformat()}
     _save_all(data)
+    if _active_process and process.lower() == _active_process.lower():
+        _cached_values = values
 
 
 def format_game_state_for_prompt() -> str:
