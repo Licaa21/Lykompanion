@@ -18,12 +18,14 @@ from app.api import (
     memory,
     models,
     profile,
+    reminders,
     screenshot,
     tts,
     usage,
     voice,
 )
 from app.services.llm.game_state_extraction import run_game_state_poller
+from app.services.llm.reminder_poller import run_reminder_poller
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -31,10 +33,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     poller_task = asyncio.create_task(run_game_state_poller())
+    reminder_task = asyncio.create_task(run_reminder_poller())
     try:
         yield
     finally:
         poller_task.cancel()
+        reminder_task.cancel()
 
 
 app = FastAPI(title="Lykompanion", lifespan=lifespan)
@@ -52,6 +56,7 @@ app.include_router(usage.router)
 app.include_router(game_state.router)
 app.include_router(debug.router)
 app.include_router(profile.router)
+app.include_router(reminders.router)
 
 _PROXY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

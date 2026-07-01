@@ -42,8 +42,13 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
 
     try:
         model = settings.memory_extraction_model or None
+        provider = settings.memory_extraction_provider or settings.llm_provider
         raw = await chat_completion(
-            messages, model=model, response_format={"type": "json_object"}, source="memory_extraction"
+            messages,
+            model=model,
+            response_format={"type": "json_object"},
+            source="memory_extraction",
+            provider=provider,
         )
         data = json.loads(raw)
     except Exception:

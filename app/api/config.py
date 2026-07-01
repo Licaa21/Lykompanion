@@ -2,7 +2,6 @@ from fastapi import APIRouter
 
 from app.core.config import persist_env_values, settings
 from app.models.schemas import CompanionConfig
-from app.services.llm import client as llm_client
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -13,6 +12,13 @@ async def get_config() -> CompanionConfig:
         user_display_name=settings.user_display_name,
         openrouter_model=settings.openrouter_model,
         openrouter_base_url=settings.openrouter_base_url,
+        llm_provider=settings.llm_provider,
+        memory_extraction_provider=settings.memory_extraction_provider,
+        game_state_provider=settings.game_state_provider,
+        game_state_training_provider=settings.game_state_training_provider,
+        google_ai_studio_api_key_set=bool(settings.google_ai_studio_api_key),
+        custom_openai_base_url=settings.custom_openai_base_url,
+        custom_openai_api_key_set=bool(settings.custom_openai_api_key),
         memory_extraction_model=settings.memory_extraction_model or None,
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
@@ -89,11 +95,30 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         env_updates["OPENROUTER_VOICE"] = config.openrouter_voice
     if config.openrouter_api_key:
         settings.openrouter_api_key = config.openrouter_api_key
-        llm_client.client.api_key = config.openrouter_api_key
         env_updates["OPENROUTER_API_KEY"] = config.openrouter_api_key
     if config.openrouter_management_key:
         settings.openrouter_management_key = config.openrouter_management_key
         env_updates["OPENROUTER_MANAGEMENT_KEY"] = config.openrouter_management_key
+
+    settings.llm_provider = config.llm_provider or "openrouter"
+    env_updates["LLM_PROVIDER"] = settings.llm_provider
+    settings.memory_extraction_provider = config.memory_extraction_provider
+    env_updates["MEMORY_EXTRACTION_PROVIDER"] = config.memory_extraction_provider
+    settings.game_state_provider = config.game_state_provider
+    env_updates["GAME_STATE_PROVIDER"] = config.game_state_provider
+    settings.game_state_training_provider = config.game_state_training_provider
+    env_updates["GAME_STATE_TRAINING_PROVIDER"] = config.game_state_training_provider
+
+    if config.google_ai_studio_api_key:
+        settings.google_ai_studio_api_key = config.google_ai_studio_api_key
+        env_updates["GOOGLE_AI_STUDIO_API_KEY"] = config.google_ai_studio_api_key
+    if config.custom_openai_base_url:
+        settings.custom_openai_base_url = config.custom_openai_base_url
+        env_updates["CUSTOM_OPENAI_BASE_URL"] = config.custom_openai_base_url
+    if config.custom_openai_api_key:
+        settings.custom_openai_api_key = config.custom_openai_api_key
+        env_updates["CUSTOM_OPENAI_API_KEY"] = config.custom_openai_api_key
+
     if config.memory_extraction_model is not None:
         settings.memory_extraction_model = config.memory_extraction_model
         env_updates["MEMORY_EXTRACTION_MODEL"] = config.memory_extraction_model

@@ -2,7 +2,7 @@ import re
 import struct
 
 from app.core.config import settings
-from app.services.llm.client import client
+from app.services.llm.client import get_client
 
 
 def _parse_pcm_format(content_type: str) -> tuple[int, int]:
@@ -42,7 +42,7 @@ async def synthesize(text: str, voice: str | None = None, speed: float | None = 
     exists as a last-resort fallback and will likely error on most providers,
     hence preferring settings.openrouter_voice when no voice is explicitly given.
     """
-    response = await client.audio.speech.create(
+    response = await get_client("openrouter").audio.speech.create(
         model=settings.openrouter_tts_model,
         voice=voice or settings.openrouter_voice or "alloy",
         input=text,

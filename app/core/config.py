@@ -37,6 +37,22 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "anthropic/claude-3.5-sonnet"
 
+    # Google AI Studio (Gemini) reuses the OpenAI SDK client via Google's OpenAI-compatibility
+    # endpoint - only an API key is needed, the base_url is a fixed constant (see llm/client.py).
+    google_ai_studio_api_key: str = ""
+
+    # Any other OpenAI-compatible API (self-hosted, a different aggregator, etc).
+    custom_openai_base_url: str = ""
+    custom_openai_api_key: str = ""
+
+    # Which provider backs each LLM feature: "openrouter" | "google_ai_studio" | "custom".
+    # The per-feature *_provider settings below default to "" (inherit llm_provider), matching
+    # how the corresponding *_model settings already default to "" (inherit openrouter_model).
+    llm_provider: str = "openrouter"
+    memory_extraction_provider: str = ""
+    game_state_provider: str = ""
+    game_state_training_provider: str = ""
+
     tts_provider: str = "kokoro"
     kokoro_base_url: str = "http://localhost:8880/v1"
     kokoro_voice: str = "af_heart"

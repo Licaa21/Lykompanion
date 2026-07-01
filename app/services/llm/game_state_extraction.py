@@ -118,11 +118,13 @@ async def _run_training_pass(process: str, ocr_text: str, screenshot_b64: str) -
             },
         ]
         model = settings.game_state_training_model or None
+        provider = settings.game_state_training_provider or settings.llm_provider
         cost_holder = {"cost": 0.0}
         revised_doc = await chat_completion(
             messages,
             model=model,
             source="game_state_training",
+            provider=provider,
             on_usage=lambda cost: cost_holder.__setitem__("cost", cost),
         )
         game_state.record_training_call(cost_holder["cost"])
@@ -185,12 +187,14 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
 
     try:
         model = settings.game_state_model or None
+        provider = settings.game_state_provider or settings.llm_provider
         cost_holder = {"cost": 0.0}
         raw = await chat_completion(
             messages,
             model=model,
             response_format={"type": "json_object"},
             source="game_state_extraction",
+            provider=provider,
             on_usage=lambda cost: cost_holder.__setitem__("cost", cost),
         )
         game_state.record_extraction_call(cost_holder["cost"])
