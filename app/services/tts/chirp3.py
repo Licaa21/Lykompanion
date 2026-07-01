@@ -91,13 +91,17 @@ async def list_voices() -> list[dict]:
     """Fetch Chirp 3 HD voices. Returns [] if neither API key nor ADC credentials are configured."""
     try:
         headers, params = await _request_auth()
-    except Exception:
+    except Exception as exc:
+        print(f"[chirp3] list_voices auth failed: {exc!r}")
         return []
     try:
         async with httpx.AsyncClient(base_url=_BASE_URL, timeout=10) as client:
             response = await client.get("/v1/voices", headers=headers, params=params)
             response.raise_for_status()
             voices = response.json().get("voices", [])
+        print(f"[chirp3] fetched {len(voices)} total voices, {sum(1 for v in voices if 'Chirp3-HD' in v['name'])} Chirp3-HD")
         return [{"id": v["name"], "name": v["name"]} for v in voices if "Chirp3-HD" in v["name"]]
-    except httpx.HTTPError:
+    except Exception as exc:
+        body = getattr(getattr(exc, "response", None), "text", "")
+        print(f"[chirp3] list_voices request failed: {exc!r} – {body}")
         return []
