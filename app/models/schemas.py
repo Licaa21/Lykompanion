@@ -17,6 +17,7 @@ class ChatResponse(BaseModel):
     reply: str
     narration_volume: float = 1.0
     stop_listening: bool = False
+    transcript: str | None = None
 
 
 class ChatTitleRequest(BaseModel):
@@ -64,6 +65,8 @@ class CompanionConfig(BaseModel):
     google_tts_api_key: str | None = None
     google_tts_api_key_set: bool = False
     google_tts_voice: str | None = None
+    transcription_enabled: bool = False
+    transcription_model: str | None = None
     openrouter_api_key: str | None = None
     openrouter_api_key_set: bool = False
     openrouter_management_key: str | None = None

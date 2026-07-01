@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     google_tts_api_key: str = ""
     google_tts_voice: str = "en-US-Chirp3-HD-Aoede"
 
+    # Transcribes voice messages with a dedicated ASR model (via OpenRouter's audio/transcriptions
+    # endpoint - a separate API from chat completions, only OpenRouter exposes it) before sending
+    # the resulting text to the main chat model, instead of sending raw audio straight to it. Lets
+    # the main model be text/image-only. No fallback to openrouter_model - must be picked
+    # explicitly, since the whole point is decoupling from a main model that may not support audio.
+    transcription_enabled: bool = False
+    transcription_model: str = ""
+
     igdb_client_id: str = ""
     igdb_client_secret: str = ""
     steam_api_key: str = ""

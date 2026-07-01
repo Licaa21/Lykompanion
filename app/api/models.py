@@ -39,6 +39,21 @@ async def get_text_llm_models(provider: str = "openrouter") -> list[dict]:
     return [m for m in models if "text" in m["output_modalities"]]
 
 
+@router.get("/llm/audio")
+async def get_audio_llm_models() -> list[dict]:
+    """Dedicated speech-to-text models (Whisper, Chirp, Parakeet, etc.) - for transcription mode,
+    where one of these transcribes voice messages before the text reaches the main chat model.
+
+    These are a distinct OpenRouter model category (output_modalities == ["transcription"]), not
+    regular chat-completion models that merely accept audio input alongside text (e.g. Gemini,
+    GPT-4o) - those still show up in /llm and cost far more per call than a purpose-built ASR
+    model. They're also called through OpenRouter's separate /audio/transcriptions endpoint, not
+    chat completions, so this list (and transcription mode) is OpenRouter-only.
+    """
+    models = await list_models("openrouter")
+    return [m for m in models if m["output_modalities"] == ["transcription"]]
+
+
 @router.get("/llm/vision")
 async def get_vision_llm_models(provider: str = "openrouter") -> list[dict]:
     """Chat-capable models that accept image input - for the game-state training pass, which is

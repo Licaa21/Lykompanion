@@ -1014,13 +1014,22 @@ async function sendDirectVoice(wavBlob) {
   const chat = getActiveChat();
   if (!chat) return;
 
-  const audioId = (crypto.randomUUID && crypto.randomUUID()) || `voice-${Date.now()}`;
-  saveVoiceBlob(audioId, wavBlob);
+  // In transcription mode the recording is thrown away after the LLM sees only the transcript
+  // text, so there's no audio worth persisting/playing back - render as a plain text bubble.
+  const transcriptionMode = transcriptionEnabledInput.checked;
+  const audioId = transcriptionMode ? null : (crypto.randomUUID && crypto.randomUUID()) || `voice-${Date.now()}`;
+  if (audioId) saveVoiceBlob(audioId, wavBlob);
 
   stopNarration();
   awaitingReply = true;
   try {
-    appendMessage("user", "🎤 (voice message)", audioId, true, wavBlob);
+    const userContentDiv = appendMessage(
+      "user",
+      transcriptionMode ? "🎤 Transcribing…" : "🎤 (voice message)",
+      audioId,
+      true,
+      audioId ? wavBlob : null
+    );
     setVoiceStatus("Sending voice message...");
 
     const formData = new FormData();
@@ -1040,6 +1049,7 @@ async function sendDirectVoice(wavBlob) {
     const assistantEl = appendMessage("assistant", "", null, true);
     let fullReply = "";
     let stopListening = false;
+    let transcript = null;
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -1069,13 +1079,20 @@ async function sendDirectVoice(wavBlob) {
         }
         if (payload.volume !== undefined) applyNarrationVolume(payload.volume);
         if (payload.stop_listening) { stopListening = true; agentStopListening(); }
-        if (payload.done) applyNarrationVolume(payload.narration_volume);
+        if (payload.done) {
+          applyNarrationVolume(payload.narration_volume);
+          transcript = payload.transcript || null;
+        }
       }
     }
 
-    addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
+    if (transcript) {
+      userContentDiv.hidden = false;
+      userContentDiv.innerHTML = renderMessageMarkup(transcript);
+    }
+    addMessageToChat(chat, "user", transcript || "🎤 (voice message)", audioId);
     addMessageToChat(chat, "assistant", fullReply);
-    maybeGenerateTitle(chat, "(voice message)", fullReply);
+    maybeGenerateTitle(chat, transcript || "(voice message)", fullReply);
 
     awaitingReply = false;
     if (stopListening) {
@@ -1631,6 +1648,7 @@ const modelOptionsCache = {
   memoryModel: [],
   gameStateModel: [],
   gameStateTrainingModel: [],
+  transcriptionModel: [],
   kokoroVoice: [],
   openrouterTts: [],
   chirp3Voice: [],
@@ -1681,6 +1699,7 @@ setupModelSearch("cfg-game-state-training-model-search", "cfg-game-state-trainin
   value: "",
   label: "(use main chat model)",
 });
+setupModelSearch("cfg-transcription-model-search", "cfg-transcription-model", "transcriptionModel");
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
 setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
 setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", "openrouterTts");
@@ -1688,7 +1707,15 @@ setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", 
 // Each LLM feature (main chat, memory extraction, game-state, training) picks its own provider
 // independently - an empty feature provider select means "inherit the main chat provider."
 const PROVIDER_FEATURES = {
-  llm: { endpoint: "/api/models/llm", cacheKey: "llm", providerSelectId: "cfg-llm-provider", selectId: "cfg-model", pinned: null },
+  // Transcription mode strips audio (and, deliberately, image) off the main model's job -
+  // voice messages arrive as plain transcribed text, so the model only needs to talk.
+  llm: {
+    endpoint: () => (transcriptionEnabledInput.checked ? "/api/models/llm/text" : "/api/models/llm"),
+    cacheKey: "llm",
+    providerSelectId: "cfg-llm-provider",
+    selectId: "cfg-model",
+    pinned: null,
+  },
   memory: {
     endpoint: "/api/models/llm/text",
     cacheKey: "memoryModel",
@@ -1710,9 +1737,19 @@ const PROVIDER_FEATURES = {
     selectId: "cfg-game-state-training-model",
     pinned: { value: "", label: "(use main chat model)" },
   },
+  // No providerSelectId - dedicated transcription (ASR) models are an OpenRouter-only catalog,
+  // called through a separate transcription API rather than chat completions.
+  transcription: {
+    endpoint: "/api/models/llm/audio",
+    cacheKey: "transcriptionModel",
+    providerSelectId: null,
+    selectId: "cfg-transcription-model",
+    pinned: null,
+  },
 };
 
 function effectiveProvider(providerSelectId) {
+  if (!providerSelectId) return "openrouter";
   const value = document.getElementById(providerSelectId).value;
   if (providerSelectId === "cfg-llm-provider") return value || "openrouter";
   return value || document.getElementById("cfg-llm-provider").value || "openrouter";
@@ -1723,10 +1760,11 @@ async function reloadModelSelect(featureKey, selectedValue) {
   const selectEl = document.getElementById(spec.selectId);
   const currentValue = selectedValue !== undefined ? selectedValue : selectEl.value;
   const provider = effectiveProvider(spec.providerSelectId);
+  const endpoint = typeof spec.endpoint === "function" ? spec.endpoint() : spec.endpoint;
 
   let models = [];
   try {
-    const response = await fetch(`${spec.endpoint}?provider=${encodeURIComponent(provider)}`);
+    const response = await fetch(`${endpoint}?provider=${encodeURIComponent(provider)}`);
     if (response.ok) models = await response.json();
   } catch (err) {
     models = [];
@@ -1741,7 +1779,9 @@ async function reloadModelSelect(featureKey, selectedValue) {
 }
 
 for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
-  document.getElementById(PROVIDER_FEATURES[featureKey].providerSelectId).addEventListener("change", () => {
+  const providerSelectId = PROVIDER_FEATURES[featureKey].providerSelectId;
+  if (!providerSelectId) continue;
+  document.getElementById(providerSelectId).addEventListener("change", () => {
     reloadModelSelect(featureKey);
     // Main chat provider changing also affects any feature currently inheriting it.
     if (featureKey === "llm") {
@@ -1760,7 +1800,8 @@ async function loadModels(
   selectedMemoryModel,
   selectedChirp3Voice,
   selectedGameStateModel,
-  selectedGameStateTrainingModel
+  selectedGameStateTrainingModel,
+  selectedTranscriptionModel
 ) {
   const [ttsModels] = await Promise.all([
     fetch("/api/models/tts").then((r) => r.json()),
@@ -1768,6 +1809,7 @@ async function loadModels(
     reloadModelSelect("memory", selectedMemoryModel),
     reloadModelSelect("gameState", selectedGameStateModel),
     reloadModelSelect("gameStateTraining", selectedGameStateTrainingModel),
+    reloadModelSelect("transcription", selectedTranscriptionModel),
   ]);
 
   const speechModels = ttsModels.openrouter_speech_models || [];
@@ -1906,6 +1948,20 @@ function updateGameStateDependentVisibility() {
 
 gameStateEnabledInput.addEventListener("change", updateGameStateDependentVisibility);
 
+const transcriptionEnabledInput = document.getElementById("cfg-transcription-enabled");
+const transcriptionDependentEl = document.getElementById("transcription-dependent");
+
+function updateTranscriptionDependentVisibility() {
+  transcriptionDependentEl.hidden = !transcriptionEnabledInput.checked;
+}
+
+transcriptionEnabledInput.addEventListener("change", () => {
+  updateTranscriptionDependentVisibility();
+  // Toggling transcription mode changes which filter the main model list uses (drops the
+  // audio+image requirement in favor of text-only), so the dropdown needs to be refreshed.
+  reloadModelSelect("llm");
+});
+
 const vadThresholdInput = document.getElementById("cfg-vad-threshold");
 const vadThresholdValue = document.getElementById("cfg-vad-threshold-value");
 const vadSilenceInput = document.getElementById("cfg-vad-silence");
@@ -1982,6 +2038,8 @@ function applyConfigToForm(cfg) {
   updateWebSearchProviderVisibility();
   document.getElementById("cfg-tts-provider").value = cfg.tts_provider;
   updateTtsProviderVisibility();
+  transcriptionEnabledInput.checked = cfg.transcription_enabled;
+  updateTranscriptionDependentVisibility();
   document.getElementById("cfg-api-key").placeholder = cfg.openrouter_api_key_set
     ? "•••••••• (set)"
     : "Not set";
@@ -2078,7 +2136,8 @@ async function loadConfig() {
     cfg.memory_extraction_model,
     cfg.google_tts_voice,
     cfg.game_state_model,
-    cfg.game_state_training_model
+    cfg.game_state_training_model,
+    cfg.transcription_model
   );
 }
 
@@ -2091,7 +2150,8 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-memory-model").value,
     document.getElementById("cfg-chirp3-voice").value,
     document.getElementById("cfg-game-state-model").value,
-    document.getElementById("cfg-game-state-training-model").value
+    document.getElementById("cfg-game-state-training-model").value,
+    document.getElementById("cfg-transcription-model").value
   );
 });
 
@@ -2117,6 +2177,8 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     tts_provider: document.getElementById("cfg-tts-provider").value,
     google_tts_api_key: document.getElementById("cfg-google-tts-api-key").value || null,
     google_tts_voice: document.getElementById("cfg-chirp3-voice").value,
+    transcription_enabled: transcriptionEnabledInput.checked,
+    transcription_model: document.getElementById("cfg-transcription-model").value,
     kokoro_base_url: document.getElementById("cfg-kokoro-base-url").value.trim() || "http://localhost:8880/v1",
     kokoro_voice: document.getElementById("cfg-kokoro-voice").value,
     openrouter_tts_model: document.getElementById("cfg-openrouter-tts-model").value,

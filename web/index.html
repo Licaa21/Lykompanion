@@ -164,7 +164,7 @@
                 </select>
               </label>
               <label>
-                <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply.">?</button></span>
+                <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply. Normally must support audio+image input (voice messages and screenshots go straight to it). With Transcription Mode enabled (Voice tab), it only needs to handle text, so any cheap text-only model works — but it can no longer see screenshots.">?</button></span>
                 <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-model"></select>
               </label>
@@ -233,6 +233,18 @@
 
         <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
+            <label class="checkbox">
+              <input id="cfg-transcription-enabled" type="checkbox" />
+              Transcribe voice messages before sending to the main model
+              <button type="button" class="cfg-help" data-tip="Runs a dedicated audio-input model to transcribe your voice message to text first, then sends the text to the main chat model - so the main model no longer needs to support raw audio input.">?</button>
+            </label>
+            <div id="transcription-dependent">
+              <label>
+                <span class="cfg-label">Transcription Model <button type="button" class="cfg-help" data-tip="Dedicated speech-to-text model (Whisper, Chirp, Parakeet, etc.) used to transcribe voice messages. Required when transcription mode is enabled. OpenRouter only - these are called through a separate transcription API, not chat completions.">?</button></span>
+                <input id="cfg-transcription-model-search" type="text" class="model-search" placeholder="Search models…" />
+                <select id="cfg-transcription-model"></select>
+              </label>
+            </div>
             <label>
               <span class="cfg-label">TTS Provider <button type="button" class="cfg-help" data-tip="Which text-to-speech engine narrates the companion's replies.">?</button></span>
               <select id="cfg-tts-provider">

@@ -28,6 +28,8 @@ async def get_config() -> CompanionConfig:
         game_state_training_model=settings.game_state_training_model or None,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
+        transcription_enabled=settings.transcription_enabled,
+        transcription_model=settings.transcription_model or None,
         web_search_provider=settings.web_search_provider,
         searxng_base_url=settings.searxng_base_url,
         tts_provider=settings.tts_provider,
@@ -148,6 +150,12 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.google_tts_voice is not None:
         settings.google_tts_voice = config.google_tts_voice
         env_updates["GOOGLE_TTS_VOICE"] = config.google_tts_voice
+
+    settings.transcription_enabled = config.transcription_enabled
+    env_updates["TRANSCRIPTION_ENABLED"] = str(config.transcription_enabled)
+    if config.transcription_model is not None:
+        settings.transcription_model = config.transcription_model
+        env_updates["TRANSCRIPTION_MODEL"] = config.transcription_model
 
     settings.tts_speed = config.narration_speed
     env_updates["TTS_SPEED"] = str(config.narration_speed)

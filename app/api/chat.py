@@ -4,6 +4,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 
+import httpx
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openai import APIError
@@ -28,6 +29,7 @@ from app.services.llm.screenshot_tool import SCREENSHOT_TOOLS, execute_take_scre
 from app.services.llm.steam_tool import STEAM_TOOLS, execute_fetch_steam_library, execute_lookup_steam_game
 from app.services.llm.system_info_tool import SYSTEM_INFO_TOOLS, execute_fetch_system_info
 from app.services.llm.tools import MEMORY_TOOLS, execute_tool_call
+from app.services.llm.transcription import transcribe_audio
 from app.services.llm.volume_tool import VOLUME_TOOLS, execute_set_narration_volume
 from app.services.llm.web_search_tool import WEB_SEARCH_TOOLS, execute_web_search
 from app.services.screenshot.capture import capture_primary_monitor_b64
@@ -314,27 +316,47 @@ async def chat_voice(
     history: str = Form("[]"),
     include_screenshot: bool = Form(False),
 ) -> ChatResponse:
-    """Send raw audio directly to an audio-capable OpenRouter model, skipping local STT."""
+    """Sends voice audio to the LLM. In transcription mode, a dedicated audio-input model
+    transcribes it first and the main model only ever sees text; otherwise the raw audio goes
+    straight to the (audio-capable) main model, skipping local STT."""
     messages = _build_base_messages(include_screenshot)
     messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
-    messages.append(
-        {
-            "role": "user",
-            "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
-        }
-    )
+    transcript: str | None = None
 
+    if settings.transcription_enabled:
+        try:
+            transcript = await transcribe_audio(audio_b64, "wav")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Transcription request failed: {exc}") from exc
+        messages.append({"role": "user", "content": transcript})
+    else:
+        messages.append(
+            {
+                "role": "user",
+                "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
+            }
+        )
+
+    model = None if settings.transcription_enabled else settings.openrouter_model
     try:
-        reply, stop_listening = await _run_chat_with_tools(messages, model=settings.openrouter_model, source="chat_voice")
+        reply, stop_listening = await _run_chat_with_tools(messages, model=model, source="chat_voice")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
+
+    # A transcript is only available in transcription mode - raw-audio voice turns have nothing
+    # meaningful to feed the memory extraction pass.
+    if transcript:
+        _schedule_memory_extraction(transcript, reply)
 
     return ChatResponse(
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
+        transcript=transcript,
     )
 
 
@@ -344,24 +366,37 @@ async def chat_voice_stream(
     history: str = Form("[]"),
     include_screenshot: bool = Form(False),
 ) -> StreamingResponse:
-    """Streaming variant of chat_voice — same audio-to-LLM flow but emits SSE deltas so the
-    reply types in live rather than appearing all at once."""
+    """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
+    but emits SSE deltas so the reply types in live rather than appearing all at once."""
     messages = _build_base_messages(include_screenshot)
     messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
-    messages.append(
-        {
-            "role": "user",
-            "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
-        }
-    )
+    transcript: str | None = None
+
+    if settings.transcription_enabled:
+        try:
+            transcript = await transcribe_audio(audio_b64, "wav")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Transcription request failed: {exc}") from exc
+        messages.append({"role": "user", "content": transcript})
+    else:
+        messages.append(
+            {
+                "role": "user",
+                "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
+            }
+        )
+
+    model = None if settings.transcription_enabled else settings.openrouter_model
 
     async def event_generator():
         full_reply = ""
         stop_listening = False
         try:
-            async for event in _stream_chat_with_tools(messages, model=settings.openrouter_model, source="chat_voice_stream"):
+            async for event in _stream_chat_with_tools(messages, model=model, source="chat_voice_stream"):
                 if event["type"] == "delta":
                     full_reply += event["text"]
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
@@ -374,7 +409,12 @@ async def chat_voice_stream(
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
             return
 
-        yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening})}\n\n"
+        # A transcript is only available in transcription mode - raw-audio voice turns have
+        # nothing meaningful to feed the memory extraction pass.
+        if transcript:
+            _schedule_memory_extraction(transcript, full_reply)
+
+        yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening, 'transcript': transcript})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
