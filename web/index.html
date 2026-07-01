@@ -194,6 +194,17 @@
               Background OCR awareness (Windows only) — track quest/location/character automatically
               <button type="button" class="cfg-help" data-tip="Periodically OCR-scans your screen in the background so the companion knows your current quest/location/character without being told. Windows only.">?</button>
             </label>
+
+            <label>
+              <span class="cfg-label">Blacklisted Processes <button type="button" class="cfg-help" data-tip="Processes the OCR poller should never scan, and the companion's take_screenshot tool should never capture, even if you ask it to. Applies regardless of whether background OCR is enabled.">?</button></span>
+              <p class="modal-hint">Blocks both background OCR and the companion's take_screenshot tool for these processes — e.g. add your code editor so it never captures your code.</p>
+            </label>
+            <div id="game-state-blacklist" class="memory-list"></div>
+            <form id="game-state-blacklist-form" class="memory-add-form">
+              <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
+              <button type="submit" class="secondary-btn">Add</button>
+            </form>
+
             <div id="game-state-dependent">
               <div class="cfg-row">
                 <label>
@@ -213,15 +224,6 @@
                   <input id="cfg-tesseract-cmd" type="text" placeholder="Auto-detected from PATH" autocomplete="off" />
                 </label>
               </details>
-              <label>
-                <span class="cfg-label">Blacklisted Processes <button type="button" class="cfg-help" data-tip="Processes the OCR poller should never scan, even if detected as a foreground game.">?</button></span>
-                <p class="modal-hint">Processes the poller should never OCR, in case built-in filters miss something.</p>
-              </label>
-              <div id="game-state-blacklist" class="memory-list"></div>
-              <form id="game-state-blacklist-form" class="memory-add-form">
-                <input id="game-state-blacklist-input" type="text" placeholder="e.g. Calculator.exe" autocomplete="off" />
-                <button type="submit" class="secondary-btn">Add</button>
-              </form>
               <label>
                 <span class="cfg-label">Approved Processes <button type="button" class="cfg-help" data-tip="Processes you've allowed the OCR poller to scan. New, unrecognized processes prompt you before being added here.">?</button></span>
                 <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>

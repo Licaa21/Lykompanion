@@ -15,27 +15,6 @@ from app.services.system.processes import get_foreground_process_name
 
 logger = logging.getLogger(__name__)
 
-# Foreground processes that are clearly not games, so the poller skips OCR/LLM work for them.
-# Best-effort heuristic, not exhaustive - see TODO.md for smarter detection ideas.
-_NON_GAME_PROCESSES = {
-    "explorer.exe",
-    "chrome.exe",
-    "msedge.exe",
-    "firefox.exe",
-    "discord.exe",
-    "code.exe",
-    "windowsterminal.exe",
-    "cmd.exe",
-    "powershell.exe",
-    "pwsh.exe",
-    "python.exe",
-    "pythonw.exe",
-    "spotify.exe",
-    "slack.exe",
-    "steam.exe",
-    "steamwebhelper.exe",
-}
-
 _last_process: str | None = None
 _last_ocr_text: str | None = None
 
@@ -93,7 +72,7 @@ async def _poll_once() -> None:
         return
 
     process = get_foreground_process_name()
-    if not process or process.lower() in _NON_GAME_PROCESSES or game_state_processes.is_blacklisted(process):
+    if not game_state_processes.is_likely_game(process):
         logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", process)
         if _last_process is not None:
             _last_process = None

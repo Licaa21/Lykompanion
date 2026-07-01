@@ -1,3 +1,5 @@
+from urllib.parse import urljoin
+
 import httpx
 
 from app.core.config import settings
@@ -37,12 +39,24 @@ async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> 
     for result in results:
         image_url = result.get("img_src") or result.get("url")
         if image_url:
-            return image_url
+            # With image_proxy enabled, SearXNG returns a path relative to itself
+            # (e.g. "/image_proxy?url=...") rather than the original external URL.
+            return urljoin(settings.searxng_base_url, image_url)
     return None
 
 
+SEARXNG_HEADERS = {
+    # Some SearXNG instances run a bot/limiter filter that rejects requests without
+    # browser-like headers, independent of whether json is in the enabled formats list.
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 async def _execute_web_search_searxng(query: str) -> str:
-    async with httpx.AsyncClient(base_url=settings.searxng_base_url, timeout=15) as http_client:
+    async with httpx.AsyncClient(
+        base_url=settings.searxng_base_url, timeout=15, headers=SEARXNG_HEADERS
+    ) as http_client:
         try:
             response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "general"})
             response.raise_for_status()

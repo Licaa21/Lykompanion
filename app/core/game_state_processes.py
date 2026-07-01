@@ -14,6 +14,34 @@ BLACKLIST_PATH = DATA_DIR / "game_state_blacklist.json"
 WHITELIST_PATH = DATA_DIR / "game_state_whitelist.json"
 PENDING_PATH = DATA_DIR / "game_state_pending.json"
 
+# Foreground processes that are clearly not games - shared by the OCR poller (skips these
+# outright) and memory tagging (never trusts an LLM-claimed game_specific=True for one of
+# these, since the model sometimes mismarks "mentioned a game" as "playing a game right now").
+# Best-effort heuristic, not exhaustive - see TODO.md for smarter detection ideas.
+NON_GAME_PROCESSES = {
+    "explorer.exe",
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "discord.exe",
+    "code.exe",
+    "windowsterminal.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "python.exe",
+    "pythonw.exe",
+    "spotify.exe",
+    "slack.exe",
+    "steam.exe",
+    "steamwebhelper.exe",
+}
+
+
+def is_likely_game(process: str | None) -> bool:
+    """False for an empty/unknown process, a known non-game process, or a blacklisted one."""
+    return bool(process) and process.lower() not in NON_GAME_PROCESSES and not is_blacklisted(process)
+
 
 def _load(path: Path) -> list[str]:
     if not path.exists():

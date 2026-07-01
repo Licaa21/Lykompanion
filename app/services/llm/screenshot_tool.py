@@ -1,4 +1,6 @@
+from app.core.game_state_processes import is_blacklisted
 from app.services.screenshot.capture import capture_monitor_b64, get_active_monitor_index, list_monitors
+from app.services.system.processes import get_foreground_process_name
 
 SCREENSHOT_TOOLS = [
     {
@@ -36,6 +38,15 @@ def format_monitors_for_prompt() -> str:
 
 
 def execute_take_screenshot(arguments: dict) -> tuple[str, list[dict]]:
+    process = get_foreground_process_name()
+    if process and is_blacklisted(process):
+        return (
+            f"403 Forbidden: screenshots are disabled for '{process}' - the user has blacklisted "
+            "this process (same blacklist as passive game-state awareness). Don't retry, and let "
+            "the user know you can't see their screen right now if it's relevant to your reply.",
+            [],
+        )
+
     monitor = arguments.get("monitor")
     monitor_index = monitor if isinstance(monitor, int) and monitor > 0 else None
 

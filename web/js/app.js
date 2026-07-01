@@ -402,13 +402,22 @@ async function synthesizeSentence(text) {
   return response.blob();
 }
 
-// The companion may embed markdown images/links (see renderMessageMarkup) - narration should
-// speak the alt/link text, not read raw "bracket bracket parenthesis http" syntax aloud.
+// The companion may embed markdown images/links (see renderMessageMarkup). Images are shown
+// visually, so narration skips them entirely rather than reading the alt text aloud; links
+// still speak their label text, just never the URL. Also strips emojis as a safety net in case
+// the model doesn't follow the "no emojis" system prompt rule. Must run BEFORE sentence-splitting
+// (see extractCompleteSentences) - a URL like "example.com/page.html" contains periods that the
+// splitter would otherwise cut through, tearing markdown link/image syntax apart mid-pattern.
+const EMOJI_REGEX = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}]/gu;
+
 function stripMarkdownForNarration(text) {
   return text
-    .replace(/!\[([^\]]*)\]\(https?:\/\/[^\s)]+\)/g, (_m, alt) => alt || "an image")
+    .replace(/!\[([^\]]*)\]\(https?:\/\/[^\s)]+\)/g, "")
     .replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g, (_m, label) => label)
-    .replace(/https?:\/\/[^\s<>"']+/g, "");
+    .replace(/https?:\/\/[^\s<>"']+/g, "")
+    .replace(EMOJI_REGEX, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 function enqueueNarration(text) {
@@ -831,7 +840,10 @@ async function sendMessage(text) {
 
         if (narrateEnabled) {
           sentenceBuffer += payload.delta;
-          const { complete, remainder } = extractCompleteSentences(sentenceBuffer);
+          // Strip before splitting into sentences, not after - otherwise the sentence
+          // splitter cuts through periods inside URLs before the markdown stripper ever
+          // sees a complete pattern to match.
+          const { complete, remainder } = extractCompleteSentences(stripMarkdownForNarration(sentenceBuffer));
           sentenceBuffer = remainder;
           for (const sentence of complete) {
             enqueueNarration(sentence);

@@ -5,8 +5,9 @@ You'll be given the current date/time, the current known facts (each with an id,
 - "remove": ids of known facts that the latest exchange invalidates, contradicts, or makes obsolete (e.g. quitting/finishing/uninstalling a game, a corrected fact, progressing past a noted obstacle).
 
 **Tag each saved fact as `game_specific: true` or `false`:**
-- `true` — tied to *this playthrough* of *the specific game currently being discussed*: character build/class/race, quest/story progress, in-game relationships, current obstacle. These only get shown back to the companion while that same game is active, so don't undertag them — a vague/general fact for one game is still useless context while playing a different one.
+- `true` — tied to *this playthrough* of *the game the user is actively playing right now, in this session*: character build/class/race, quest/story progress, in-game relationships, current obstacle. These only get shown back to the companion while that same game is active, so don't undertag them — a vague/general fact for one game is still useless context while playing a different one.
 - `false` — true regardless of what they're playing right now: name/how to address them, life context, and *recurring cross-game* tastes/habits (see below). These always show up.
+- **Merely discussing or mentioning a game is not the same as playing it right now.** A game they're considering buying, planning to start, used to play, or are just chatting about — while actually playing something else (or not playing anything, e.g. just typing to the companion app) — is a general fact (`false`), not game-specific. Tagging is anchored to what's actually running this moment, never to the subject of conversation.
 
 **Resolve relative dates/times using the given current date before saving.** If the user says "tomorrow," "next Friday," "in two weeks," etc., convert it to an absolute date (e.g. "tomorrow" on Monday, June 29 → "June 30") so the fact still makes sense whenever it's read back later. Never save a bare relative reference on its own.
 

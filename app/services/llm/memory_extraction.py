@@ -1,7 +1,7 @@
 import json
 import logging
 
-from app.core import memory
+from app.core import game_state_processes, memory
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
@@ -52,7 +52,11 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
         if fact.get("game_specific"):
             if process is None:
                 process = get_foreground_process_name() or ""
-            memory.add_memory(content, process=process or None)
+            # Don't trust the extraction model's game_specific flag blindly - it sometimes
+            # mismarks "discussed a game" as "playing it right now." Only tag if the foreground
+            # process is actually a plausible game (same check the OCR poller uses).
+            tag = process if process and game_state_processes.is_likely_game(process) else None
+            memory.add_memory(content, process=tag)
         else:
             memory.add_memory(content)
 

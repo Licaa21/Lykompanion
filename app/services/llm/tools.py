@@ -1,4 +1,4 @@
-from app.core import memory
+from app.core import game_state_processes, memory
 from app.services.system.processes import get_foreground_process_name
 
 MEMORY_TOOLS = [
@@ -23,10 +23,13 @@ MEMORY_TOOLS = [
                     "game_specific": {
                         "type": "boolean",
                         "description": (
-                            "True if this fact is specific to the game currently being played (e.g. character "
-                            "build, quest progress, in-game relationships) and should only resurface while that "
-                            "same game is active. False/omitted for general facts (name, life context, "
-                            "preferences that hold across games)."
+                            "True ONLY if this fact is tied to the game the user is actively playing RIGHT NOW in "
+                            "this session (e.g. character build, quest progress, in-game relationships) - it gets "
+                            "tagged to whatever process is currently in the foreground, so only use true when that "
+                            "current process genuinely is the game the fact is about. Merely mentioning a game by "
+                            "name is NOT enough - a game they're not currently playing (wishlist/considering "
+                            "buying/used to play/heard about) is a general fact, false/omitted, even if the "
+                            "foreground process happens to be a game launcher like Steam at the time."
                         ),
                     },
                 },
@@ -66,6 +69,11 @@ def execute_tool_call(name: str, arguments: dict) -> str:
         if not content:
             return "Nothing to save: content was empty."
         process = get_foreground_process_name() if arguments.get("game_specific") else None
+        # Don't trust the LLM's game_specific flag blindly - it sometimes mismarks "mentioned a
+        # game" as "playing a game right now." Only tag if the foreground process is actually
+        # a plausible game (same check the OCR poller uses), otherwise fall back to a general fact.
+        if process and not game_state_processes.is_likely_game(process):
+            process = None
         entry = memory.add_memory(content, process=process)
         return f"Saved memory [{entry['id']}]: {entry['content']}"
 
