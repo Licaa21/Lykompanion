@@ -10,5 +10,6 @@ venv/
 *.wav
 *.mp3
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/launch.json
 image/

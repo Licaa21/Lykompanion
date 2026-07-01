@@ -4,74 +4,101 @@
   <meta charset="utf-8" />
   <title>Lykompanion</title>
   <link rel="icon" type="image/png" href="img/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div class="app-shell">
+
+    <!-- ── SIDEBAR — glass, logo + chat list + tool dock ────────────── -->
     <aside class="sidebar">
       <div class="sidebar-brand">
         <img src="img/logo.png" alt="Lykompanion" class="sidebar-logo" />
       </div>
-      <button id="new-chat-btn" class="sidebar-btn new-chat-btn">
-        <span class="sidebar-icon">+</span> New Chat
+
+      <button id="new-chat-btn" class="new-chat-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Chat
       </button>
+
       <div id="chat-list" class="chat-list"></div>
+
+      <!-- Tool dock — sits at the bottom of the sidebar -->
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-tools">
+
+        <button id="instructions-btn" class="tool-btn" title="Personal Instructions">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </button>
+
+        <button id="memory-btn" class="tool-btn" title="Memory">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        </button>
+
+        <button id="game-state-btn" class="tool-btn" title="Game State">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/></svg>
+          <span id="game-state-dot" class="status-dot" title="Game-state awareness disabled"></span>
+        </button>
+
+        <button id="usage-btn" class="tool-btn" title="Consumption">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </button>
+
+        <button id="debug-btn" class="tool-btn" title="Debug">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </button>
+
+        <button id="notif-bell-btn" class="tool-btn" title="Notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span id="notif-badge" class="notif-badge" hidden>0</span>
+        </button>
+
+        <button id="settings-btn" class="tool-btn" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+
+      </div>
     </aside>
 
+    <!-- ── MAIN CHAT PANEL ──────────────────────────────────────────── -->
     <main class="chat-panel">
       <div id="chat-log" class="chat-log"></div>
+
       <div class="composer">
         <div id="voice-status" class="voice-status"></div>
         <div id="screenshot-indicator" class="screenshot-indicator" hidden>
-          📷 Screenshot will be included with your next message
+          Screenshot will be included with your next message
         </div>
         <form id="chat-form" class="chat-form">
-          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off">📷</button>
-          <button
-            type="button"
-            id="live-mic-toggle"
-            class="icon-btn"
-            title="Hands-free: auto-record and send when you speak"
-          >
-            🎙️
+          <!-- Screenshot toggle -->
+          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
-          <button type="button" id="mic-btn" class="icon-btn" title="Voice input">🎤</button>
-          <input id="chat-input" type="text" placeholder="Message Lykompanion..." autocomplete="off" />
+          <!-- Hands-free / live mic toggle -->
+          <button type="button" id="live-mic-toggle" class="icon-btn" title="Hands-free: auto-record and send when you speak">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+          </button>
+          <!-- Push-to-talk mic -->
+          <button type="button" id="mic-btn" class="icon-btn" title="Voice input (push to talk)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+
+          <input id="chat-input" type="text" placeholder="Message Lykompanion…" autocomplete="off" />
+
           <button type="submit" class="send-btn">Send</button>
-          <button type="button" id="stop-narration-btn" class="icon-btn" title="Stop narration" hidden>⏹️</button>
+
+          <!-- Stop narration — hidden until TTS is playing -->
+          <button type="button" id="stop-narration-btn" class="icon-btn" title="Stop narration" hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
         </form>
       </div>
     </main>
 
-    <aside class="sidebar action-sidebar">
-      <button id="instructions-btn" class="sidebar-btn">
-        <span class="sidebar-icon">📝</span> Personal Instructions
-      </button>
-      <button id="memory-btn" class="sidebar-btn">
-        <span class="sidebar-icon">🧠</span> Memory
-      </button>
-      <button id="game-state-btn" class="sidebar-btn">
-        <span class="sidebar-icon">🎮</span>
-        <span class="sidebar-btn-label">Game State</span>
-        <span id="game-state-dot" class="status-dot" title="Game-state awareness disabled"></span>
-      </button>
-      <button id="usage-btn" class="sidebar-btn">
-        <span class="sidebar-icon">📊</span> Consumption
-      </button>
-      <button id="debug-btn" class="sidebar-btn">
-        <span class="sidebar-icon">🐞</span> Debug
-      </button>
-      <button id="notif-bell-btn" class="sidebar-btn">
-        <span class="sidebar-icon">🔔</span>
-        <span class="sidebar-btn-label">Notifications</span>
-        <span id="notif-badge" class="notif-badge" hidden>0</span>
-      </button>
-      <button id="settings-btn" class="sidebar-btn">
-        <span class="sidebar-icon">⚙️</span> Settings
-      </button>
-    </aside>
   </div>
 
+  <!-- ── SETTINGS MODAL ─────────────────────────────────────────────── -->
   <div id="settings-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -85,6 +112,8 @@
         <button type="button" class="tab-btn" data-tab="third-party">Third-Party APIs</button>
       </div>
       <div class="modal-body">
+
+        <!-- GENERAL tab -->
         <section class="tab-panel" data-tab="general">
           <div class="cfg-key-row">
             <label>
@@ -98,18 +127,19 @@
           </div>
           <label>
             LLM Model
-            <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
             <select id="cfg-model"></select>
           </label>
           <label>
             Memory Extraction Model
-            <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models…" />
             <select id="cfg-memory-model"></select>
           </label>
           <label>
             Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit)
             <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
           </label>
+
           <h3>Vision</h3>
           <p class="modal-hint">Lower values cut image token cost on screenshots sent to the LLM.</p>
           <label>
@@ -120,6 +150,7 @@
             Screenshot JPEG Quality: <span id="cfg-screenshot-quality-value">70</span>
             <input id="cfg-screenshot-quality" type="range" min="30" max="95" step="5" value="70" />
           </label>
+
           <h3>Passive Game-State Awareness</h3>
           <label class="checkbox">
             <input id="cfg-game-state-enabled" type="checkbox" />
@@ -131,14 +162,12 @@
           </label>
           <label>
             Game-State Model
-            <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models..." />
+            <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
             <select id="cfg-game-state-model"></select>
           </label>
           <label>
             Blacklisted Processes
-            <p class="modal-hint">
-              Processes the game-state poller should never OCR/track, in case the built-in filters miss something.
-            </p>
+            <p class="modal-hint">Processes the poller should never OCR, in case built-in filters miss something.</p>
           </label>
           <div id="game-state-blacklist" class="memory-list"></div>
           <form id="game-state-blacklist-form" class="memory-add-form">
@@ -147,14 +176,12 @@
           </form>
           <label>
             Approved Processes
-            <p class="modal-hint">
-              Processes you've allowed the poller to OCR/track. New, unfamiliar processes show up as a
-              notification asking you to allow or blacklist them instead of being tracked automatically.
-            </p>
+            <p class="modal-hint">Processes you've allowed the poller to OCR. New ones prompt you first.</p>
           </label>
           <div id="game-state-whitelist" class="memory-list"></div>
         </section>
 
+        <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
           <label>
             TTS Provider
@@ -167,19 +194,14 @@
           <div data-tts-provider="kokoro">
             <label>
               Kokoro Voice
-              <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices..." />
+              <input id="cfg-kokoro-voice-search" type="text" class="model-search" placeholder="Search voices…" />
               <select id="cfg-kokoro-voice"></select>
             </label>
           </div>
           <div data-tts-provider="openrouter">
             <label>
               OpenRouter TTS Model
-              <input
-                id="cfg-openrouter-tts-model-search"
-                type="text"
-                class="model-search"
-                placeholder="Search models..."
-              />
+              <input id="cfg-openrouter-tts-model-search" type="text" class="model-search" placeholder="Search models…" />
               <select id="cfg-openrouter-tts-model"></select>
             </label>
             <label>
@@ -194,12 +216,12 @@
             </label>
             <label>
               Chirp 3 HD Voice
-              <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices..." />
+              <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices…" />
               <select id="cfg-chirp3-voice"></select>
             </label>
           </div>
           <label>
-            Narration Speed (<span id="cfg-narration-speed-value">1.0</span>x)
+            Narration Speed (<span id="cfg-narration-speed-value">1.0</span>×)
             <input id="cfg-narration-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
           </label>
           <label>
@@ -210,26 +232,19 @@
             <input id="cfg-narrate" type="checkbox" checked />
             Narrate replies (TTS)
           </label>
+
           <h3>Voice Input</h3>
-          <p class="modal-hint">
-            Speech is always sent directly to an audio-capable LLM (no local transcription).
-          </p>
+          <p class="modal-hint">Speech is always sent directly to an audio-capable LLM (no local transcription).</p>
           <label>
             OpenRouter Voice Model
-            <input
-              id="cfg-openrouter-voice-model-search"
-              type="text"
-              class="model-search"
-              placeholder="Search models..."
-            />
+            <input id="cfg-openrouter-voice-model-search" type="text" class="model-search" placeholder="Search models…" />
             <select id="cfg-openrouter-voice-model"></select>
           </label>
         </section>
 
+        <!-- LIVE MIC tab -->
         <section class="tab-panel" data-tab="live-mic" hidden>
-          <p class="modal-hint">
-            Tune how the hands-free mic (🎙️) decides when you're speaking. Stored locally in this browser.
-          </p>
+          <p class="modal-hint">Tune how the hands-free mic decides when you're speaking. Stored server-side.</p>
           <label>
             Voice Activation Threshold (<span id="cfg-vad-threshold-value">8</span>)
             <input id="cfg-vad-threshold" type="range" min="1" max="40" step="1" value="8" />
@@ -245,12 +260,11 @@
 
           <h3>Wake Word</h3>
           <p class="modal-hint">
-            Say this phrase to re-enable hands-free listening after it's been turned off (by you or the
-            companion), without touching the keyboard/mouse. Uses your browser's built-in speech recognition
-            (Chrome/Edge only).
+            Say this phrase to re-enable hands-free listening after it's been turned off, without
+            touching keyboard or mouse. Uses your browser's built-in speech recognition (Chrome/Edge only).
           </p>
           <p id="wake-word-unsupported" class="modal-hint" hidden>
-            Not supported in this browser - try Chrome or Edge.
+            Not supported in this browser — try Chrome or Edge.
           </p>
           <div id="wake-word-controls">
             <label class="checkbox">
@@ -262,17 +276,18 @@
               <input id="cfg-wake-word-phrase" type="text" value="Hey Buddy" autocomplete="off" />
             </label>
             <div id="wake-word-debug" class="wake-word-debug" hidden>
-              <div id="wake-word-status" class="wake-word-status">Listening for wake phrase...</div>
+              <div id="wake-word-status" class="wake-word-status">Listening for wake phrase…</div>
               <div id="wake-word-transcript" class="wake-word-transcript"></div>
             </div>
           </div>
         </section>
 
+        <!-- THIRD-PARTY tab -->
         <section class="tab-panel" data-tab="third-party" hidden>
           <h3>IGDB</h3>
           <p class="modal-hint">
             Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
-            Twitch - create a free app at
+            Twitch — create a free app at
             <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
             to get a Client ID and Secret.
           </p>
@@ -302,6 +317,7 @@
           </label>
         </section>
       </div>
+
       <div class="modal-footer">
         <button type="button" id="cfg-refresh-models" class="secondary-btn">Refresh Model Lists</button>
         <button type="button" id="cfg-save" class="primary-btn">Save Settings</button>
@@ -309,6 +325,7 @@
     </div>
   </div>
 
+  <!-- ── PERSONAL INSTRUCTIONS MODAL ──────────────────────────────── -->
   <div id="instructions-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -317,8 +334,8 @@
       </div>
       <div class="modal-body">
         <p class="modal-hint">
-          Tell your companion anything it should always know or do — tone, how to address you, things to avoid, etc.
-          This is added to every conversation.
+          Tell your companion anything it should always know or do — tone, how to address you, things to
+          avoid, etc. This is added to every conversation.
         </p>
         <textarea
           id="instructions-text"
@@ -332,6 +349,7 @@
     </div>
   </div>
 
+  <!-- ── MEMORY MODAL ───────────────────────────────────────────────── -->
   <div id="memory-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -340,17 +358,16 @@
       </div>
       <div class="modal-body">
         <p class="modal-hint">
-          Facts your companion has saved about you. It can add or remove these itself during conversation, or you
-          can manage them directly here. Facts tagged to a game only get shown to the companion while that game is
-          active; general facts always show.
+          Facts your companion has saved about you. It can add or remove these itself during conversation,
+          or you can manage them directly here. Facts tagged to a game only show while that game is active.
         </p>
         <div id="memory-filters" class="memory-filters"></div>
         <div id="memory-list" class="memory-list"></div>
         <form id="memory-add-form" class="memory-add-form">
-          <input id="memory-add-input" type="text" placeholder="Add a memory..." autocomplete="off" />
+          <input id="memory-add-input" type="text" placeholder="Add a memory…" autocomplete="off" />
           <select id="memory-add-process">
             <option value="">General</option>
-            <option value="__other__">Other...</option>
+            <option value="__other__">Other…</option>
           </select>
           <input
             id="memory-add-process-custom"
@@ -365,6 +382,7 @@
     </div>
   </div>
 
+  <!-- ── GAME STATE MODAL ───────────────────────────────────────────── -->
   <div id="game-state-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -374,14 +392,15 @@
       <div class="modal-body">
         <p class="modal-hint">
           What the companion has picked up automatically from on-screen text via background OCR, refreshed
-          periodically while a game is focused. This is separate from Memory — only facts the companion explicitly
-          decides are worth remembering long-term get saved there.
+          periodically while a game is focused. Separate from Memory — only facts explicitly decided worth
+          remembering get saved there.
         </p>
         <div id="game-state-fields" class="game-state-fields"></div>
       </div>
     </div>
   </div>
 
+  <!-- ── CONSUMPTION MODAL ─────────────────────────────────────────── -->
   <div id="usage-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -430,6 +449,7 @@
     </div>
   </div>
 
+  <!-- ── DEBUG MODAL ───────────────────────────────────────────────── -->
   <div id="debug-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -438,14 +458,15 @@
       </div>
       <div class="modal-body">
         <p class="modal-hint">
-          The last 10 individual LLM requests (one per API call - a single reply can involve several if tools
-          were used), most recent first. Long fields are truncated. Not persisted - resets on server restart.
+          The last 10 individual LLM requests (one per API call — a single reply can involve several if
+          tools were used), most recent first. Not persisted — resets on server restart.
         </p>
         <div id="debug-requests-list" class="debug-requests-list"></div>
       </div>
     </div>
   </div>
 
+  <!-- ── NOTIFICATIONS MODAL ───────────────────────────────────────── -->
   <div id="notif-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-header">
@@ -460,12 +481,6 @@
   </div>
 
   <audio id="narration-audio" hidden></audio>
-  <!--
-    Lightweight speech/non-speech classifier (Silero VAD), used to filter out coughs/claps/keyboard
-    noise that pass the live mic's amplitude threshold but aren't actually speech, before sending an
-    utterance to the LLM. Loaded from CDN - if this fails to load (offline, CDN blocked, version
-    moved), app.js fails open and just sends utterances as before, so it's not a hard dependency.
-  -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web/dist/bundle.min.js"></script>
   <script src="js/app.js"></script>
