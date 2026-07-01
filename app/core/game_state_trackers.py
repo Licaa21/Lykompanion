@@ -1,7 +1,7 @@
 """Per-process, user-configurable list of fields ("trackers") the game-state extraction LLM pass
 fills in for a given foreground process - e.g. Rocket League might track "1v1 Rank" and "Goals
-scored this session" instead of the generic RPG-flavored defaults. Persisted to disk (unlike the
-ephemeral live snapshot in app/core/game_state.py) so customizations survive restarts.
+scored this session" instead of the generic RPG-flavored defaults. Persisted to disk (data/
+game_state_trackers.json) so customizations survive restarts.
 
 Every process gets a copy of DEFAULT_TRACKERS the first time it's looked up, and the user can
 add/remove/edit trackers per process from there - except "activity", which always stays present

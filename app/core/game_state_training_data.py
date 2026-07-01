@@ -2,10 +2,9 @@
 training pass (see app/services/llm/game_state_extraction.py) - e.g. explaining that a string
 like 0-2:12-2 on a Rocket League HUD means home score - time left - away score. Each training
 pass revises the whole document rather than appending a new entry, so it stays a coherent
-reference instead of a growing pile of loosely-related notes. Persisted to disk (unlike the
-ephemeral live snapshot in app/core/game_state.py) so it accumulates across sessions and gets fed
-into every future extraction pass for that process. User-editable from Settings > Game Awareness
-> Training Data."""
+reference instead of a growing pile of loosely-related notes. Persisted to disk (data/
+game_state_training_data.json) so it accumulates across sessions and gets fed into every future
+extraction pass for that process. User-editable from Settings > Game Awareness > Training Data."""
 
 import json
 from datetime import datetime, timezone

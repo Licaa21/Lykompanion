@@ -1,6 +1,6 @@
 """User-managed allow/deny lists and the pending-approval slot for passive game-state OCR,
-persisted to disk (unlike the ephemeral live snapshot in app/core/game_state.py) so they survive
-restarts and give the user visibility/control over what the poller is allowed to OCR.
+persisted to disk so they survive restarts and give the user visibility/control over what the
+poller is allowed to OCR.
 
 Any foreground process that isn't in the hardcoded non-game denylist (see game_state_extraction.py)
 and isn't already on the whitelist is treated as "pending" - the poller won't OCR it until the user

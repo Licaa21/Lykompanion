@@ -1461,15 +1461,25 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 ════════════════════════════════════════════════════ */
 .game-state-fields { display: flex; flex-direction: column; gap: 4px; }
 .game-state-row {
-  display: flex; justify-content: space-between; align-items: baseline;
-  gap: 12px; padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 12px;
   border-radius: var(--r2);
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--glass-border);
   font-size: 13px;
 }
-.game-state-row-label { color: var(--t2); font-size: 12px; }
-.game-state-row-value { color: var(--t1); font-weight: 500; text-align: right; }
+.game-state-row-label { color: var(--t2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+.game-state-row-value { color: var(--t1); font-weight: 500; text-align: left; overflow-wrap: break-word; }
+.game-state-row-value-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.game-state-row-value-list li {
+  padding-left: 12px; position: relative;
+}
+.game-state-row-value-list li::before {
+  content: "•"; position: absolute; left: 0; color: var(--t3);
+}
 
 .game-state-stats {
   display: flex; flex-direction: column; gap: 2px;

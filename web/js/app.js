@@ -2289,14 +2289,32 @@ function renderGameStateFields(data) {
   for (const [label, value] of rows) {
     const row = document.createElement("div");
     row.className = "game-state-row";
+
     const labelEl = document.createElement("span");
     labelEl.className = "game-state-row-label";
     labelEl.textContent = label;
-    const valueEl = document.createElement("span");
-    valueEl.className = "game-state-row-value";
-    valueEl.textContent = value || "(not seen yet)";
     row.appendChild(labelEl);
-    row.appendChild(valueEl);
+
+    // Multi-part values (a "Known Stats"-style field gathering several distinct facts) read as
+    // an unreadable wall of text on one line - split them into a small list, one part per line,
+    // instead. A single short value (most fields, most of the time) stays as plain inline text.
+    const parts = (value || "").split(/\s*;\s*/).filter(Boolean);
+    if (parts.length > 1) {
+      const list = document.createElement("ul");
+      list.className = "game-state-row-value game-state-row-value-list";
+      for (const part of parts) {
+        const item = document.createElement("li");
+        item.textContent = part;
+        list.appendChild(item);
+      }
+      row.appendChild(list);
+    } else {
+      const valueEl = document.createElement("span");
+      valueEl.className = "game-state-row-value";
+      valueEl.textContent = value || "(not seen yet)";
+      row.appendChild(valueEl);
+    }
+
     gameStateFields.appendChild(row);
   }
 }

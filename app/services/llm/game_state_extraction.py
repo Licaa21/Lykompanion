@@ -55,14 +55,15 @@ _EMPTY_OCR_WARN_THRESHOLD = 10
 _empty_ocr_streak = 0
 
 
-def _reset_window(clear_state: bool) -> None:
+def _reset_window() -> None:
+    """Resets the per-process OCR-batching buffers (frames collected this poll window, dedupe
+    state). Doesn't touch persisted tracker values - those live independently in game_state.py,
+    keyed by process, and survive a process switch or the companion restarting."""
     global _frames, _last_kept_text, _window_started_at, _empty_ocr_streak
     _frames = []
     _last_kept_text = None
     _window_started_at = None
     _empty_ocr_streak = 0
-    if clear_state:
-        game_state.clear_game_state()
 
 
 def _frames_similar(a: str, b: str) -> bool:
@@ -229,17 +230,23 @@ async def _capture_tick() -> None:
             logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", foreground)
 
         if _last_process is not None and not is_process_running(_last_process):
-            logger.info("Game-state poll: tracked process=%r no longer running, clearing state", _last_process)
+            logger.info(
+                "Game-state poll: tracked process=%r no longer running, hiding panel (its data "
+                "stays saved for next time)",
+                _last_process,
+            )
             _last_process = None
-            _reset_window(clear_state=True)
+            _reset_window()
+            game_state.stop_tracking()
         return
 
     process = foreground
     if process != _last_process:
         _last_process = process
-        _reset_window(clear_state=True)
-        # Flips tracking=True immediately (fields empty until the first extraction pass lands),
-        # instead of waiting a full poll window for the first LLM call to populate anything.
+        _reset_window()
+        # Flips tracking=True immediately (previous session's values for this process show up
+        # right away if any exist, empty otherwise) instead of waiting a full poll window for the
+        # first LLM call to populate anything.
         game_state.start_tracking(process)
 
     if _window_started_at is None:
