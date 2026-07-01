@@ -913,6 +913,23 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .cfg-advanced[open] summary::before { content: "▾ "; }
 .cfg-advanced[open] summary { margin-bottom: 10px; }
 
+/* API key field with clear button */
+.key-field { display: flex; gap: 6px; align-items: center; }
+.key-field input { flex: 1; min-width: 0; }
+.clear-key-btn {
+  flex-shrink: 0;
+  padding: 0 8px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.clear-key-btn:hover { background: #c0392b22; color: #e74c3c; border-color: #e74c3c; }
+
 /* Per-setting help tooltip */
 .cfg-label { display: inline-flex; align-items: center; gap: 6px; }
 .cfg-help {

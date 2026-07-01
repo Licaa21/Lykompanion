@@ -95,10 +95,10 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.openrouter_voice is not None:
         settings.openrouter_voice = config.openrouter_voice
         env_updates["OPENROUTER_VOICE"] = config.openrouter_voice
-    if config.openrouter_api_key:
+    if config.openrouter_api_key is not None:
         settings.openrouter_api_key = config.openrouter_api_key
         env_updates["OPENROUTER_API_KEY"] = config.openrouter_api_key
-    if config.openrouter_management_key:
+    if config.openrouter_management_key is not None:
         settings.openrouter_management_key = config.openrouter_management_key
         env_updates["OPENROUTER_MANAGEMENT_KEY"] = config.openrouter_management_key
 
@@ -111,13 +111,13 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     settings.game_state_training_provider = config.game_state_training_provider
     env_updates["GAME_STATE_TRAINING_PROVIDER"] = config.game_state_training_provider
 
-    if config.google_ai_studio_api_key:
+    if config.google_ai_studio_api_key is not None:
         settings.google_ai_studio_api_key = config.google_ai_studio_api_key
         env_updates["GOOGLE_AI_STUDIO_API_KEY"] = config.google_ai_studio_api_key
     if config.custom_openai_base_url:
         settings.custom_openai_base_url = config.custom_openai_base_url
         env_updates["CUSTOM_OPENAI_BASE_URL"] = config.custom_openai_base_url
-    if config.custom_openai_api_key:
+    if config.custom_openai_api_key is not None:
         settings.custom_openai_api_key = config.custom_openai_api_key
         env_updates["CUSTOM_OPENAI_API_KEY"] = config.custom_openai_api_key
 
@@ -144,7 +144,7 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         settings.game_state_training_model = config.game_state_training_model
         env_updates["GAME_STATE_TRAINING_MODEL"] = config.game_state_training_model
 
-    if config.google_tts_api_key:
+    if config.google_tts_api_key is not None:
         settings.google_tts_api_key = config.google_tts_api_key
         env_updates["GOOGLE_TTS_API_KEY"] = config.google_tts_api_key
     if config.google_tts_voice is not None:
@@ -194,10 +194,10 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.igdb_client_id is not None:
         settings.igdb_client_id = config.igdb_client_id
         env_updates["IGDB_CLIENT_ID"] = config.igdb_client_id
-    if config.igdb_client_secret:
+    if config.igdb_client_secret is not None:
         settings.igdb_client_secret = config.igdb_client_secret
         env_updates["IGDB_CLIENT_SECRET"] = config.igdb_client_secret
-    if config.steam_api_key:
+    if config.steam_api_key is not None:
         settings.steam_api_key = config.steam_api_key
         env_updates["STEAM_API_KEY"] = config.steam_api_key
     if config.steam_id is not None:

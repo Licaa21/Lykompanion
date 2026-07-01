@@ -90,10 +90,10 @@
       <div class="modal-layout">
         <nav class="modal-tabs">
           <button type="button" class="tab-btn active" data-tab="general">General</button>
+          <button type="button" class="tab-btn" data-tab="api-keys">API Keys</button>
           <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
           <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
           <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
-          <button type="button" class="tab-btn" data-tab="third-party">Integrations</button>
         </nav>
         <div class="modal-main modal-body">
 
@@ -121,38 +121,6 @@
               <span class="cfg-label">Display Name <button type="button" class="cfg-help" data-tip="Your name, shown next to your messages in chat instead of 'You'.">?</button></span>
               <input id="cfg-user-name" type="text" placeholder="You" autocomplete="off" />
             </label>
-            <h3>Provider Credentials</h3>
-            <p class="modal-hint">
-              Set up credentials for whichever providers you use below - each LLM feature (main chat,
-              memory extraction, game-state, training) picks its own provider independently.
-            </p>
-            <div class="cfg-key-row">
-              <label>
-                <span class="cfg-label">OpenRouter API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests routed through OpenRouter.">?</button></span>
-                <input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" />
-              </label>
-              <label>
-                <span class="cfg-label">OpenRouter Management Key <button type="button" class="cfg-help" data-tip="A separate OpenRouter key with account-read permissions, used only to fetch your usage/balance — never used for chat requests.">?</button></span>
-                <input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" />
-              </label>
-            </div>
-            <div class="cfg-key-row">
-              <label>
-                <span class="cfg-label">Google AI Studio API Key <button type="button" class="cfg-help" data-tip="Your Gemini API key from Google AI Studio — used for any feature set to the Google AI Studio provider.">?</button></span>
-                <input id="cfg-google-ai-studio-key" type="password" placeholder="Not set" autocomplete="off" />
-              </label>
-            </div>
-            <div class="cfg-key-row">
-              <label>
-                <span class="cfg-label">Custom Provider Base URL <button type="button" class="cfg-help" data-tip="Base URL of any OpenAI-compatible API (self-hosted, a different aggregator, etc), e.g. https://api.example.com/v1.">?</button></span>
-                <input id="cfg-custom-openai-base-url" type="text" placeholder="https://api.example.com/v1" autocomplete="off" />
-              </label>
-              <label>
-                <span class="cfg-label">Custom Provider API Key <button type="button" class="cfg-help" data-tip="API key for the custom OpenAI-compatible endpoint above.">?</button></span>
-                <input id="cfg-custom-openai-key" type="password" placeholder="Not set" autocomplete="off" />
-              </label>
-            </div>
-
             <h3>Main Chat</h3>
             <div class="cfg-row">
               <label>
@@ -231,6 +199,83 @@
           </div>
         </section>
 
+        <!-- API KEYS tab -->
+        <section class="tab-panel" data-tab="api-keys" hidden>
+          <p class="modal-hint">All secrets are stored server-side and never returned to the browser after saving.</p>
+
+          <h3>OpenRouter</h3>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">API Key <button type="button" class="cfg-help" data-tip="Your OpenRouter account API key — used to authenticate all chat, vision, and voice requests routed through OpenRouter.">?</button></span>
+              <span class="key-field"><input id="cfg-api-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+            <label>
+              <span class="cfg-label">Management Key <button type="button" class="cfg-help" data-tip="A separate OpenRouter key with account-read permissions, used only to fetch your usage/balance — never used for chat requests.">?</button></span>
+              <span class="key-field"><input id="cfg-management-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+
+          <h3>Google</h3>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">AI Studio API Key <button type="button" class="cfg-help" data-tip="Your Gemini API key from Google AI Studio — used for any feature set to the Google AI Studio provider.">?</button></span>
+              <span class="key-field"><input id="cfg-google-ai-studio-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+            <label>
+              <span class="cfg-label">Cloud TTS Key <button type="button" class="cfg-help" data-tip="Google Cloud API key for Chirp 3 HD voices (Voice &amp; Narration tab). Leave blank to use Application Default Credentials instead.">?</button></span>
+              <span class="key-field"><input id="cfg-google-tts-api-key" type="password" placeholder="Not set (uses ADC)" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+
+          <h3>Custom Provider</h3>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">Base URL <button type="button" class="cfg-help" data-tip="Base URL of any OpenAI-compatible API (self-hosted, a different aggregator, etc), e.g. https://api.example.com/v1.">?</button></span>
+              <input id="cfg-custom-openai-base-url" type="text" placeholder="https://api.example.com/v1" autocomplete="off" />
+            </label>
+            <label>
+              <span class="cfg-label">API Key <button type="button" class="cfg-help" data-tip="API key for the custom OpenAI-compatible endpoint above.">?</button></span>
+              <span class="key-field"><input id="cfg-custom-openai-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+
+          <h3>IGDB</h3>
+          <p class="modal-hint">
+            Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
+            Twitch — create a free app at
+            <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
+            to get a Client ID and Secret.
+          </p>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">Client ID <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client ID, used to look up game info (genre, summary, platforms, rating).">?</button></span>
+              <input id="cfg-igdb-client-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+            <label>
+              <span class="cfg-label">Client Secret <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client Secret, paired with the Client ID above.">?</button></span>
+              <span class="key-field"><input id="cfg-igdb-client-secret" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+
+          <h3>Steam</h3>
+          <p class="modal-hint">
+            Store and app info works without setup. To let the companion check your owned games and playtime,
+            add a free API key from
+            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>
+            plus your numeric SteamID64.
+          </p>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">API Key <button type="button" class="cfg-help" data-tip="Free Steam Web API key, lets the companion check your owned games and playtime.">?</button></span>
+              <span class="key-field"><input id="cfg-steam-api-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+            <label>
+              <span class="cfg-label">SteamID64 <button type="button" class="cfg-help" data-tip="Your numeric SteamID64, used together with the API key to look up your library.">?</button></span>
+              <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
+        </section>
+
         <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
             <label class="checkbox">
@@ -279,10 +324,6 @@
               </label>
             </div>
             <div data-tts-provider="chirp3">
-              <label>
-                <span class="cfg-label">Google API Key <button type="button" class="cfg-help" data-tip="Google Cloud API key for Chirp 3 HD voices. Leave blank to use Application Default Credentials instead.">?</button></span>
-                <input id="cfg-google-tts-api-key" type="password" placeholder="Not set (uses Application Default Credentials)" autocomplete="off" />
-              </label>
               <label>
                 <span class="cfg-label">Chirp 3 HD Voice <button type="button" class="cfg-help" data-tip="Voice used by Google's Chirp 3 HD text-to-speech.">?</button></span>
                 <input id="cfg-chirp3-voice-search" type="text" class="model-search" placeholder="Search voices…" />
@@ -475,48 +516,6 @@
             </label>
             <select id="game-state-training-data-process"></select>
             <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - it'll be written automatically once a training pass runs."></textarea>
-          </div>
-        </section>
-
-        <!-- INTEGRATIONS tab -->
-        <section class="tab-panel" data-tab="third-party" hidden>
-          <div class="subtab-bar">
-            <button type="button" class="subtab-btn active" data-subtab="igdb">IGDB</button>
-            <button type="button" class="subtab-btn" data-subtab="steam">Steam</button>
-          </div>
-
-          <div class="subtab-panel" data-subtab="igdb">
-            <p class="modal-hint">
-              Game database lookups (genre, summary, release date, platforms, rating). IGDB auth runs through
-              Twitch — create a free app at
-              <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">dev.twitch.tv/console/apps</a>
-              to get a Client ID and Secret.
-            </p>
-            <label>
-              <span class="cfg-label">Twitch Client ID <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client ID, used to look up game info (genre, summary, platforms, rating).">?</button></span>
-              <input id="cfg-igdb-client-id" type="text" placeholder="Not set" autocomplete="off" />
-            </label>
-            <label>
-              <span class="cfg-label">Twitch Client Secret <button type="button" class="cfg-help" data-tip="IGDB/Twitch application Client Secret, paired with the Client ID above.">?</button></span>
-              <input id="cfg-igdb-client-secret" type="password" placeholder="Not set" autocomplete="off" />
-            </label>
-          </div>
-
-          <div class="subtab-panel" data-subtab="steam" hidden>
-            <p class="modal-hint">
-              Store/app info works with no setup. To let the agent check your owned games and playtime, add a
-              free API key from
-              <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer">steamcommunity.com/dev/apikey</a>
-              plus your numeric SteamID64.
-            </p>
-            <label>
-              <span class="cfg-label">Steam API Key <button type="button" class="cfg-help" data-tip="Free Steam Web API key, lets the companion check your owned games and playtime.">?</button></span>
-              <input id="cfg-steam-api-key" type="password" placeholder="Not set" autocomplete="off" />
-            </label>
-            <label>
-              <span class="cfg-label">SteamID64 <button type="button" class="cfg-help" data-tip="Your numeric SteamID64, used together with the API key to look up your library.">?</button></span>
-              <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
-            </label>
           </div>
         </section>
 

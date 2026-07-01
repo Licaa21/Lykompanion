@@ -180,6 +180,17 @@ function flashSaved(button) {
   }, 1000);
 }
 
+// Clear button for API key fields
+settingsModal.addEventListener("click", (e) => {
+  const btn = e.target.closest(".clear-key-btn");
+  if (!btn) return;
+  const input = btn.closest(".key-field")?.querySelector("input");
+  if (!input) return;
+  input.value = "";
+  input.dataset.cleared = "true";
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
 // Floating help tooltip for .cfg-help buttons - positioned in JS (not pure CSS ::after) so it can
 // flip above/below the trigger and clamp horizontally, since a fixed "always open upward,
 // centered" popup gets clipped by the Settings modal's overflow:auto body or runs off-screen
@@ -2155,6 +2166,14 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
   );
 });
 
+// Returns "" when the user explicitly cleared the field (signals server to wipe it),
+// the typed value when they entered a new key, or null when untouched (server keeps existing).
+function keyFieldValue(id) {
+  const el = document.getElementById(id);
+  if (el.dataset.cleared) return "";
+  return el.value || null;
+}
+
 document.getElementById("cfg-save").addEventListener("click", async (event) => {
   const saveButton = event.currentTarget;
   const apiKeyInput = document.getElementById("cfg-api-key");
@@ -2168,14 +2187,14 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     memory_extraction_provider: document.getElementById("cfg-memory-provider").value,
     game_state_provider: document.getElementById("cfg-game-state-provider").value,
     game_state_training_provider: document.getElementById("cfg-game-state-training-provider").value,
-    google_ai_studio_api_key: document.getElementById("cfg-google-ai-studio-key").value || null,
+    google_ai_studio_api_key: keyFieldValue("cfg-google-ai-studio-key"),
     custom_openai_base_url: document.getElementById("cfg-custom-openai-base-url").value.trim(),
-    custom_openai_api_key: document.getElementById("cfg-custom-openai-key").value || null,
+    custom_openai_api_key: keyFieldValue("cfg-custom-openai-key"),
     memory_extraction_model: document.getElementById("cfg-memory-model").value,
     web_search_provider: document.getElementById("cfg-web-search-provider").value,
     searxng_base_url: document.getElementById("cfg-searxng-base-url").value.trim() || "http://localhost:8080",
     tts_provider: document.getElementById("cfg-tts-provider").value,
-    google_tts_api_key: document.getElementById("cfg-google-tts-api-key").value || null,
+    google_tts_api_key: keyFieldValue("cfg-google-tts-api-key"),
     google_tts_voice: document.getElementById("cfg-chirp3-voice").value,
     transcription_enabled: transcriptionEnabledInput.checked,
     transcription_model: document.getElementById("cfg-transcription-model").value,
@@ -2183,16 +2202,16 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     kokoro_voice: document.getElementById("cfg-kokoro-voice").value,
     openrouter_tts_model: document.getElementById("cfg-openrouter-tts-model").value,
     openrouter_voice: document.getElementById("cfg-openrouter-voice").value,
-    openrouter_api_key: apiKeyInput.value || null,
-    openrouter_management_key: document.getElementById("cfg-management-key").value || null,
+    openrouter_api_key: keyFieldValue("cfg-api-key"),
+    openrouter_management_key: keyFieldValue("cfg-management-key"),
     narration_speed: parseFloat(narrationSpeedInput.value),
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
     context_window_messages: parseInt(contextWindowInput.value, 10),
     screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
     screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
     igdb_client_id: document.getElementById("cfg-igdb-client-id").value,
-    igdb_client_secret: igdbSecretInput.value || null,
-    steam_api_key: steamApiKeyInput.value || null,
+    igdb_client_secret: keyFieldValue("cfg-igdb-client-secret"),
+    steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
@@ -2216,12 +2235,17 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     body: JSON.stringify(body),
   });
   const updatedCfg = await response.json();
-  apiKeyInput.value = "";
-  document.getElementById("cfg-management-key").value = "";
-  document.getElementById("cfg-google-ai-studio-key").value = "";
-  document.getElementById("cfg-custom-openai-key").value = "";
-  igdbSecretInput.value = "";
-  steamApiKeyInput.value = "";
+  // Clear values and reset the "explicitly cleared" flag on all key fields.
+  const keyInputIds = [
+    "cfg-api-key", "cfg-management-key", "cfg-google-ai-studio-key",
+    "cfg-google-tts-api-key", "cfg-custom-openai-key",
+    "cfg-igdb-client-secret", "cfg-steam-api-key",
+  ];
+  for (const id of keyInputIds) {
+    const el = document.getElementById(id);
+    el.value = "";
+    delete el.dataset.cleared;
+  }
   applyConfigToForm(updatedCfg);
   flashSaved(saveButton);
 });
