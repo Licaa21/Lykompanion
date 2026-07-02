@@ -7,10 +7,6 @@
 - [ ] **Proactive LLM** - Give the LLM the possibility to talk to the user, making comments, giving tips, etc. This should not happen too often, but only when relevant. The user should also be able to control it by adding limitations (like setting a fixed interval for when this can happen or even disabling it alltogether). The best model to do this is probably the Game State model, since it's also seeing the game screen. Give it a tool to talk to the user. When that happens, we add it as a new message in the active chat as a normal interaction.
 - [ ] **Smarter Game State Model** - We need to allow the Game State Model to think when saving observations or facts. Give it web search access so it can search game-specific stuff if something from the screenshots or the OCR is unknown to the model. E.g: Model sees "Lumina" in Claire Obscur, but has no idea what that word actually means in the game context.
 
-## Medium priority
-
-- [ ] **Drop `GET /api/screenshot`** — since we auto inject screenshots to the game state model now, there's no point to have the LLM take screenshots of the user's screen anymore.  
-
 ## Random bugs:
 - [ ] **Remove markdown syntaxes from Narration.** - I'm tired of the TTS saying "asterisk" over and over again. All markdown characters need to be completely stripped from the prompt before sending over to TTS.
 - [ ] **Hold my beer, I have a speech** - Sometimes the main LLM replies with a huge chunk of text, which takes over 30 seconds to narrate. This is bad. And annoying. 
