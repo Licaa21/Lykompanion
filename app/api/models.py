@@ -31,8 +31,8 @@ async def get_llm_models(provider: str = "openrouter", force: bool = False) -> l
 
 @router.get("/llm/text")
 async def get_text_llm_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
-    """Chat-capable models with no input-modality requirement - for background passes (memory
-    extraction, game-state extraction) that only ever receive plain text, never audio or images."""
+    """Chat-capable models with no input-modality requirement - for the memory extraction pass,
+    which only ever receives plain text, never audio or images."""
     models = await list_models(provider, force=force)
     if provider != "openrouter":
         return models
@@ -56,8 +56,8 @@ async def get_audio_llm_models(force: bool = False) -> list[dict]:
 
 @router.get("/llm/vision")
 async def get_vision_llm_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
-    """Chat-capable models that accept image input - for the game-state training pass, which is
-    sent a screenshot alongside the OCR text."""
+    """Chat-capable models that accept image input - for the game-state extraction pass, which is
+    sent the poll window's first/last frames as screenshots alongside the OCR text."""
     models = await list_models(provider, force=force)
     if provider != "openrouter":
         return models

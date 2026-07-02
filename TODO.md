@@ -24,9 +24,10 @@ self-reinforcing; (6) `confidence` gates only training — low-confidence window
 - [x] **Layer 3 (vision-grounded extraction)** — done 2026-07-02: the first and most recent
   kept frames of each poll window are attached to the extraction pass as screenshots (OCR still
   does free change-detection/dedup; middle frames stay text-only; non-vision models retried
-  text-only). Training pass now reuses the window's last frame instead of a mismatched GDI
-  re-capture. Remaining follow-up: consider whether the training pass is still needed at all
-  now that extraction sees pixels directly.
+  text-only). Follow-up also done 2026-07-02: the separate trainer model/pass is removed —
+  the extraction pass now self-maintains the per-game training notes via a
+  `training_data_update` output field, and the Settings game-state model dropdown fetches
+  vision-capable models only (`/api/models/llm/vision`).
 
 ## Medium priority
 

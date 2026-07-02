@@ -52,7 +52,6 @@ class Settings(BaseSettings):
     llm_provider: str = "openrouter"
     memory_extraction_provider: str = ""
     game_state_provider: str = ""
-    game_state_training_provider: str = ""
 
     tts_provider: str = "kokoro"
     kokoro_base_url: str = "http://localhost:8880/v1"
@@ -103,12 +102,10 @@ class Settings(BaseSettings):
     game_state_capture_interval_seconds: int = 1
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
-    # Game-state "trainer" pass - re-interprets low-confidence OCR frames (screenshot + OCR text)
-    # with a vision-capable model to build per-process training data (a document of interpretation
-    # notes), fed into future extraction passes for that process. Falls back to openrouter_model
-    # if empty.
+    # Self-training: lets the extraction pass maintain a per-process notes document (how to decode
+    # this game's HUD/UI from OCR text), fed back into every future extraction pass for that
+    # process. No separate trainer model - the extraction model sees the screenshots itself.
     game_state_training_enabled: bool = False
-    game_state_training_model: str = ""
 
     google_tts_api_key: str = ""
     google_tts_voice: str = "en-US-Chirp3-HD-Aoede"

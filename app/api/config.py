@@ -15,7 +15,6 @@ async def get_config() -> CompanionConfig:
         llm_provider=settings.llm_provider,
         memory_extraction_provider=settings.memory_extraction_provider,
         game_state_provider=settings.game_state_provider,
-        game_state_training_provider=settings.game_state_training_provider,
         google_ai_studio_api_key_set=bool(settings.google_ai_studio_api_key),
         custom_openai_base_url=settings.custom_openai_base_url,
         custom_openai_api_key_set=bool(settings.custom_openai_api_key),
@@ -25,7 +24,6 @@ async def get_config() -> CompanionConfig:
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
         game_state_model=settings.game_state_model or None,
         game_state_training_enabled=settings.game_state_training_enabled,
-        game_state_training_model=settings.game_state_training_model or None,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
         transcription_enabled=settings.transcription_enabled,
@@ -109,8 +107,6 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     env_updates["MEMORY_EXTRACTION_PROVIDER"] = config.memory_extraction_provider
     settings.game_state_provider = config.game_state_provider
     env_updates["GAME_STATE_PROVIDER"] = config.game_state_provider
-    settings.game_state_training_provider = config.game_state_training_provider
-    env_updates["GAME_STATE_TRAINING_PROVIDER"] = config.game_state_training_provider
 
     if config.google_ai_studio_api_key is not None:
         settings.google_ai_studio_api_key = config.google_ai_studio_api_key
@@ -141,9 +137,6 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     settings.game_state_training_enabled = config.game_state_training_enabled
     env_updates["GAME_STATE_TRAINING_ENABLED"] = str(config.game_state_training_enabled)
-    if config.game_state_training_model is not None:
-        settings.game_state_training_model = config.game_state_training_model
-        env_updates["GAME_STATE_TRAINING_MODEL"] = config.game_state_training_model
 
     if config.google_tts_api_key is not None:
         settings.google_tts_api_key = config.google_tts_api_key

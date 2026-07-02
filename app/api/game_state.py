@@ -43,8 +43,6 @@ async def get_game_state() -> GameStateResponse:
         trackers=trackers,
         extraction_call_count=stats["extraction_call_count"],
         extraction_cost_usd=stats["extraction_cost_usd"],
-        training_call_count=stats["training_call_count"],
-        training_cost_usd=stats["training_cost_usd"],
     )
 
 

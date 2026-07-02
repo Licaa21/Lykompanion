@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
 from app.services.ocr import windows_ocr
-from app.services.screenshot.capture import capture_monitor_b64, image_to_b64
+from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
 from app.services.system.processes import get_foreground_process_name, is_process_running
 
@@ -30,18 +30,6 @@ _SIMILARITY_THRESHOLD = 0.9
 # with negligible accuracy loss for HUD-sized text, reducing CPU contention with whatever game
 # is running while this poller captures every tick.
 _OCR_MAX_WIDTH = 1600
-
-# Below this self-reported confidence, a training pass re-examines the frame with a vision model.
-# Set higher than "clearly wrong" on purpose - self-reported LLM confidence skews high, especially
-# now that OCR text itself is clean (Windows OCR vs. the old Tesseract path), which tends to read
-# as "legible" even when the model is genuinely guessing at what a value means.
-_TRAINING_CONFIDENCE_THRESHOLD = 0.65
-
-# Fire-and-forget training tasks, kept around so they aren't garbage-collected mid-flight.
-_training_tasks: set[asyncio.Task] = set()
-# Processes (lowercased) with a training pass currently in flight - guards against two passes for
-# the same process racing to read-then-write the same training data document.
-_training_in_progress: set[str] = set()
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
@@ -96,76 +84,6 @@ def _format_tracker_fields(trackers: list[dict], previous_values: dict[str, str]
     lines = [f'- "{t["id"]}": {t["description"]}' for t in trackers]
     previous_text = json.dumps(previous_values) if previous_values else "none yet"
     return "Fields to track for this process:\n" + "\n".join(lines) + f"\n\nPrevious values: {previous_text}"
-
-
-async def _run_training_pass(process: str, ocr_text: str, screenshot_b64: str) -> None:
-    """Fire-and-forget: re-examines a low-confidence OCR frame with a vision-capable "trainer"
-    model (screenshot + the OCR text + the training data document as it stands) and saves
-    its revised document as the new persistent per-process training data, so future extraction
-    passes for this game understand its HUD/UI layout without needing another training pass.
-    The screenshot is captured by the caller before the extraction LLM call, so it matches the
-    frames being trained on rather than whatever happens to be on screen when training fires.
-    Never raises into the caller - training is best-effort. Always releases the in-flight guard
-    for this process, even on failure, so a later low-confidence frame can retry."""
-    try:
-        current_doc = game_state_training_data.get_training_data(process)
-        doc_text = current_doc or "(empty - no training data yet for this process)"
-        messages = [
-            {"role": "system", "content": load_prompt("game_state_training")},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Foreground process: {process}\n\n"
-                            f"Current training data document:\n{doc_text}\n\n"
-                            f"New OCR text:\n```\n{ocr_text}\n```"
-                        ),
-                    },
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}},
-                ],
-            },
-        ]
-        model = settings.game_state_training_model or None
-        provider = settings.game_state_training_provider or settings.llm_provider
-        cost_holder = {"cost": 0.0}
-        revised_doc = await chat_completion(
-            messages,
-            model=model,
-            source="game_state_training",
-            provider=provider,
-            on_usage=lambda cost: cost_holder.__setitem__("cost", cost),
-        )
-        game_state.record_training_call(cost_holder["cost"])
-        game_state_training_data.set_training_data(process, revised_doc)
-    except Exception:
-        logger.exception("Game-state training pass failed")
-    finally:
-        _training_in_progress.discard(process.lower())
-
-
-def _maybe_start_training_pass(process: str, confidence, ocr_text: str, screenshot_b64: str) -> None:
-    if not settings.game_state_training_enabled:
-        return
-    no_training_data = not game_state_training_data.get_training_data(process)
-    confidence_low = isinstance(confidence, (int, float)) and confidence < _TRAINING_CONFIDENCE_THRESHOLD
-    # Fire when confidence is low OR when this process has never been trained before — the
-    # chicken-and-egg guard: the first extraction for a new game has no training data to lean on,
-    # and might produce a confidently-wrong result that never triggers a normal training pass.
-    if not confidence_low and not no_training_data:
-        return
-    if process.lower() in _training_in_progress:
-        logger.debug("Game-state poll: training already in flight for process=%r, skipping", process)
-        return
-    if no_training_data:
-        logger.info("Game-state poll: no training data yet for process=%r, bootstrapping", process)
-    else:
-        logger.info("Game-state poll: low confidence (%.2f) for process=%r, starting training pass", confidence, process)
-    _training_in_progress.add(process.lower())
-    task = asyncio.create_task(_run_training_pass(process, ocr_text, screenshot_b64))
-    _training_tasks.add(task)
-    task.add_done_callback(_training_tasks.discard)
 
 
 async def _call_extraction(user_content, model: str | None, provider: str) -> dict:
@@ -276,12 +194,16 @@ async def extract_and_apply_game_state(
         logger.info("Game-state poll: divergence detected for process=%r session=%r: %s", process, active_session_id, divergence.strip())
         game_state.set_pending_divergence(process, divergence.strip())
 
-    # The training pass reuses the window's most recent kept frame, so the screenshot it studies
-    # is exactly the one the OCR text came from (the old GDI re-capture here could show whatever
-    # was on screen seconds later). Fallback capture only if no frame image survived the window.
-    _maybe_start_training_pass(
-        process, data.get("confidence"), frames[-1][1], last_frame_b64 or capture_monitor_b64()
-    )
+    # Self-training: the extraction model sees the screenshots, the OCR text, and the current
+    # per-process notes document, so it maintains that document itself - no separate trainer
+    # model/pass anymore. Persist its revision only when enabled and actually changed.
+    if settings.game_state_training_enabled:
+        update = data.get("training_data_update")
+        if isinstance(update, str) and update.strip():
+            update = update.strip()
+            if update != game_state_training_data.get_training_data(process).strip():
+                logger.info("Game-state poll: extraction pass revised the training notes for process=%r", process)
+                game_state_training_data.set_training_data(process, update)
 
 
 async def _capture_tick() -> None:

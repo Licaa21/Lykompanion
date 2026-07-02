@@ -70,5 +70,5 @@ Every `fetch()` in `app.js` must send the `x-lyko-token` header (or `?token=` fo
 
 - `.env` at repo root is the user's real config with live API keys — never overwrite it wholesale; settings changes go through `persist_env_values()`.
 - `winrt-*`, `windows-capture`, `pycaw` imports are Windows-only; modules using them import lazily/guarded so the server still boots elsewhere.
-- Background LLM passes (memory extraction, game-state, training) are fire-and-forget asyncio tasks — they must never add latency to or raise into the visible reply path.
+- Background LLM passes (memory extraction, game-state extraction) are fire-and-forget asyncio tasks — they must never add latency to or raise into the visible reply path. The game-state pass is vision-grounded: it receives each poll window's first/last frames as screenshots, and self-maintains a per-game UI-decoding notes document via its `training_data_update` output (there is no separate trainer model/pass).
 - `TODO.md` is the maintained backlog of open items; check it before proposing work.

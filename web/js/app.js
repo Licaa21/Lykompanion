@@ -1888,7 +1888,6 @@ const modelOptionsCache = {
   llm: [],
   memoryModel: [],
   gameStateModel: [],
-  gameStateTrainingModel: [],
   transcriptionModel: [],
   kokoroVoice: [],
   openrouterTts: [],
@@ -1936,16 +1935,12 @@ setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "gameSta
   value: "",
   label: "(use main chat model)",
 });
-setupModelSearch("cfg-game-state-training-model-search", "cfg-game-state-training-model", "gameStateTrainingModel", {
-  value: "",
-  label: "(use main chat model)",
-});
 setupModelSearch("cfg-transcription-model-search", "cfg-transcription-model", "transcriptionModel");
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
 setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
 setupModelSearch("cfg-openrouter-tts-model-search", "cfg-openrouter-tts-model", "openrouterTts");
 
-// Each LLM feature (main chat, memory extraction, game-state, training) picks its own provider
+// Each LLM feature (main chat, memory extraction, game-state) picks its own provider
 // independently - an empty feature provider select means "inherit the main chat provider."
 const PROVIDER_FEATURES = {
   // Transcription mode strips audio (and, deliberately, image) off the main model's job -
@@ -1964,18 +1959,13 @@ const PROVIDER_FEATURES = {
     selectId: "cfg-memory-model",
     pinned: { value: "", label: "(use main chat model)" },
   },
+  // Vision-capable list: the extraction pass is sent each poll window's first/last frames as
+  // actual screenshots alongside the OCR text, so the model must accept image input.
   gameState: {
-    endpoint: "/api/models/llm/text",
+    endpoint: "/api/models/llm/vision",
     cacheKey: "gameStateModel",
     providerSelectId: "cfg-game-state-provider",
     selectId: "cfg-game-state-model",
-    pinned: { value: "", label: "(use main chat model)" },
-  },
-  gameStateTraining: {
-    endpoint: "/api/models/llm/vision",
-    cacheKey: "gameStateTrainingModel",
-    providerSelectId: "cfg-game-state-training-provider",
-    selectId: "cfg-game-state-training-model",
     pinned: { value: "", label: "(use main chat model)" },
   },
   // No providerSelectId - dedicated transcription (ASR) models are an OpenRouter-only catalog,
@@ -2026,7 +2016,7 @@ for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
     reloadModelSelect(featureKey);
     // Main chat provider changing also affects any feature currently inheriting it.
     if (featureKey === "llm") {
-      for (const other of ["memory", "gameState", "gameStateTraining"]) {
+      for (const other of ["memory", "gameState"]) {
         if (!document.getElementById(PROVIDER_FEATURES[other].providerSelectId).value) reloadModelSelect(other);
       }
     }
@@ -2041,7 +2031,6 @@ async function loadModels(
   selectedMemoryModel,
   selectedChirp3Voice,
   selectedGameStateModel,
-  selectedGameStateTrainingModel,
   selectedTranscriptionModel,
   force = false
 ) {
@@ -2050,7 +2039,6 @@ async function loadModels(
     reloadModelSelect("llm", selectedLlm, force),
     reloadModelSelect("memory", selectedMemoryModel, force),
     reloadModelSelect("gameState", selectedGameStateModel, force),
-    reloadModelSelect("gameStateTraining", selectedGameStateTrainingModel, force),
     reloadModelSelect("transcription", selectedTranscriptionModel, force),
   ]);
 
@@ -2298,7 +2286,6 @@ function applyConfigToForm(cfg) {
   document.getElementById("cfg-llm-provider").value = cfg.llm_provider || "openrouter";
   document.getElementById("cfg-memory-provider").value = cfg.memory_extraction_provider || "";
   document.getElementById("cfg-game-state-provider").value = cfg.game_state_provider || "";
-  document.getElementById("cfg-game-state-training-provider").value = cfg.game_state_training_provider || "";
 
   narrationSpeed = cfg.narration_speed;
   narrationSpeedInput.value = cfg.narration_speed;
@@ -2386,7 +2373,6 @@ async function loadConfig() {
     cfg.memory_extraction_model,
     cfg.google_tts_voice,
     cfg.game_state_model,
-    cfg.game_state_training_model,
     cfg.transcription_model
   );
   return cfg;
@@ -2401,7 +2387,6 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-memory-model").value,
     document.getElementById("cfg-chirp3-voice").value,
     document.getElementById("cfg-game-state-model").value,
-    document.getElementById("cfg-game-state-training-model").value,
     document.getElementById("cfg-transcription-model").value,
     true // bypass the server-side catalog cache - that's the whole point of this button
   );
@@ -2427,7 +2412,6 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     llm_provider: document.getElementById("cfg-llm-provider").value,
     memory_extraction_provider: document.getElementById("cfg-memory-provider").value,
     game_state_provider: document.getElementById("cfg-game-state-provider").value,
-    game_state_training_provider: document.getElementById("cfg-game-state-training-provider").value,
     google_ai_studio_api_key: keyFieldValue("cfg-google-ai-studio-key"),
     custom_openai_base_url: document.getElementById("cfg-custom-openai-base-url").value.trim(),
     custom_openai_api_key: keyFieldValue("cfg-custom-openai-key"),
@@ -2460,7 +2444,6 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
     game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
-    game_state_training_model: document.getElementById("cfg-game-state-training-model").value,
     wake_word_enabled: wakeWordEnabledInput.checked,
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
     wake_word_max_failures: wakeWordMaxFailures,
@@ -3011,8 +2994,6 @@ function renderGameStateStats(data) {
   const rows = [
     ["Extraction calls", data.extraction_call_count],
     ["Extraction cost", `$${data.extraction_cost_usd.toFixed(4)}`],
-    ["Training calls", data.training_call_count],
-    ["Training cost", `$${data.training_cost_usd.toFixed(4)}`],
   ];
   for (const [label, value] of rows) {
     const row = document.createElement("div");
@@ -3387,8 +3368,9 @@ gameStateTrackerResetBtn.addEventListener("click", async () => {
 });
 
 // --- Training Data (Settings > Game Awareness > Training Data) ---
-// A single living reference document per process, maintained by the training pass - editable
-// directly, but not user-created here, since it's meant to reflect what training actually produced.
+// A single living reference document per process, self-maintained by the game-state extraction
+// pass (its training_data_update output) - editable directly, but not user-created here, since
+// it's meant to reflect what the model actually learned about the game's UI.
 
 const gameStateTrainingDataProcessEl = document.getElementById("game-state-training-data-process");
 const gameStateTrainingDataContentEl = document.getElementById("game-state-training-data-content");

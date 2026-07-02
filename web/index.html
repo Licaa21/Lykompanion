@@ -432,8 +432,8 @@
             </label>
             <label class="checkbox">
               <input id="cfg-game-state-training-enabled" type="checkbox" />
-              Game-state training
-              <button type="button" class="cfg-help" data-tip="When the Game-State Model reports low confidence in an OCR frame, re-examines it with a vision-capable Training Model and saves what it learns as per-process training data, fed into future extraction passes for that game. See the Training Data tab.">?</button>
+              Game-state self-training
+              <button type="button" class="cfg-help" data-tip="Lets the Game-State Model maintain per-game notes on how to decode that game's HUD/UI (learned from the screenshots it sees), fed back into its future passes. See the Training Data tab.">?</button>
             </label>
 
             <div id="game-state-dependent">
@@ -454,25 +454,9 @@
                   </select>
                 </label>
                 <label>
-                  <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Model used to interpret OCR text into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
+                  <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to interpret each poll window's OCR text plus its first/last frames as screenshots into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
                   <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
                   <select id="cfg-game-state-model"></select>
-                </label>
-              </div>
-              <div class="cfg-row">
-                <label>
-                  <span class="cfg-label">Training Provider <button type="button" class="cfg-help" data-tip="Which provider handles the game-state training pass. Leave as 'use main chat provider' to reuse whatever the main chat uses.">?</button></span>
-                  <select id="cfg-game-state-training-provider">
-                    <option value="">(use main chat provider)</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="google_ai_studio">Google AI Studio</option>
-                    <option value="custom">Custom OpenAI-compatible</option>
-                  </select>
-                </label>
-                <label>
-                  <span class="cfg-label">Training Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to re-interpret low-confidence OCR frames for the game-state training pass. Leave blank to reuse the main chat model.">?</button></span>
-                  <input id="cfg-game-state-training-model-search" type="text" class="model-search" placeholder="Search models…" />
-                  <select id="cfg-game-state-training-model"></select>
                 </label>
               </div>
               <details class="cfg-advanced">
@@ -520,11 +504,11 @@
 
           <div class="subtab-panel" data-subtab="ga-training-data" hidden>
             <label>
-              <span class="cfg-label">Training Data <button type="button" class="cfg-help" data-tip="A living reference document the training pass maintains per process, explaining how to interpret that game's OCR output. Fed into every future extraction pass for that process. Edit it directly if something's wrong or stale.">?</button></span>
-              <p class="modal-hint">Reference document the Training Model maintains for a process. Pick one below to review or edit.</p>
+              <span class="cfg-label">Training Data <button type="button" class="cfg-help" data-tip="A living reference document the Game-State Model maintains per process, explaining how to interpret that game's OCR output and UI. Fed into every future extraction pass for that process. Edit it directly if something's wrong or stale.">?</button></span>
+              <p class="modal-hint">Notes the Game-State Model keeps for itself about a process. Pick one below to review or edit.</p>
             </label>
             <select id="game-state-training-data-process"></select>
-            <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - it'll be written automatically once a training pass runs."></textarea>
+            <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - the Game-State Model writes it automatically as it learns the game's UI (requires self-training to be enabled)."></textarea>
           </div>
         </section>
 

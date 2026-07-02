@@ -31,8 +31,6 @@ _cached_values: dict[str, str | None] | None = None
 
 _extraction_call_count = 0
 _extraction_cost_usd = 0.0
-_training_call_count = 0
-_training_cost_usd = 0.0
 
 # Divergence warnings set by the extraction pass when OCR contradicts session memory (e.g. level
 # regressed). Keyed by lowercased process name. Consumed once — popped on the next chat turn so
@@ -89,18 +87,10 @@ def record_extraction_call(cost_usd: float) -> None:
     _extraction_cost_usd += cost_usd
 
 
-def record_training_call(cost_usd: float) -> None:
-    global _training_call_count, _training_cost_usd
-    _training_call_count += 1
-    _training_cost_usd += cost_usd
-
-
 def get_session_stats() -> dict:
     return {
         "extraction_call_count": _extraction_call_count,
         "extraction_cost_usd": _extraction_cost_usd,
-        "training_call_count": _training_call_count,
-        "training_cost_usd": _training_cost_usd,
     }
 
 

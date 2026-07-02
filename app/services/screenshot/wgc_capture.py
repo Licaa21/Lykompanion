@@ -5,9 +5,10 @@ capture.py` (GDI/BitBlt via `mss`, used for on-demand vision screenshots), this 
 desktop-compositor synchronization that BitBlt-style capture causes, which was visibly stuttering
 games - especially noticeable on cursor movement - since the OCR poller captures every tick.
 
-Only used by the OCR poller. The occasional vision-screenshot paths (take_screenshot tool, chat
-image attachments, the game-state training pass) keep using the mss-based capture module, since
-those aren't called often enough to cause the same contention.
+Only used by the OCR poller (which also reuses these frames as the screenshots attached to the
+game-state extraction pass). The occasional vision-screenshot paths (take_screenshot tool, chat
+image attachments) keep using the mss-based capture module, since those aren't called often
+enough to cause the same contention.
 """
 
 import asyncio

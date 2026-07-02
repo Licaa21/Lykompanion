@@ -1,8 +1,8 @@
-"""Per-process training data: a single living reference document maintained by the game-state
-training pass (see app/services/llm/game_state_extraction.py) - e.g. explaining that a string
-like 0-2:12-2 on a Rocket League HUD means home score - time left - away score. Each training
-pass revises the whole document rather than appending a new entry, so it stays a coherent
-reference instead of a growing pile of loosely-related notes. Persisted to disk (data/
+"""Per-process training data: a single living reference document self-maintained by the
+game-state extraction pass via its "training_data_update" output (see app/services/llm/
+game_state_extraction.py) - e.g. explaining that a string like 0-2:12-2 on a Rocket League HUD
+means home score - time left - away score. The pass revises the whole document rather than
+appending a new entry, so it stays a coherent reference instead of a growing pile of notes. Persisted to disk (data/
 game_state_training_data.json) so it accumulates across sessions and gets fed into every future
 extraction pass for that process. User-editable from Settings > Game Awareness > Training Data."""
 
@@ -59,4 +59,4 @@ def format_training_data_for_prompt(process: str) -> str:
     content = get_training_data(process)
     if not content:
         return ""
-    return f"Known training data for this game (learned from earlier training passes - trust this over guesses when it applies):\n{content}"
+    return f"Known training data for this game (notes from your own earlier passes - trust this over guesses when it applies):\n{content}"

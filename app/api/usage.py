@@ -23,7 +23,6 @@ async def get_account_balance() -> list[AccountBalance]:
         settings.llm_provider,
         settings.memory_extraction_provider or settings.llm_provider,
         settings.game_state_provider or settings.llm_provider,
-        settings.game_state_training_provider or settings.llm_provider,
     }
     balances = [await fetch_account_balance(provider) for provider in providers]
     return [b for b in balances if b.available]

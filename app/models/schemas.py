@@ -42,7 +42,6 @@ class CompanionConfig(BaseModel):
     llm_provider: str = "openrouter"
     memory_extraction_provider: str = ""
     game_state_provider: str = ""
-    game_state_training_provider: str = ""
     google_ai_studio_api_key: str | None = None
     google_ai_studio_api_key_set: bool = False
     custom_openai_base_url: str = ""
@@ -54,7 +53,6 @@ class CompanionConfig(BaseModel):
     game_state_capture_interval_seconds: int = 1
     game_state_model: str | None = None
     game_state_training_enabled: bool = False
-    game_state_training_model: str | None = None
     web_search_provider: Literal["openrouter", "searxng"] = "openrouter"
     searxng_base_url: str = "http://localhost:8080"
     tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"
@@ -138,8 +136,6 @@ class GameStateResponse(BaseModel):
     trackers: list[GameStateTracker] = []
     extraction_call_count: int = 0
     extraction_cost_usd: float = 0.0
-    training_call_count: int = 0
-    training_cost_usd: float = 0.0
 
 
 class ProcessEntry(BaseModel):
