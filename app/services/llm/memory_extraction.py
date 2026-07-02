@@ -1,11 +1,10 @@
 import json
 import logging
 
-from app.core import game_state, game_state_processes, memory
+from app.core import game_state, memory, observations
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
-from app.services.system.processes import get_foreground_process_name
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,7 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     tracked_session = gs["session_id"] if gs else None
     known_facts = memory.format_memories_for_prompt(tracked_process, tracked_session) or "Known facts about the user: none yet."
     game_state_text = game_state.format_game_state_for_prompt()
+    observations_text = observations.format_observations_for_prompt(tracked_process, tracked_session) if tracked_process else ""
     # The scope decision ("user" vs "game"/"session") is anchored to what's actually running -
     # without stating it explicitly, the model can only infer it from the session snapshot,
     # which is absent whenever no tracker values have been extracted yet.
@@ -43,6 +43,7 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
             "content": (
                 f"{current_datetime_context()}\n\n{tracked_line}\n\n{known_facts}\n\n"
                 + (f"{game_state_text}\n\n" if game_state_text else "")
+                + (f"{observations_text}\n\n" if observations_text else "")
                 + f"Latest exchange:\nUser: {user_message}\nCompanion: {assistant_message}"
             ),
         },
@@ -63,34 +64,26 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
         logger.exception("Memory extraction failed")
         return
 
-    fg_process = None
     for fact in data.get("save") or []:
         if not isinstance(fact, dict):
             continue
-        content = (fact.get("content") or "").strip()
-        if not content:
-            continue
-        scope = (fact.get("scope") or "user").lower()
-        if scope in ("game", "session"):
-            # Resolve the game process — prefer the tracked game over raw foreground, since
-            # the user may have alt-tabbed to the companion window while still mid-session.
-            if fg_process is None:
-                fg_process = get_foreground_process_name() or ""
-            tag = fg_process if fg_process and game_state_processes.is_likely_game(fg_process) else None
-            if not tag and tracked_process and game_state_processes.is_likely_game(tracked_process):
-                tag = tracked_process
-            if scope == "session":
-                # Session-specific: only visible in this exact playthrough.
-                sess = tracked_session if (tag and tracked_process and tag.lower() == tracked_process.lower()) else None
-                memory.add_memory(content, process=tag, session_id=sess)
-            else:
-                # Game-level: visible across all sessions of this game, not just this run.
-                memory.add_memory(content, process=tag, session_id=None)
-        else:
-            # "user" scope — general fact about the person, no process, no session,
-            # always visible regardless of what game is active.
-            memory.add_memory(content)
+        # Placement is anchored strictly to the tracked game (what the model was told about).
+        # remember() owns the degradation rule - a "session" fact with no active session becomes
+        # a "user" fact, never a game-wide one. The old foreground-process fallback here is gone:
+        # it silently re-tiered session facts to game scope whenever tracking was off.
+        memory.remember(
+            (fact.get("content") or ""),
+            (fact.get("scope") or "user").lower(),
+            process=tracked_process,
+            session_id=tracked_session,
+        )
 
     for memory_id in data.get("remove") or []:
         if isinstance(memory_id, str) and memory_id:
             memory.remove_memory(memory_id)
+
+    # Observations the model confirmed (promoted into "save" above), contradicted, or judged
+    # stale get cleared from the journal so they stop being re-surfaced.
+    cleared = [i for i in data.get("clear_observations") or [] if isinstance(i, str) and i]
+    if cleared:
+        observations.remove_observations(cleared)

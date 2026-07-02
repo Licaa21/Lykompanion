@@ -171,6 +171,7 @@ class CustomInstructions(BaseModel):
 class MemoryEntry(BaseModel):
     id: str
     content: str
+    scope: Literal["user", "game", "session"] = "user"
     process: str | None = None
     session_id: str | None = None
     saved_at: str | None = None
@@ -178,12 +179,40 @@ class MemoryEntry(BaseModel):
 
 class MemoryCreate(BaseModel):
     content: str
+    scope: Literal["user", "game", "session"] | None = None
     process: str | None = None
+    session_id: str | None = None
 
 
 class MemoryUpdate(BaseModel):
     content: str
     process: str | None = None
+    session_id: str | None = None
+
+
+class ObservationEntry(BaseModel):
+    id: str
+    process: str
+    session_id: str | None = None
+    content: str
+    confidence: float | None = None
+    observed_at: str | None = None
+
+
+class GamingJournalSession(BaseModel):
+    session_id: str
+    name: str
+    updated_at: str | None = None
+    active: bool = False
+    memories: list[MemoryEntry] = []
+    observations: list[ObservationEntry] = []
+
+
+class GamingJournalGame(BaseModel):
+    process: str
+    tracked: bool = False
+    memories: list[MemoryEntry] = []
+    sessions: list[GamingJournalSession] = []
 
 
 class ReminderEntry(BaseModel):

@@ -19,6 +19,7 @@ from app.api import (
     config,
     debug,
     game_state,
+    gaming_journal,
     instructions,
     memory,
     models,
@@ -75,6 +76,7 @@ app.include_router(instructions.router)
 app.include_router(memory.router)
 app.include_router(usage.router)
 app.include_router(game_state.router)
+app.include_router(gaming_journal.router)
 app.include_router(debug.router)
 app.include_router(profile.router)
 app.include_router(reminders.router)

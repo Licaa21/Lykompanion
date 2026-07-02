@@ -70,3 +70,75 @@ def test_prompt_lists_ids_for_removal():
     entry = memory.add_memory("removable fact")
     text = memory.format_memories_for_prompt(None, None)
     assert f"[{entry['id']}]" in text
+
+
+# --- remember(): the single entry point owning scope resolution/degradation ---
+
+def test_remember_user_scope_strips_placement():
+    entry = memory.remember("Likes roguelikes", "user", process="hades.exe", session_id="runA")
+    assert entry["scope"] == "user"
+    assert entry["process"] is None
+    assert entry["session_id"] is None
+
+
+def test_remember_game_scope():
+    entry = memory.remember("Prefers shield builds", "game", process="bg3.exe", session_id="runA")
+    assert entry["scope"] == "game"
+    assert entry["process"] == "bg3.exe"
+    assert entry["session_id"] is None  # game scope never carries a session
+
+
+def test_remember_session_scope():
+    entry = memory.remember("Character is level 5", "session", process="bg3.exe", session_id="runA")
+    assert entry["scope"] == "session"
+    assert entry["session_id"] == "runA"
+
+
+def test_remember_session_without_session_degrades_to_user_not_game():
+    """The Ironclad bug: a session fact with no resolvable session must NOT become a
+    game-wide fact - it degrades all the way to user scope."""
+    entry = memory.remember("Started an Ironclad run", "session", process="sts2.exe", session_id=None)
+    assert entry["scope"] == "user"
+    assert entry["process"] is None
+    assert entry["session_id"] is None
+
+
+def test_remember_game_without_process_degrades_to_user():
+    entry = memory.remember("Prefers stealth", "game", process=None)
+    assert entry["scope"] == "user"
+    assert entry["process"] is None
+
+
+def test_remember_skips_exact_duplicates():
+    memory.remember("Likes roguelikes", "user")
+    assert memory.remember("likes roguelikes", "user") is None
+    assert len(memory.load_memories()) == 1
+    # Same content at a different placement is a different fact
+    assert memory.remember("Likes roguelikes", "game", process="hades.exe") is not None
+
+
+def test_remember_rejects_empty_content():
+    assert memory.remember("   ", "user") is None
+
+
+def test_scope_migration_on_read(tmp_path):
+    """Pre-scope entries (no 'scope' key) get their scope derived from process/session_id."""
+    import json
+    memory.MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    memory.MEMORY_PATH.write_text(json.dumps([
+        {"id": "a1", "content": "user fact", "process": None, "session_id": None, "saved_at": "x"},
+        {"id": "b2", "content": "game fact", "process": "bg3.exe", "session_id": None, "saved_at": "x"},
+        {"id": "c3", "content": "run fact", "process": "bg3.exe", "session_id": "runA", "saved_at": "x"},
+    ]), encoding="utf-8")
+    scopes = {m["id"]: m["scope"] for m in memory.load_memories()}
+    assert scopes == {"a1": "user", "b2": "game", "c3": "session"}
+
+
+def test_prompt_renders_scope_suffixes():
+    memory.remember("user fact", "user")
+    memory.remember("game fact", "game", process="bg3.exe")
+    memory.remember("run fact", "session", process="bg3.exe", session_id="runA")
+    text = memory.format_memories_for_prompt("bg3.exe", "runA")
+    assert "user fact\n" in text or "user fact" in text.splitlines()[1]
+    assert "(game: bg3.exe, all playthroughs)" in text
+    assert "(this playthrough of bg3.exe)" in text

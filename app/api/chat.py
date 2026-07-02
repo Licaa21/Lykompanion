@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from openai import APIError
 from pydantic import ValidationError
 
-from app.core import debug_log, game_state, memory, reminders as reminders_store
+from app.core import debug_log, game_state, memory, observations, reminders as reminders_store
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -128,6 +128,10 @@ def _build_base_messages() -> list[dict]:
     divergence_warning = game_state.pop_pending_divergence(tracked_process) if tracked_process else None
     if game_state_text:
         system_content += "\n\n" + game_state_text
+    if tracked_process:
+        observations_text = observations.format_observations_for_prompt(tracked_process, tracked_session)
+        if observations_text:
+            system_content += "\n\n" + observations_text
     if divergence_warning:
         system_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
 

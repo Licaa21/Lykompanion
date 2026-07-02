@@ -10,6 +10,7 @@ from app.core import game_state_processes
 from app.core import game_state_trackers
 from app.core import game_state_training_data
 from app.core import memory as memory_store
+from app.core import observations as observations_store
 from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
@@ -177,17 +178,30 @@ async def extract_and_apply_game_state(
         tid = tracker["id"]
         if tid == game_state_trackers.ACTIVITY_TRACKER_ID:
             new_values[tid] = data.get(tid)
+        elif tid in data:
+            # Key present: an explicit null/"" clears the field (the model retracting a value it
+            # now believes is wrong), any other value replaces it. Without this, one bad guess
+            # was sticky forever - null used to fall back to the previous value.
+            new_values[tid] = data[tid] or None
         else:
-            new_values[tid] = data.get(tid) or previous_values.get(tid)
+            # Key omitted: not visible this window, keep what we had.
+            new_values[tid] = previous_values.get(tid)
     game_state.set_game_state(process, new_values)
 
-    for fact in data.get("save_memories") or []:
-        if isinstance(fact, str) and fact.strip():
-            memory_store.add_memory(fact.strip(), process=process, session_id=active_session_id)
-
-    for memory_id in data.get("remove_memory_ids") or []:
-        if isinstance(memory_id, str) and memory_id:
-            memory_store.remove_memory(memory_id)
+    # The OCR pass observes; it does not write long-term memory. Candidate facts go to the
+    # observations journal, where the conversation-side memory-extraction pass promotes the ones
+    # that hold up (see app/core/observations.py).
+    confidence = data.get("confidence")
+    confidence = confidence if isinstance(confidence, (int, float)) else None
+    observed = [
+        (fact.strip(), confidence)
+        for fact in data.get("observations") or []
+        if isinstance(fact, str) and fact.strip()
+    ]
+    if observed:
+        added = observations_store.add_observations(process, active_session_id, observed)
+        if added:
+            logger.info("Game-state poll: recorded %d observation(s) for process=%r", len(added), process)
 
     divergence = data.get("divergence_warning")
     if isinstance(divergence, str) and divergence.strip():

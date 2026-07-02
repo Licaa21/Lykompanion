@@ -132,6 +132,26 @@ def get_active_session_id(process: str) -> str:
     return session_id
 
 
+def peek_active_session_id(process: str) -> str | None:
+    """Read-only variant of get_active_session_id - never creates a default session, so listing
+    endpoints (Gaming Journal) don't mutate state as a side effect of being viewed."""
+    session_id = _load_active_sessions().get(process.lower())
+    if session_id and _session_key(process, session_id) in _load_all():
+        return session_id
+    sessions = get_sessions(process)
+    return sessions[0]["session_id"] if sessions else None
+
+
+def get_processes_with_sessions() -> list[str]:
+    """Distinct process names that have at least one stored session."""
+    seen: dict[str, str] = {}
+    for entry in _load_all().values():
+        proc = entry.get("process")
+        if proc and proc.lower() not in seen:
+            seen[proc.lower()] = proc
+    return list(seen.values())
+
+
 def get_session_name(process: str, session_id: str) -> str | None:
     entry = _load_all().get(_session_key(process, session_id))
     return entry.get("name") if entry else None

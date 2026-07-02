@@ -11,16 +11,17 @@ invisible downstream — both game- and session-scope facts render as `(game: X)
 (5) `data.get(tid) or previous_values.get(tid)` makes wrong tracker values unclearable and
 self-reinforcing; (6) `confidence` gates only training — low-confidence windows still write memory.
 
-- [ ] **Layer 1 (fixes, no redesign):** never silently degrade scope; store explicit
-  `scope` field on memory entries (+ migration) and render it in prompts/UI; let the OCR pass
-  choose scope per fact; extend the choice-certainty gate to `save_memories` (replace the
-  Shadowheart example with a post-confirmation version); make tracker fields clearable
-  (omitted key = keep previous, explicit null = clear).
-- [ ] **Layer 2 (memory service + journal):** single `remember(content, scope, source,
-  confidence)` entry point owning scope resolution/dedup; demote the OCR pass from
-  memory-writer to observer — it appends to a per-session observation journal, and promotion
-  to real memory happens only via the chat extraction pass (corroborated by conversation) or a
-  consolidation pass (seen in ≥2 windows / high confidence).
+- [x] **Layer 1** — done 2026-07-02: explicit `scope` field (+ read-time migration), scope
+  degradation goes to user (never cross-tier), choice-certainty gate extended to observations,
+  tracker fields clearable (omitted key = keep previous, explicit null = clear).
+- [x] **Layer 2** — done 2026-07-02: `memory.remember()` is the single write entry point; the
+  OCR pass appends to a per-session observations journal (`app/core/observations.py`) instead
+  of writing memory; the chat extraction pass promotes corroborated observations and clears
+  handled ones. Frontend: new Gaming Journal modal (per-game memories, profiles with
+  playthrough memories + observations; Game Awareness settings moved there from Settings);
+  Personal Data modal now shows user-scope facts only. Possible follow-up: a periodic
+  consolidation pass for long unattended play sessions (observations currently only get
+  promoted when the user actually chats).
 - [x] **Layer 3 (vision-grounded extraction)** — done 2026-07-02: the first and most recent
   kept frames of each poll window are attached to the extraction pass as screenshots (OCR still
   does free change-detection/dedup; middle frames stay text-only; non-vision models retried

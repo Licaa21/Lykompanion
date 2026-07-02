@@ -28,8 +28,21 @@ async def create_memory(payload: MemoryCreate) -> MemoryEntry:
     if not content:
         raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
     process = (payload.process or "").strip() or None
-    session_id = _derive_session_id(process)
-    return memory.add_memory(content, process=process, session_id=session_id)
+    # Explicit session_id (Gaming Journal adds a fact to a specific profile) wins; otherwise
+    # fall back to tagging with the active session the way auto-extracted memories are.
+    session_id = (payload.session_id or "").strip() or _derive_session_id(process)
+    if payload.scope:
+        scope = payload.scope
+    elif session_id:
+        scope = "session"
+    elif process:
+        scope = "game"
+    else:
+        scope = "user"
+    entry = memory.remember(content, scope, process=process, session_id=session_id)
+    if entry is None:
+        raise HTTPException(status_code=409, detail="An identical memory already exists.")
+    return entry
 
 
 @router.put("/{memory_id}", response_model=MemoryEntry)
@@ -38,7 +51,7 @@ async def update_memory(memory_id: str, payload: MemoryUpdate) -> MemoryEntry:
     if not content:
         raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
     process = (payload.process or "").strip() or None
-    session_id = _derive_session_id(process)
+    session_id = (payload.session_id or "").strip() or _derive_session_id(process)
     updated = memory.update_memory(memory_id, content, process=process, session_id=session_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Memory not found.")

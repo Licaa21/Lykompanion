@@ -132,34 +132,37 @@ def _resolve_tracked_game() -> tuple[str | None, str | None]:
     return gs["process"], gs.get("session_id")
 
 
+def _save_via_remember(content: str, scope: str) -> str:
+    """Shared handler for the three save tools - all placement decisions live in
+    memory.remember(), including the degradation rule when the requested scope can't be
+    honored (no tracked game / no active session)."""
+    content = (content or "").strip()
+    if not content:
+        return "Nothing to save: content was empty."
+    process, session_id = _resolve_tracked_game()
+    entry = memory.remember(content, scope, process=process, session_id=session_id)
+    if entry is None:
+        return "Not saved: an identical fact is already in memory."
+    applied = entry["scope"]
+    if applied == "session":
+        label = f"session memory (this playthrough of {entry['process']})"
+    elif applied == "game":
+        label = f"game memory (game: {entry['process']}, all playthroughs)"
+    else:
+        label = "user memory"
+    note = "" if applied == scope else f" (requested {scope} scope wasn't available - no tracked game/session - so it was saved as a general user fact)"
+    return f"Saved {label} [{entry['id']}]: {entry['content']}{note}"
+
+
 def execute_tool_call(name: str, arguments: dict) -> str:
     if name == "save_user_memory":
-        content = (arguments.get("content") or "").strip()
-        if not content:
-            return "Nothing to save: content was empty."
-        entry = memory.add_memory(content, process=None, session_id=None)
-        return f"Saved user memory [{entry['id']}]: {entry['content']}"
+        return _save_via_remember(arguments.get("content"), "user")
 
     if name == "save_game_memory":
-        content = (arguments.get("content") or "").strip()
-        if not content:
-            return "Nothing to save: content was empty."
-        process, _ = _resolve_tracked_game()
-        if not process:
-            return "No game is currently being tracked — saved as a general user memory instead."
-        entry = memory.add_memory(content, process=process, session_id=None)
-        return f"Saved game memory [{entry['id']}] (game: {process}): {entry['content']}"
+        return _save_via_remember(arguments.get("content"), "game")
 
     if name == "save_session_memory":
-        content = (arguments.get("content") or "").strip()
-        if not content:
-            return "Nothing to save: content was empty."
-        process, session_id = _resolve_tracked_game()
-        if not process:
-            return "No game is currently being tracked — saved as a general user memory instead."
-        entry = memory.add_memory(content, process=process, session_id=session_id)
-        label = f"game: {process}" + (f", session: {session_id}" if session_id else "")
-        return f"Saved session memory [{entry['id']}] ({label}): {entry['content']}"
+        return _save_via_remember(arguments.get("content"), "session")
 
     if name == "remove_memory":
         memory_id = arguments.get("memory_id") or ""

@@ -864,8 +864,7 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
         document.getElementById("memory-add-input").value = contentDiv.textContent.trim().slice(0, 300);
         openModal(personalDataModal);
         personalDataModal.querySelector('.tab-btn[data-tab="memory"]').click();
-        await populateMemoryProcessOptions();
-        await loadMemories();
+              await loadMemories();
       });
       actionsEl.appendChild(memBtn);
     }
@@ -1824,7 +1823,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, personalDataModal, diagnosticsModal].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -2400,8 +2399,10 @@ function keyFieldValue(id) {
   return el.value || null;
 }
 
-document.getElementById("cfg-save").addEventListener("click", async (event) => {
-  const saveButton = event.currentTarget;
+// Shared by the Settings footer button and the Gaming Journal's "Save Awareness Settings"
+// button - the config PUT collects every cfg-* input by id regardless of which modal it
+// lives in, so both buttons save the full settings form.
+async function saveSettings(saveButton) {
   const apiKeyInput = document.getElementById("cfg-api-key");
   const igdbSecretInput = document.getElementById("cfg-igdb-client-secret");
   const steamApiKeyInput = document.getElementById("cfg-steam-api-key");
@@ -2473,7 +2474,10 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
   }
   applyConfigToForm(updatedCfg);
   flashSaved(saveButton);
-});
+}
+
+document.getElementById("cfg-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
+document.getElementById("ga-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
 
 // --- Personal Data modal (Instructions + Memory) ---
 
@@ -2482,7 +2486,6 @@ personalDataBtn.addEventListener("click", async () => {
   const response = await fetch("/api/instructions");
   const data = await response.json();
   document.getElementById("instructions-text").value = data.instructions;
-  await populateMemoryProcessOptions();
   await loadMemories();
   await loadReminders();
   await loadAlarms();
@@ -2499,18 +2502,14 @@ document.getElementById("instructions-save").addEventListener("click", async (ev
   flashSaved(saveButton);
 });
 
-// --- Memory modal ---
-// The agent can save/remove facts itself via tool calls during conversation;
-// this view lets the user audit and correct that memory directly. Facts can optionally be
-// tagged to a process (e.g. "bg3.exe") so they only get shown to the companion while that
-// game is active - general facts (no tag) always show.
+// --- Personal Data > Memory tab ---
+// User-scope facts only: things about the person (preferences, life context, cross-game
+// habits) that are always shown to the companion. Game- and session-scoped facts are
+// managed per game in the Gaming Journal modal instead.
 
 const memoryList = document.getElementById("memory-list");
-const memoryFiltersEl = document.getElementById("memory-filters");
 const memoryAddForm = document.getElementById("memory-add-form");
 const memoryAddInput = document.getElementById("memory-add-input");
-const memoryAddProcess = document.getElementById("memory-add-process");
-const memoryAddProcessCustom = document.getElementById("memory-add-process-custom");
 
 // Auto-grow the add-memory textarea between its CSS min/max-height as the user types, instead
 // of a fixed single-line input that scrolled long facts sideways.
@@ -2529,63 +2528,11 @@ memoryAddInput.addEventListener("keydown", (event) => {
 });
 
 let allMemories = [];
-let memoryFilter = "all"; // "all" | "general" | a specific process name
-
-memoryAddProcess.addEventListener("change", () => {
-  memoryAddProcessCustom.hidden = memoryAddProcess.value !== "__other__";
-});
-
-async function populateMemoryProcessOptions() {
-  const whitelist = await fetch("/api/game-state/whitelist").then((r) => r.json());
-  const previousValue = memoryAddProcess.value;
-  memoryAddProcess.innerHTML = '<option value="">General</option>';
-  for (const process of whitelist) {
-    const option = document.createElement("option");
-    option.value = process;
-    option.textContent = process;
-    memoryAddProcess.appendChild(option);
-  }
-  const otherOption = document.createElement("option");
-  otherOption.value = "__other__";
-  otherOption.textContent = "Other...";
-  memoryAddProcess.appendChild(otherOption);
-  if ([...memoryAddProcess.options].some((o) => o.value === previousValue)) {
-    memoryAddProcess.value = previousValue;
-  }
-}
-
-function renderMemoryFilters() {
-  memoryFiltersEl.innerHTML = "";
-
-  const processes = [...new Set(allMemories.map((m) => m.process).filter(Boolean))].sort();
-  const filters = [
-    ["all", "All"],
-    ["general", "General"],
-    ...processes.map((p) => [p, p]),
-  ];
-
-  for (const [value, label] of filters) {
-    const pill = document.createElement("button");
-    pill.type = "button";
-    pill.className = "memory-filter-pill" + (memoryFilter === value ? " active" : "");
-    pill.textContent = label;
-    pill.addEventListener("click", () => {
-      memoryFilter = value;
-      renderMemoryFilters();
-      renderMemoryList();
-    });
-    memoryFiltersEl.appendChild(pill);
-  }
-}
 
 function renderMemoryList() {
   memoryList.innerHTML = "";
 
-  const visible = allMemories.filter((m) => {
-    if (memoryFilter === "all") return true;
-    if (memoryFilter === "general") return !m.process;
-    return m.process === memoryFilter;
-  });
+  const visible = allMemories.filter((m) => (m.scope || "user") === "user");
 
   if (visible.length === 0) {
     const hint = document.createElement("div");
@@ -2596,82 +2543,65 @@ function renderMemoryList() {
   }
 
   for (const entry of visible) {
-    const item = document.createElement("div");
-    item.className = "memory-item";
-
-    const text = document.createElement("div");
-    text.className = "memory-item-text";
-    text.contentEditable = "true";
-    text.textContent = entry.content;
-
-    const tag = document.createElement("div");
-    tag.className = "memory-item-tag";
-    tag.contentEditable = "true";
-    tag.textContent = entry.process || "General";
-    tag.title = "Edit to tag this fact to a process, or clear/type General for an always-shown fact";
-
-    const saveEdits = async () => {
-      const content = text.textContent.trim();
-      const tagText = tag.textContent.trim();
-      const process = !tagText || tagText.toLowerCase() === "general" ? null : tagText;
-      if (!content) {
-        text.textContent = entry.content;
-        return;
-      }
-      if (content === entry.content && process === entry.process) {
-        tag.textContent = entry.process || "General";
-        return;
-      }
-      const response = await fetch(`/api/memory/${entry.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, process }),
-      });
-      if (response.ok) {
-        entry.content = content;
-        entry.process = process;
-        renderMemoryFilters();
-      } else {
-        text.textContent = entry.content;
-        tag.textContent = entry.process || "General";
-      }
-    };
-
-    text.addEventListener("blur", saveEdits);
-    tag.addEventListener("blur", saveEdits);
-    for (const el of [text, tag]) {
-      el.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          el.blur();
-        }
-      });
-    }
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "memory-item-delete";
-    deleteBtn.textContent = "×";
-    deleteBtn.title = "Remove memory";
-    deleteBtn.addEventListener("click", async () => {
-      const response = await fetch(`/api/memory/${entry.id}`, { method: "DELETE" });
-      if (response.ok) {
-        allMemories = allMemories.filter((m) => m.id !== entry.id);
-        renderMemoryFilters();
-        renderMemoryList();
-      }
-    });
-
-    item.appendChild(text);
-    item.appendChild(tag);
-    item.appendChild(deleteBtn);
-    memoryList.appendChild(item);
+    memoryList.appendChild(buildMemoryItem(entry, () => {
+      allMemories = allMemories.filter((m) => m.id !== entry.id);
+      renderMemoryList();
+    }));
   }
+}
+
+// Shared editable memory row (Personal Data + Gaming Journal): contentEditable text saved on
+// blur via PUT (keeping the entry's existing placement), and a delete button.
+function buildMemoryItem(entry, onDeleted) {
+  const item = document.createElement("div");
+  item.className = "memory-item";
+
+  const text = document.createElement("div");
+  text.className = "memory-item-text";
+  text.contentEditable = "true";
+  text.textContent = entry.content;
+
+  text.addEventListener("blur", async () => {
+    const content = text.textContent.trim();
+    if (!content || content === entry.content) {
+      text.textContent = entry.content;
+      return;
+    }
+    const response = await fetch(`/api/memory/${entry.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, process: entry.process, session_id: entry.session_id }),
+    });
+    if (response.ok) {
+      entry.content = content;
+    } else {
+      text.textContent = entry.content;
+    }
+  });
+  text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      text.blur();
+    }
+  });
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "memory-item-delete";
+  deleteBtn.textContent = "×";
+  deleteBtn.title = "Remove memory";
+  deleteBtn.addEventListener("click", async () => {
+    const response = await fetch(`/api/memory/${entry.id}`, { method: "DELETE" });
+    if (response.ok) onDeleted();
+  });
+
+  item.appendChild(text);
+  item.appendChild(deleteBtn);
+  return item;
 }
 
 async function loadMemories() {
   const response = await fetch("/api/memory");
   allMemories = await response.json();
-  renderMemoryFilters();
   renderMemoryList();
 }
 
@@ -2679,20 +2609,195 @@ memoryAddForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const content = memoryAddInput.value.trim();
   if (!content) return;
-  let process = memoryAddProcess.value;
-  if (process === "__other__") {
-    process = memoryAddProcessCustom.value.trim();
-  }
   memoryAddInput.value = "";
   memoryAddInput.style.height = "auto";
-  memoryAddProcessCustom.value = "";
   await fetch("/api/memory", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, process: process || null }),
+    body: JSON.stringify({ content, scope: "user" }),
   });
   await loadMemories();
 });
+
+// --- Gaming Journal modal ---
+// Per-game view of everything the companion knows: game-scope memories (hold across all
+// playthroughs), profiles (named sessions) with their playthrough-scope memories, and each
+// profile's unconfirmed screen observations. Also hosts the Game Awareness settings tab,
+// moved out of Settings.
+
+const gamingJournalModal = document.getElementById("gaming-journal-modal");
+const gamingJournalBtn = document.getElementById("gaming-journal-btn");
+const gamingJournalList = document.getElementById("gaming-journal-list");
+
+gamingJournalBtn.addEventListener("click", () => {
+  openModal(gamingJournalModal);
+  loadGamingJournal();
+  loadGameStateProcessLists();
+});
+
+async function loadGamingJournal() {
+  let games = [];
+  try {
+    const response = await fetch("/api/gaming-journal");
+    if (response.ok) games = await response.json();
+  } catch (err) {
+    games = [];
+  }
+  renderGamingJournal(games);
+}
+
+function buildJournalAddForm(placeholder, buildBody) {
+  const form = document.createElement("form");
+  form.className = "memory-add-form";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = placeholder;
+  input.autocomplete = "off";
+  const btn = document.createElement("button");
+  btn.type = "submit";
+  btn.className = "secondary-btn";
+  btn.textContent = "Add";
+  form.appendChild(input);
+  form.appendChild(btn);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = "";
+    await fetch("/api/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildBody(content)),
+    });
+    await loadGamingJournal();
+  });
+  return form;
+}
+
+function buildSectionLabel(text) {
+  const label = document.createElement("div");
+  label.className = "journal-section-label";
+  label.textContent = text;
+  return label;
+}
+
+function renderGamingJournal(games) {
+  gamingJournalList.innerHTML = "";
+
+  if (games.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "No games yet - approve a game for tracking (Game Awareness tab) or let the companion learn about one in conversation.";
+    gamingJournalList.appendChild(hint);
+    return;
+  }
+
+  for (const game of games) {
+    const card = document.createElement("div");
+    card.className = "journal-game";
+
+    const header = document.createElement("div");
+    header.className = "journal-game-header";
+    const title = document.createElement("span");
+    title.className = "journal-game-title";
+    title.textContent = game.process;
+    header.appendChild(title);
+    if (game.tracked) {
+      const badge = document.createElement("span");
+      badge.className = "journal-badge";
+      badge.textContent = "tracked";
+      badge.title = "Approved for background OCR awareness";
+      header.appendChild(badge);
+    }
+    card.appendChild(header);
+
+    // Game-scope memories: hold across every playthrough of this game.
+    card.appendChild(buildSectionLabel("Game memories (all playthroughs)"));
+    const gameMemList = document.createElement("div");
+    gameMemList.className = "memory-list";
+    if (game.memories.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "memory-empty-hint";
+      hint.textContent = "Nothing saved for this game yet.";
+      gameMemList.appendChild(hint);
+    }
+    for (const entry of game.memories) {
+      gameMemList.appendChild(buildMemoryItem(entry, loadGamingJournal));
+    }
+    card.appendChild(gameMemList);
+    card.appendChild(buildJournalAddForm(
+      "Add a game memory (true across playthroughs)…",
+      (content) => ({ content, scope: "game", process: game.process })
+    ));
+
+    // Profiles (named sessions), each with its playthrough-scope memories + observations.
+    for (const session of game.sessions) {
+      const profile = document.createElement("div");
+      profile.className = "journal-profile";
+
+      const pHeader = document.createElement("div");
+      pHeader.className = "journal-game-header";
+      const pTitle = document.createElement("span");
+      pTitle.className = "journal-profile-title";
+      pTitle.textContent = `Profile: ${session.name}`;
+      pHeader.appendChild(pTitle);
+      if (session.active) {
+        const badge = document.createElement("span");
+        badge.className = "journal-badge journal-badge--active";
+        badge.textContent = "active";
+        badge.title = "The profile new playthrough facts currently go to";
+        pHeader.appendChild(badge);
+      }
+      profile.appendChild(pHeader);
+
+      const sessMemList = document.createElement("div");
+      sessMemList.className = "memory-list";
+      if (session.memories.length === 0) {
+        const hint = document.createElement("div");
+        hint.className = "memory-empty-hint";
+        hint.textContent = "Nothing saved for this playthrough yet.";
+        sessMemList.appendChild(hint);
+      }
+      for (const entry of session.memories) {
+        sessMemList.appendChild(buildMemoryItem(entry, loadGamingJournal));
+      }
+      profile.appendChild(sessMemList);
+      profile.appendChild(buildJournalAddForm(
+        "Add a playthrough memory…",
+        (content) => ({ content, scope: "session", process: game.process, session_id: session.session_id })
+      ));
+
+      if (session.observations.length > 0) {
+        profile.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
+        const obsList = document.createElement("div");
+        obsList.className = "memory-list";
+        for (const obs of session.observations) {
+          const item = document.createElement("div");
+          item.className = "memory-item journal-observation";
+          const text = document.createElement("div");
+          text.className = "memory-item-text";
+          text.textContent = obs.content;
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "memory-item-delete";
+          deleteBtn.textContent = "×";
+          deleteBtn.title = "Discard observation";
+          deleteBtn.addEventListener("click", async () => {
+            const response = await fetch(`/api/observations/${obs.id}`, { method: "DELETE" });
+            if (response.ok) loadGamingJournal();
+          });
+          item.appendChild(text);
+          item.appendChild(deleteBtn);
+          obsList.appendChild(item);
+        }
+        profile.appendChild(obsList);
+      }
+
+      card.appendChild(profile);
+    }
+
+    gamingJournalList.appendChild(card);
+  }
+}
 
 // --- Reminders & Alarms modal ---
 // Read-only management views: the agent creates/removes these itself via tool calls during
@@ -3446,7 +3551,6 @@ gameStateBlacklistForm.addEventListener("submit", async (event) => {
   await loadGameStateProcessLists();
 });
 
-settingsBtn.addEventListener("click", loadGameStateProcessLists);
 loadGameStateProcessLists();
 
 // --- Pending process approvals ---

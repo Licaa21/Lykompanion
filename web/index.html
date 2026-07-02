@@ -35,6 +35,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         </button>
 
+        <button id="gaming-journal-btn" class="tool-btn" title="Gaming Journal" aria-label="Gaming Journal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>
+        </button>
+
         <button id="diagnostics-btn" class="tool-btn" title="Usage &amp; Debug" aria-label="Usage and Debug">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         </button>
@@ -102,7 +106,6 @@
           <button type="button" class="tab-btn" data-tab="api-keys">API Keys</button>
           <button type="button" class="tab-btn" data-tab="voice">Voice &amp; Narration</button>
           <button type="button" class="tab-btn" data-tab="live-mic">Live Mic</button>
-          <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
         </nav>
         <div class="modal-main modal-body">
 
@@ -415,6 +418,111 @@
           </div>
         </section>
 
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="cfg-quick-setup" class="secondary-btn">Quick Setup…</button>
+        <button type="button" id="cfg-refresh-models" class="secondary-btn">Refresh Model Lists</button>
+        <button type="button" id="cfg-save" class="primary-btn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PERSONAL DATA MODAL (Instructions + Memory) ──────────────── -->
+  <div id="personal-data-modal" class="modal-overlay" hidden>
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h2>Personal Data</h2>
+        <button type="button" class="modal-close" data-close="personal-data-modal">&times;</button>
+      </div>
+      <div class="modal-layout">
+        <nav class="modal-tabs">
+          <button type="button" class="tab-btn active" data-tab="instructions">Instructions</button>
+          <button type="button" class="tab-btn" data-tab="memory">Memory</button>
+          <button type="button" class="tab-btn" data-tab="reminders">Reminders</button>
+          <button type="button" class="tab-btn" data-tab="alarms">Alarms</button>
+        </nav>
+        <div class="modal-main modal-body">
+
+          <section class="tab-panel" data-tab="instructions">
+            <p class="modal-hint">
+              Tell your companion anything it should always know or do — tone, how to address you, things to
+              avoid, etc. This is added to every conversation.
+            </p>
+            <textarea
+              id="instructions-text"
+              rows="16"
+              placeholder="e.g. Call me Andrei. Keep jokes to a minimum. Always warn before spoilers."
+            ></textarea>
+            <div class="modal-footer modal-footer--inline">
+              <button type="button" id="instructions-save" class="primary-btn">Save Instructions</button>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-tab="memory" hidden>
+            <p class="modal-hint">
+              Facts your companion has saved about you as a person — preferences, life context, cross-game
+              habits. It adds and removes these itself during conversation, or you can manage them directly
+              here. Game-specific facts live in the Gaming Journal instead.
+            </p>
+            <div id="memory-list" class="memory-list"></div>
+            <form id="memory-add-form" class="memory-add-form memory-add-form--stacked">
+              <textarea id="memory-add-input" rows="1" placeholder="Add a fact about yourself…" autocomplete="off"></textarea>
+              <div class="memory-add-controls">
+                <button type="submit" class="secondary-btn">Add</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="tab-panel" data-tab="reminders" hidden>
+            <p class="modal-hint">
+              Recurring nudges the companion set up during conversation - each repeats the exact message
+              it composed when you set it up, spoken every N minutes while its game is the one being
+              played, and pausing automatically otherwise. Set these by asking your companion, e.g.
+              "remind me to save every 5 minutes".
+            </p>
+            <div id="reminder-list" class="memory-list"></div>
+          </section>
+
+          <section class="tab-panel" data-tab="alarms" hidden>
+            <p class="modal-hint">
+              One-time nudges the companion set up during conversation - each speaks the exact message it
+              composed when you set it up, once, at a specific time while its game is the one being
+              played. Set these by asking your companion, e.g. "in 20 minutes remind me to check the
+              auction house".
+            </p>
+            <div id="alarm-list" class="memory-list"></div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GAMING JOURNAL MODAL (per-game memories + game awareness) ── -->
+  <div id="gaming-journal-modal" class="modal-overlay" hidden>
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h2>Gaming Journal</h2>
+        <button type="button" class="modal-close" data-close="gaming-journal-modal">&times;</button>
+      </div>
+      <div class="modal-layout">
+        <nav class="modal-tabs">
+          <button type="button" class="tab-btn active" data-tab="journal">Journal</button>
+          <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
+        </nav>
+        <div class="modal-main modal-body">
+
+          <section class="tab-panel" data-tab="journal">
+            <p class="modal-hint">
+              Everything your companion knows per game: general facts that hold across all playthroughs,
+              and per-profile facts tied to one playthrough. Unconfirmed observations are things it noticed
+              on screen but hasn't confirmed with you yet — they fade in and out on their own.
+            </p>
+            <div id="gaming-journal-list" class="gaming-journal-list"></div>
+          </section>
+
         <!-- GAME AWARENESS tab -->
         <section class="tab-panel" data-tab="game-awareness" hidden>
           <div class="subtab-bar">
@@ -467,6 +575,9 @@
                 </label>
               </details>
             </div>
+            <div class="modal-footer modal-footer--inline">
+              <button type="button" id="ga-save" class="primary-btn">Save Awareness Settings</button>
+            </div>
           </div>
 
           <div class="subtab-panel" data-subtab="ga-processes" hidden>
@@ -511,94 +622,6 @@
             <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - the Game-State Model writes it automatically as it learns the game's UI (requires self-training to be enabled)."></textarea>
           </div>
         </section>
-
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" id="cfg-quick-setup" class="secondary-btn">Quick Setup…</button>
-        <button type="button" id="cfg-refresh-models" class="secondary-btn">Refresh Model Lists</button>
-        <button type="button" id="cfg-save" class="primary-btn">Save Settings</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── PERSONAL DATA MODAL (Instructions + Memory) ──────────────── -->
-  <div id="personal-data-modal" class="modal-overlay" hidden>
-    <div class="modal modal--wide">
-      <div class="modal-header">
-        <h2>Personal Data</h2>
-        <button type="button" class="modal-close" data-close="personal-data-modal">&times;</button>
-      </div>
-      <div class="modal-layout">
-        <nav class="modal-tabs">
-          <button type="button" class="tab-btn active" data-tab="instructions">Instructions</button>
-          <button type="button" class="tab-btn" data-tab="memory">Memory</button>
-          <button type="button" class="tab-btn" data-tab="reminders">Reminders</button>
-          <button type="button" class="tab-btn" data-tab="alarms">Alarms</button>
-        </nav>
-        <div class="modal-main modal-body">
-
-          <section class="tab-panel" data-tab="instructions">
-            <p class="modal-hint">
-              Tell your companion anything it should always know or do — tone, how to address you, things to
-              avoid, etc. This is added to every conversation.
-            </p>
-            <textarea
-              id="instructions-text"
-              rows="16"
-              placeholder="e.g. Call me Andrei. Keep jokes to a minimum. Always warn before spoilers."
-            ></textarea>
-            <div class="modal-footer modal-footer--inline">
-              <button type="button" id="instructions-save" class="primary-btn">Save Instructions</button>
-            </div>
-          </section>
-
-          <section class="tab-panel" data-tab="memory" hidden>
-            <p class="modal-hint">
-              Facts your companion has saved about you. It can add or remove these itself during conversation,
-              or you can manage them directly here. Facts tagged to a game only show while that game is active.
-            </p>
-            <div id="memory-filters" class="memory-filters"></div>
-            <div id="memory-list" class="memory-list"></div>
-            <form id="memory-add-form" class="memory-add-form memory-add-form--stacked">
-              <textarea id="memory-add-input" rows="1" placeholder="Add a memory…" autocomplete="off"></textarea>
-              <div class="memory-add-controls">
-                <select id="memory-add-process">
-                  <option value="">General</option>
-                  <option value="__other__">Other…</option>
-                </select>
-                <input
-                  id="memory-add-process-custom"
-                  type="text"
-                  placeholder="e.g. bg3.exe"
-                  autocomplete="off"
-                  hidden
-                />
-                <button type="submit" class="secondary-btn">Add</button>
-              </div>
-            </form>
-          </section>
-
-          <section class="tab-panel" data-tab="reminders" hidden>
-            <p class="modal-hint">
-              Recurring nudges the companion set up during conversation - each repeats the exact message
-              it composed when you set it up, spoken every N minutes while its game is the one being
-              played, and pausing automatically otherwise. Set these by asking your companion, e.g.
-              "remind me to save every 5 minutes".
-            </p>
-            <div id="reminder-list" class="memory-list"></div>
-          </section>
-
-          <section class="tab-panel" data-tab="alarms" hidden>
-            <p class="modal-hint">
-              One-time nudges the companion set up during conversation - each speaks the exact message it
-              composed when you set it up, once, at a specific time while its game is the one being
-              played. Set these by asking your companion, e.g. "in 20 minutes remind me to check the
-              auction house".
-            </p>
-            <div id="alarm-list" class="memory-list"></div>
-          </section>
 
         </div>
       </div>
