@@ -429,6 +429,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}") from exc
 
+    # Typed turns carry no transcript instruction, but a model that just did voice turns in the
+    # same conversation sometimes emits the block out of habit - strip it, never surface it.
+    _, reply = _split_transcript(reply)
+
     _schedule_memory_extraction(last_user_message, reply)
 
     return ChatResponse(
@@ -450,7 +454,11 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     async def event_generator():
         full_reply = ""
         try:
-            async for event in _stream_chat_with_tools(messages, source="chat_stream"):
+            # Typed turns carry no transcript instruction, but a model that just did voice turns
+            # in the same conversation sometimes emits the block out of habit - peel and drop it.
+            async for event in _peel_transcript(_stream_chat_with_tools(messages, source="chat_stream")):
+                if event["type"] == "transcript":
+                    continue
                 if event["type"] == "delta":
                     full_reply += event["text"]
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"

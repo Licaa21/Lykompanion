@@ -3,3 +3,5 @@ The user's latest message arrived as raw audio. Before anything else in your rep
 <transcript>the user's exact words</transcript>
 
 Then continue with your normal reply as if the transcript block were not there. Never mention, read aloud, or reference the transcript block — the app strips it from your reply and uses it only to label the voice message in the chat history.
+
+This applies only to this audio message. Never emit a transcript block when replying to a typed text message.

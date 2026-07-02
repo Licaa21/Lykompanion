@@ -889,8 +889,9 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   const contentDiv = document.createElement("div");
   contentDiv.className = "msg-content";
   contentDiv.innerHTML = renderMessageMarkup(content);
-  // For voice messages the player IS the bubble; hide the text placeholder
-  if (audioId) contentDiv.hidden = true;
+  // For voice messages the player IS the bubble; hide the text only while it's still the
+  // 🎤 placeholder - once the transcript is swapped in it must survive re-renders/reloads.
+  if (audioId && (!content || content.startsWith("🎤"))) contentDiv.hidden = true;
   el.appendChild(contentDiv);
 
   // ── Voice player — styled as the message bubble ───────────
@@ -1141,6 +1142,10 @@ async function sendMessage(text) {
         if (payload.done) continue;
 
         fullReply += payload.delta;
+        // Re-attach if a mid-stream re-render (chat switch, modal, etc.) detached the bubble.
+        if (!assistantEl.isConnected && activeChatId === chat.id) {
+          chatLog.appendChild(assistantEl.parentElement);
+        }
         assistantEl.innerHTML = renderMessageMarkup(fullReply);
         chatLog.scrollTop = chatLog.scrollHeight;
 
@@ -1162,6 +1167,7 @@ async function sendMessage(text) {
     }
 
     addMessageToChat(chat, "assistant", fullReply);
+    if (!assistantEl.isConnected && activeChatId === chat.id) renderChatLog();
     maybeGenerateTitle(chat, text, fullReply);
   } catch (err) {
     if (err.name !== "AbortError") {
@@ -1325,6 +1331,12 @@ async function sendDirectVoice(wavBlob) {
         }
         if (payload.delta) {
           fullReply += payload.delta;
+          // A re-render mid-stream (chat switch, modal, etc.) wipes chatLog and detaches the
+          // live bubbles - the stream then types into limbo and the UI looks hung. Re-attach
+          // as long as this chat is still the visible one.
+          if (!assistantEl.isConnected && activeChatId === chat.id) {
+            chatLog.appendChild(assistantEl.parentElement);
+          }
           assistantEl.innerHTML = renderMessageMarkup(fullReply);
           chatLog.scrollTop = chatLog.scrollHeight;
           if (narrateEnabled) {
@@ -1344,11 +1356,15 @@ async function sendDirectVoice(wavBlob) {
     }
 
     if (transcript) {
+      // Update the store first - it's the source of truth for re-renders and future history.
+      userMessage.content = transcript;
       userContentDiv.hidden = false;
       userContentDiv.innerHTML = renderMessageMarkup(transcript);
-      userMessage.content = transcript;
     }
     addMessageToChat(chat, "assistant", fullReply);
+    // If a re-render happened mid-stream, the live bubbles are detached; now that everything
+    // is in chat.messages, one re-render restores the full exchange (incl. the transcript).
+    if (!assistantEl.isConnected && activeChatId === chat.id) renderChatLog();
     maybeGenerateTitle(chat, transcript || "(voice message)", fullReply);
 
     awaitingReply = false;
