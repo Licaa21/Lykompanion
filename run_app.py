@@ -1,6 +1,7 @@
 """Desktop launcher — starts the FastAPI server in a background thread, then opens a
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
+import faulthandler
 import json
 import os
 import secrets
@@ -9,6 +10,17 @@ import sys
 import time
 import threading
 from pathlib import Path
+
+# The process has died silently (no traceback, straight to RUN.cmd's pause) during normal use -
+# the signature of a native access violation in one of the Windows-native deps (WGC capture,
+# Windows OCR winrt, pycaw, WebView2 COM). faulthandler prints a C-level traceback for every
+# thread on a hard crash so the faulting module is identifiable from the console/log.
+faulthandler.enable()
+try:
+    _crash_log = open(Path(__file__).resolve().parent / "data" / "crash_log.txt", "a")
+    faulthandler.enable(file=_crash_log)
+except OSError:
+    pass  # console-only fallback (faulthandler.enable() above already covers stderr)
 
 # WebView2 white-screen-on-maximize fix: the blank-out on resize/maximize comes from
 # Chromium's native window occlusion tracker wrongly deciding the window is covered and

@@ -1,4 +1,5 @@
 import asyncio
+import faulthandler
 import hmac
 import ipaddress
 import logging
@@ -48,6 +49,11 @@ async def lifespan(_app: FastAPI):
         # Await the cancelled tasks so shutdown doesn't log "Task was destroyed but it is pending".
         await asyncio.gather(poller_task, reminder_task, return_exceptions=True)
 
+
+# Dev-uvicorn coverage for silent native crashes (run_app.py already enables it pointing at
+# data/crash_log.txt - don't override that handler when running as the desktop app).
+if not faulthandler.is_enabled():
+    faulthandler.enable()
 
 app = FastAPI(title="Lykompanion", lifespan=lifespan)
 

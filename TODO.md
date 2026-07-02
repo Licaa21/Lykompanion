@@ -1,5 +1,13 @@
 # TODO
 
+## Active bug hunt
+
+- [ ] **Silent process death at voice-reply end** — the Python process dies with no traceback
+  (cmd drops straight to `pause`) when a voice reply finishes while navigating Settings; the
+  WebView2 window survives as a frozen zombie ("app hangs"). Signature of a native access
+  violation (WGC / winrt OCR / pycaw / WebView2 COM). `faulthandler` now writes a C-level
+  traceback to `data/crash_log.txt` on crash — reproduce once, then read that file.
+
 ## Frontend / UX
 
 - [ ] **`app.js` is ~4,000 lines in one file.** Split into ES modules: chat, voice/VAD, settings,
@@ -17,3 +25,4 @@
   runs on a secondary display it may OCR the wrong screen. Follow the foreground window's
   monitor instead.
 - [ ] **Export/import** — one-click backup of `data/` (chats, memories, settings) for machine moves.
+- [ ] **More SFX** - Add a short "dot dot dot" sound effect after a user prompt is registered and sent to the LLM. Add sound effects for tool calls, like a plane sound effect when web search is used or a nice crescendo when a memory is saved or a descendo when it's deleted, etc.
