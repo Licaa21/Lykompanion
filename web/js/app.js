@@ -423,12 +423,14 @@ let chatSearchQuery = "";
 function renderChatList() {
   chatListEl.innerHTML = "";
   const query = chatSearchQuery.toLowerCase();
-  const visible = query ? chats.filter((c) => c.title.toLowerCase().includes(query)) : chats;
+  // Only show chats that have at least one message — "New Chat" never appears until a message is sent.
+  const withMessages = chats.filter((c) => c.messages.length > 0);
+  const visible = query ? withMessages.filter((c) => c.title.toLowerCase().includes(query)) : withMessages;
 
-  if (chats.length === 0) {
+  if (withMessages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "chat-list-empty";
-    empty.textContent = "Your conversations will appear here";
+    empty.textContent = "No chat history — your next chats will appear here";
     chatListEl.appendChild(empty);
     return;
   }
@@ -550,11 +552,6 @@ function exitEmptyState() {
     composer.style.transform = "";
   }, { once: true });
 }
-
-// Trigger the animation as soon as the user starts typing in the empty state.
-chatInput.addEventListener("input", () => {
-  exitEmptyState();
-});
 
 newChatBtn.addEventListener("click", () => {
   activeChatId = null;
@@ -3983,12 +3980,13 @@ document.addEventListener("keydown", (event) => {
 async function init() {
   await refreshAvatarStatus();
   await loadChatsFromStorage();
-  if (chats.length === 0) {
+  const firstWithMessages = chats.find((c) => c.messages.length > 0);
+  if (firstWithMessages) {
+    switchChat(firstWithMessages.id);
+  } else {
     activeChatId = null;
     renderChatList();
     renderChatLog();
-  } else {
-    switchChat(chats[0].id);
   }
   const cfg = await loadConfig();
   // First run on this machine with nothing configured - walk through setup automatically.
