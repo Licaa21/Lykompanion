@@ -1754,9 +1754,24 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   color: var(--t1); font-size: 12px; line-height: 1.5;
 }
 .debug-detail-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.debug-detail-pane {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+}
+.debug-detail-pane-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--t3);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: 2px;
 }
 
 /* ════════════════════════════════════════════════════

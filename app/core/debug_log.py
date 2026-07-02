@@ -1,6 +1,6 @@
 """In-memory ring buffer of the last 50 individual LLM API calls and tool executions, for live
-debugging via the Debug panel. Restart-scoped on purpose (not persisted) - this reflects "what
-just happened", not a historical record (that's what app/core/usage.py is for).
+debugging via the Debug panel. When debug mode is enabled, entries are also persisted to
+data/debug_log.json (capped at 10 MB) so the history survives restarts for post-mortem debugging.
 
 Recording is gated behind settings.debug_mode_enabled (off by default) - entries are kept
 full/untruncated, which can be large, so this is opt-in rather than always-on."""
@@ -9,12 +9,45 @@ import json
 import uuid
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.core.config import settings
 
 _MAX_ENTRIES = 50
+_DISK_MAX_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+_DEBUG_LOG_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "debug_log.json"
 
 _entries: deque[dict] = deque(maxlen=_MAX_ENTRIES)
+
+
+def _load_from_disk() -> None:
+    if not settings.debug_mode_enabled or not _DEBUG_LOG_PATH.exists():
+        return
+    try:
+        data = json.loads(_DEBUG_LOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Entries on disk are newest-first; appendleft from oldest so newest stays at front.
+            for entry in reversed(data):
+                _entries.appendleft(entry)
+    except Exception:
+        pass
+
+
+def _save_to_disk() -> None:
+    try:
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entries = list(_entries)
+        content = json.dumps(entries, ensure_ascii=False)
+        # Trim oldest entries (tail of the newest-first list) until under the size cap.
+        while entries and len(content.encode()) > _DISK_MAX_SIZE_BYTES:
+            entries.pop()
+            content = json.dumps(entries, ensure_ascii=False)
+        _DEBUG_LOG_PATH.write_text(content, encoding="utf-8")
+    except Exception:
+        pass
+
+
+_load_from_disk()
 
 
 def record_request(
@@ -47,6 +80,7 @@ def record_request(
         "duration_ms": duration_ms,
     }
     _entries.appendleft(entry)
+    _save_to_disk()
 
 
 def record_tool_call(name: str, arguments: dict, result: str, duration_ms: float) -> None:

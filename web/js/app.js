@@ -3822,8 +3822,9 @@ usageClearBtn.addEventListener("click", async () => {
 });
 
 // --- Debug tab (Usage & Debug modal) ---
-// Last 50 individual LLM API calls and tool executions (not persisted, resets on server restart) -
-// lets the user inspect exactly what was sent/received for each request, including tool round-trips.
+// Last 50 individual LLM API calls and tool executions - persisted to data/debug_log.json when
+// debug mode is enabled so history survives restarts. Lets the user inspect exactly what was
+// sent/received for each request, including tool round-trips.
 
 const debugRequestsListEl = document.getElementById("debug-requests-list");
 
@@ -3860,39 +3861,54 @@ function openDebugDetail(entry) {
   debugDetailTitleEl.textContent = `${entry.source} · ${entry.model}`;
   debugDetailBodyEl.innerHTML = "";
 
+  // ── Left pane: metadata + full prompt messages ───────────────────────
+  const leftPane = document.createElement("div");
+  leftPane.className = "debug-detail-pane";
+  const leftLabel = document.createElement("div");
+  leftLabel.className = "debug-detail-pane-label";
+  leftLabel.textContent = "Prompt";
+  leftPane.appendChild(leftLabel);
+
   const time = new Date(entry.timestamp).toLocaleString();
-  const headerBlock = document.createElement("div");
-  headerBlock.className = "debug-message-block";
-  headerBlock.innerHTML = `
-    <div class="debug-message-role">metadata</div>
-    <div class="debug-message-content">
-      ${time}\n${entry.prompt_tokens}+${entry.completion_tokens} tok · $${entry.cost_usd.toFixed(4)} · ${entry.duration_ms ? Math.round(entry.duration_ms) + "ms" : "-"}
-    </div>
-  `;
-  debugDetailBodyEl.appendChild(headerBlock);
+  const metaBlock = document.createElement("div");
+  metaBlock.className = "debug-message-block";
+  metaBlock.innerHTML = `<div class="debug-message-role">metadata</div><div class="debug-message-content"></div>`;
+  metaBlock.querySelector(".debug-message-content").textContent =
+    `${time}\n${entry.prompt_tokens}+${entry.completion_tokens} tok · $${entry.cost_usd.toFixed(4)} · ${entry.duration_ms ? Math.round(entry.duration_ms) + "ms" : "-"}`;
+  leftPane.appendChild(metaBlock);
 
   for (const message of entry.messages) {
-    debugDetailBodyEl.appendChild(formatDebugMessage(message));
+    leftPane.appendChild(formatDebugMessage(message));
   }
+
+  // ── Right pane: tools available + LLM response ───────────────────────
+  const rightPane = document.createElement("div");
+  rightPane.className = "debug-detail-pane";
+  const rightLabel = document.createElement("div");
+  rightLabel.className = "debug-detail-pane-label";
+  rightLabel.textContent = "Response";
+  rightPane.appendChild(rightLabel);
 
   if (entry.tools && entry.tools.length > 0) {
     const toolsBlock = document.createElement("div");
     toolsBlock.className = "debug-message-block";
-    toolsBlock.innerHTML = `<div class="debug-message-role">tools available</div><div class="debug-message-content">${entry.tools.join(", ")}</div>`;
-    debugDetailBodyEl.appendChild(toolsBlock);
+    toolsBlock.innerHTML = `<div class="debug-message-role">tools available</div><div class="debug-message-content"></div>`;
+    toolsBlock.querySelector(".debug-message-content").textContent = entry.tools.join(", ");
+    rightPane.appendChild(toolsBlock);
   }
 
-  if (entry.reply || entry.tool_calls) {
-    const replyBlock = document.createElement("div");
-    replyBlock.className = "debug-message-block";
-    const toolCallsText = entry.tool_calls
-      ? entry.tool_calls.map((tc) => `→ ${tc.name}(${tc.arguments})`).join("\n")
-      : "";
-    replyBlock.innerHTML = `<div class="debug-message-role">result</div><div class="debug-message-content"></div>`;
-    replyBlock.querySelector(".debug-message-content").textContent =
-      [entry.reply, toolCallsText].filter(Boolean).join("\n") || "(empty)";
-    debugDetailBodyEl.appendChild(replyBlock);
-  }
+  const replyBlock = document.createElement("div");
+  replyBlock.className = "debug-message-block";
+  const toolCallsText = entry.tool_calls
+    ? entry.tool_calls.map((tc) => `→ ${tc.name}(${tc.arguments})`).join("\n")
+    : "";
+  replyBlock.innerHTML = `<div class="debug-message-role">result</div><div class="debug-message-content"></div>`;
+  replyBlock.querySelector(".debug-message-content").textContent =
+    [entry.reply, toolCallsText].filter(Boolean).join("\n") || "(empty)";
+  rightPane.appendChild(replyBlock);
+
+  debugDetailBodyEl.appendChild(leftPane);
+  debugDetailBodyEl.appendChild(rightPane);
 
   openModal(debugDetailModal);
 }
@@ -3903,7 +3919,7 @@ function renderDebugRequests(entries) {
   if (entries.length === 0) {
     const hint = document.createElement("div");
     hint.className = "memory-empty-hint";
-    hint.textContent = "No requests recorded yet this session.";
+    hint.textContent = "No requests recorded. Enable debug capture and make a request.";
     debugRequestsListEl.appendChild(hint);
     return;
   }
