@@ -35,7 +35,7 @@ Lykompanion is a small FastAPI backend serving a vanilla HTML/CSS/JS frontend (n
 A typical turn looks like:
 
 1. You speak (hands-free live mic, or push-to-talk) or type.
-2. Audio is sent straight to an audio-capable LLM — there's no local speech-to-text step.
+2. Audio is sent straight to an audio-capable LLM — there's no local speech-to-text step. The model is asked to prefix its reply with a verbatim `<transcript>` of what you said; the backend peels it off and the chat log swaps the "🎤 (voice message)" placeholder for your actual words, so later turns keep full conversational context (only text history is re-sent — past audio never is) and the memory pass sees what you said, all without a dedicated transcription model.
 3. The model replies, optionally calling one or more tools along the way (check memory, look at your screen, search the web, etc.) before producing its final answer.
 4. The reply streams back and is narrated sentence-by-sentence via TTS as it arrives, so you don't wait for the full response before hearing the first words.
 5. After the exchange, a background pass silently extracts anything worth remembering (or forgetting) and updates long-term memory — independent of whether the main reply called a memory tool itself.
@@ -256,7 +256,7 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `POST /api/chat` | Non-streaming chat completion (tool loop included). |
 | `POST /api/chat/stream` | Streaming chat completion (SSE) — primary path used by the UI. |
 | `POST /api/chat/voice` | Send raw audio directly to an audio-capable model (no local STT). Non-streaming; returns full reply JSON. |
-| `POST /api/chat/voice/stream` | Streaming (SSE) voice chat — same as `/voice` but streams `delta`/`stop_listening`/`done` events; used by the UI so the voice-reply transcript appears live. |
+| `POST /api/chat/voice/stream` | Streaming (SSE) voice chat — same as `/voice` but streams `delta`/`transcript`/`stop_listening`/`done` events; used by the UI so the voice-reply transcript appears live. |
 | `GET /api/proxy/image` | Server-side image proxy (`?url=...`). Fetches external images with browser-like headers to bypass hotlink protection — all SearXNG image results are routed through this. |
 | `POST /api/chat/title` | Generate a short chat title from the first exchange. |
 | `GET/PUT /api/config` | Read/update all settings. |

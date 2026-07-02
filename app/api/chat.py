@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 
@@ -82,6 +83,78 @@ def _parse_history_form(history: str) -> list[dict]:
         raise HTTPException(status_code=400, detail=f"Invalid history payload: {exc}") from exc
 
 
+# Raw-audio voice turns are stored in chat history as a "🎤 (voice message)" placeholder, which
+# loses the user's side of every past voice exchange. Instead of paying for a dedicated STT model,
+# the audio-capable main model is asked to prefix its reply with a <transcript> block; it is peeled
+# off here, sent to the frontend (which rewrites the placeholder into the actual words), and fed to
+# the memory extraction pass.
+_TRANSCRIPT_OPEN = "<transcript>"
+_TRANSCRIPT_CLOSE = "</transcript>"
+_TRANSCRIPT_RE = re.compile(r"^\s*<transcript>(.*?)</transcript>\s*", re.DOTALL)
+# If the model opens a transcript block but hasn't closed it after this many streamed chars,
+# assume it's not going to and flush - keeps a non-compliant reply from being withheld forever.
+_TRANSCRIPT_BUFFER_CAP = 600
+
+
+def _voice_user_message(audio_b64: str) -> dict:
+    """The raw-audio user turn, with the transcript-prefix instruction attached to it (not the
+    system prompt, so text chats and transcription mode are unaffected)."""
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": load_prompt("voice_transcript")},
+            {"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}},
+        ],
+    }
+
+
+def _split_transcript(reply: str) -> tuple[str | None, str]:
+    """Splits a leading <transcript>...</transcript> block off a complete reply. Returns
+    (transcript-or-None, reply without the block)."""
+    match = _TRANSCRIPT_RE.match(reply)
+    if not match:
+        return None, reply
+    return match.group(1).strip() or None, reply[match.end():]
+
+
+async def _peel_transcript(inner: AsyncIterator[dict]) -> AsyncIterator[dict]:
+    """Passes the tool-loop event stream through unchanged, except a leading
+    <transcript>...</transcript> block in the delta text is removed and re-emitted as a single
+    {"type": "transcript", "text": ...} event. Deltas are buffered only while the text could
+    still turn out to be that block, so a compliant reply loses no streaming and a
+    non-compliant one is flushed as soon as the prefix stops matching."""
+    buffer = ""
+    buffering = True
+    async for event in inner:
+        if not buffering or event["type"] != "delta":
+            yield event
+            continue
+        buffer += event["text"]
+        stripped = buffer.lstrip()
+        if not stripped:
+            continue
+        if stripped.startswith(_TRANSCRIPT_OPEN):
+            close_idx = stripped.find(_TRANSCRIPT_CLOSE)
+            if close_idx != -1:
+                buffering = False
+                transcript = stripped[len(_TRANSCRIPT_OPEN):close_idx].strip()
+                if transcript:
+                    yield {"type": "transcript", "text": transcript}
+                remainder = stripped[close_idx + len(_TRANSCRIPT_CLOSE):].lstrip()
+                if remainder:
+                    yield {"type": "delta", "text": remainder}
+            elif len(stripped) > _TRANSCRIPT_BUFFER_CAP:
+                buffering = False
+                yield {"type": "delta", "text": buffer}
+        elif _TRANSCRIPT_OPEN.startswith(stripped[: len(_TRANSCRIPT_OPEN)]):
+            continue  # still a prefix of the open tag - keep buffering
+        else:
+            buffering = False
+            yield {"type": "delta", "text": buffer}
+    if buffering and buffer:
+        yield {"type": "delta", "text": buffer}
+
+
 def _screenshot_message() -> dict:
     """A user-role message carrying a fresh screenshot. Appended adjacent to the newest message
     (not before the whole history) so the model reads it as current context, not as something
@@ -98,8 +171,8 @@ def _screenshot_message() -> dict:
 
 def _retrieval_query(history: list[dict]) -> str:
     """Text the RAG-lite memory selection ranks against: the last few text messages of the
-    conversation plus the live game activity. Voice messages carry no text (raw audio), so this
-    can legitimately come back empty - retrieval then falls back to recency."""
+    conversation plus the live game activity. Voice turns whose transcript never arrived carry
+    only a placeholder, so this can come back empty - retrieval then falls back to recency."""
     parts = []
     for m in history[-6:]:
         content = m.get("content")
@@ -408,12 +481,7 @@ async def chat_voice(
             raise HTTPException(status_code=502, detail=f"Transcription request failed: {exc}") from exc
         messages.append({"role": "user", "content": transcript})
     else:
-        messages.append(
-            {
-                "role": "user",
-                "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
-            }
-        )
+        messages.append(_voice_user_message(audio_b64))
 
     model = None if settings.transcription_enabled else settings.openrouter_model
     try:
@@ -421,8 +489,10 @@ async def chat_voice(
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
 
-    # A transcript is only available in transcription mode - raw-audio voice turns have nothing
-    # meaningful to feed the memory extraction pass.
+    # Raw-audio turns get their transcript from the model's own <transcript> reply prefix.
+    if transcript is None:
+        transcript, reply = _split_transcript(reply)
+
     if transcript:
         _schedule_memory_extraction(transcript, reply)
 
@@ -460,23 +530,24 @@ async def chat_voice_stream(
             raise HTTPException(status_code=502, detail=f"Transcription request failed: {exc}") from exc
         messages.append({"role": "user", "content": transcript})
     else:
-        messages.append(
-            {
-                "role": "user",
-                "content": [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}],
-            }
-        )
+        messages.append(_voice_user_message(audio_b64))
 
     model = None if settings.transcription_enabled else settings.openrouter_model
 
     async def event_generator():
+        nonlocal transcript
         full_reply = ""
         stop_listening = False
         try:
-            async for event in _stream_chat_with_tools(messages, model=model, source="chat_voice_stream"):
+            async for event in _peel_transcript(_stream_chat_with_tools(messages, model=model, source="chat_voice_stream")):
                 if event["type"] == "delta":
                     full_reply += event["text"]
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
+                elif event["type"] == "transcript":
+                    # Only emitted on raw-audio turns; lets the frontend rewrite the
+                    # "🎤 (voice message)" placeholder while the reply is still streaming.
+                    transcript = event["text"]
+                    yield f"data: {json.dumps({'transcript': transcript})}\n\n"
                 elif event["type"] == "volume":
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
                 elif event["type"] == "stop_listening":
@@ -486,8 +557,8 @@ async def chat_voice_stream(
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
             return
 
-        # A transcript is only available in transcription mode - raw-audio voice turns have
-        # nothing meaningful to feed the memory extraction pass.
+        # Transcription mode transcribes up front; raw-audio turns get theirs from the model's
+        # <transcript> reply prefix - either way the extraction pass now has real user text.
         if transcript:
             _schedule_memory_extraction(transcript, full_reply)
 
