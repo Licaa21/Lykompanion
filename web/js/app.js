@@ -1336,17 +1336,9 @@ async function sendDirectVoice(wavBlob) {
         }
         if (payload.volume !== undefined) applyNarrationVolume(payload.volume);
         if (payload.stop_listening) { stopListening = true; agentStopListening(); }
-        if (payload.transcript && !payload.done) {
-          // Raw-audio mode: the model echoed the user's words back (peeled from its reply by
-          // the backend) - swap the 🎤 placeholder for the real text while the reply streams.
-          transcript = payload.transcript;
-          userContentDiv.hidden = false;
-          userContentDiv.innerHTML = renderMessageMarkup(transcript);
-          userMessage.content = transcript;
-        }
         if (payload.done) {
           applyNarrationVolume(payload.narration_volume);
-          transcript = payload.transcript || transcript;
+          transcript = payload.transcript || null;
         }
       }
     }

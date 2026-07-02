@@ -123,8 +123,15 @@ async def _peel_transcript(inner: AsyncIterator[dict]) -> AsyncIterator[dict]:
     non-compliant one is flushed as soon as the prefix stops matching."""
     buffer = ""
     buffering = True
+    strip_lead = False  # eat whitespace between the close tag and the first reply text
     async for event in inner:
         if not buffering or event["type"] != "delta":
+            if strip_lead and event["type"] == "delta":
+                text = event["text"].lstrip()
+                if not text:
+                    continue
+                strip_lead = False
+                event = {"type": "delta", "text": text}
             yield event
             continue
         buffer += event["text"]
@@ -141,6 +148,8 @@ async def _peel_transcript(inner: AsyncIterator[dict]) -> AsyncIterator[dict]:
                 remainder = stripped[close_idx + len(_TRANSCRIPT_CLOSE):].lstrip()
                 if remainder:
                     yield {"type": "delta", "text": remainder}
+                else:
+                    strip_lead = True
             elif len(stripped) > _TRANSCRIPT_BUFFER_CAP:
                 buffering = False
                 yield {"type": "delta", "text": buffer}
@@ -549,10 +558,10 @@ async def chat_voice_stream(
                     full_reply += event["text"]
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "transcript":
-                    # Only emitted on raw-audio turns; lets the frontend rewrite the
-                    # "🎤 (voice message)" placeholder while the reply is still streaming.
+                    # Raw-audio turns: peeled from the model's reply prefix. Delivered only in
+                    # the final done payload - no mid-stream event - so the UI updates the
+                    # 🎤 placeholder once, after the reply is finished.
                     transcript = event["text"]
-                    yield f"data: {json.dumps({'transcript': transcript})}\n\n"
                 elif event["type"] == "volume":
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
                 elif event["type"] == "stop_listening":
