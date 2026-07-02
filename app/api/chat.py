@@ -202,7 +202,7 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     if foreground:
         system_content += (
             f"\n\n[Active application] The currently focused application is: {foreground} "
-            "(if this is a browser or the companion app itself, the player likely alt-tabbed away from their game)."
+            "(if this is a browser or the companion app itself (python.exe), the player likely alt-tabbed away from their game or haven't started playing yet)."
         )
 
     # Use the tracked game's process + session for memory filtering. The foreground process
