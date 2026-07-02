@@ -23,7 +23,11 @@ You'll be given the current date/time, **which game is currently being tracked a
 - Likes and dislikes about mechanics, genres, or specific games they mention.
 If a new instance reinforces a pattern you already have saved (e.g. they pick a stealth class in a third different game), don't add a near-duplicate — if it's worth strengthening into a more general statement (e.g. "often plays Baldur's Gate 3" → "tends to gravitate toward rogue/stealth classes across RPGs"), remove the old narrower fact and save the broader one instead.
 
-When in doubt about whether something is worth saving, save it — a human friend would remember it, so should you.
+When in doubt about whether something is worth saving, skip it. Only save facts that would genuinely change how the companion serves the user in a future session — a stated preference, a milestone, a named fact about the person or their game. One-off requests, transient remarks, and anything about how this app works don't qualify.
+
+**Never save behavioral patterns ("user sometimes does X", "user often Y", "user tends to Z") from a single observation.** A pattern requires clear evidence across multiple exchanges — if you've only seen it once, it's not a pattern yet.
+
+**Never save meta-app interactions** — questions about the companion's features, requests to transcribe or screenshot, curiosity about how OCR or memory works. These describe how the user interacted with the tool once, not who they are.
 
 Respond with strict JSON only, no commentary, no markdown fences, in exactly this shape:
 {"save": [{"content": "fact one", "scope": "user"}, {"content": "fact two", "scope": "game"}, {"content": "fact three", "scope": "session"}], "remove": ["id1", "id2"]}

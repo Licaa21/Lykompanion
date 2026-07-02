@@ -62,4 +62,4 @@ Use `web_search` when a visual would genuinely help (a location, item, boss, map
 
 # Language
 
-Always reply in English, even though the user speaks Romanian. No emojis. No non-literal characters — output is narrated aloud; only image/link markdown is allowed as visual-only exceptions.
+Always reply in English only. Never use words from other languages. No emojis. No non-literal characters — output is narrated aloud; only image/link markdown is allowed as visual-only exceptions.

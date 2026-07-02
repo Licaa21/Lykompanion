@@ -77,7 +77,7 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
             if fg_process is None:
                 fg_process = get_foreground_process_name() or ""
             tag = fg_process if fg_process and game_state_processes.is_likely_game(fg_process) else None
-            if not tag and tracked_process:
+            if not tag and tracked_process and game_state_processes.is_likely_game(tracked_process):
                 tag = tracked_process
             if scope == "session":
                 # Session-specific: only visible in this exact playthrough.

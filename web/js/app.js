@@ -334,7 +334,11 @@ function createNewChat() {
   activeChatId = chat.id;
   saveChatsToStorage();
   renderChatList();
-  renderChatLog();
+  // Don't call renderChatLog here — the caller (sendMessage / sendDirectVoice)
+  // immediately appends the first message, so renderChatLog would see an empty
+  // chat and wrongly re-enter the empty/centered state mid-animation.
+  chatPanel.classList.remove("empty");
+  chatLog.innerHTML = "";
 }
 
 function switchChat(id) {
@@ -357,7 +361,9 @@ function deleteChat(id) {
     if (chats.length > 0) {
       switchChat(chats[0].id);
     } else {
-      createNewChat();
+      activeChatId = null;
+      renderChatList();
+      renderChatLog();
     }
   } else {
     renderChatList();
@@ -365,7 +371,7 @@ function deleteChat(id) {
 }
 
 function addMessageToChat(chat, role, content, audioId) {
-  chat.messages.push({ role, content, audioId: audioId || undefined });
+  chat.messages.push({ role, content, audioId: audioId || undefined, ts: new Date().toISOString() });
   if (chat.title === "New Chat" && role === "user") {
     chat.title = content.slice(0, 40) || "New Chat";
     renderChatList();
@@ -412,9 +418,30 @@ async function maybeGenerateTitle(chat, userText, assistantText) {
   }
 }
 
+let chatSearchQuery = "";
+
 function renderChatList() {
   chatListEl.innerHTML = "";
-  for (const chat of chats) {
+  const query = chatSearchQuery.toLowerCase();
+  const visible = query ? chats.filter((c) => c.title.toLowerCase().includes(query)) : chats;
+
+  if (chats.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-list-empty";
+    empty.textContent = "Your conversations will appear here";
+    chatListEl.appendChild(empty);
+    return;
+  }
+
+  if (visible.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-list-empty";
+    empty.textContent = "No chats match your search";
+    chatListEl.appendChild(empty);
+    return;
+  }
+
+  for (const chat of visible) {
     const item = document.createElement("div");
     item.className = "chat-list-item" + (chat.id === activeChatId ? " active" : "");
 
@@ -438,8 +465,14 @@ function renderChatList() {
   }
 }
 
-// Welcome screen for a brand-new/empty chat - the log used to be a blank void with no hint of
-// what the companion can do or how to talk to it. The suggestion chips send a real message.
+document.getElementById("chat-search").addEventListener("input", (e) => {
+  chatSearchQuery = e.target.value;
+  renderChatList();
+});
+
+const chatPanel = document.querySelector(".chat-panel");
+
+// Empty state with suggestion chips — shown when there's no active chat or no messages yet.
 const EMPTY_STATE_SUGGESTIONS = [
   "What can you do?",
   "Recommend me a game for tonight",
@@ -457,12 +490,12 @@ function renderEmptyState() {
   wrap.appendChild(logo);
 
   const heading = document.createElement("h1");
-  heading.textContent = "What are we playing today?";
+  heading.textContent = `What's up, ${userDisplayName}?`;
   wrap.appendChild(heading);
 
   const sub = document.createElement("p");
   sub.textContent =
-    "Type below, or talk to me — the mic button is push-to-talk, and the headset button keeps me listening hands-free while you game.";
+    "Ask about a build, a boss, or just start talking.";
   wrap.appendChild(sub);
 
   const chips = document.createElement("div");
@@ -483,17 +516,52 @@ function renderEmptyState() {
 function renderChatLog() {
   chatLog.innerHTML = "";
   const chat = getActiveChat();
-  if (!chat) return;
-  if (chat.messages.length === 0) {
+  if (!chat || chat.messages.length === 0) {
+    chatPanel.classList.add("empty");
     renderEmptyState();
     return;
   }
+  chatPanel.classList.remove("empty");
   for (const message of chat.messages) {
-    appendMessage(message.role, message.content, message.audioId);
+    appendMessage(message.role, message.content, message.audioId, false, null, message.ts);
   }
 }
 
-newChatBtn.addEventListener("click", createNewChat);
+// Exit the empty/centered state: FLIP-animate the composer from its current
+// centered position down to its normal bottom position, then clear the class.
+function exitEmptyState() {
+  if (!chatPanel.classList.contains("empty")) return;
+  const composer = document.querySelector(".composer");
+  const first = composer.getBoundingClientRect();
+  chatPanel.classList.remove("empty");
+  const last = composer.getBoundingClientRect();
+  const dy = first.top - last.top;
+  if (Math.abs(dy) < 2) return;
+  composer.style.transition = "none";
+  composer.style.transform = `translateY(${dy}px)`;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      composer.style.transition = "transform 450ms cubic-bezier(0.16, 1, 0.3, 1)";
+      composer.style.transform = "";
+    });
+  });
+  composer.addEventListener("transitionend", () => {
+    composer.style.transition = "";
+    composer.style.transform = "";
+  }, { once: true });
+}
+
+// Trigger the animation as soon as the user starts typing in the empty state.
+chatInput.addEventListener("input", () => {
+  exitEmptyState();
+});
+
+newChatBtn.addEventListener("click", () => {
+  activeChatId = null;
+  renderChatList();
+  renderChatLog();
+  chatInput.focus();
+});
 
 // --- Sentence-pipelined TTS queue ---
 // Rather than waiting for the full LLM reply before synthesizing speech, each
@@ -679,7 +747,7 @@ function renderMessageMarkup(text) {
   return html;
 }
 
-function appendMessage(role, content, audioId, isNew = false, audioBlob = null) {
+function appendMessage(role, content, audioId, isNew = false, audioBlob = null, timestamp = null) {
   chatLog.querySelector(".chat-empty-state")?.remove();
   const el = document.createElement("div");
   el.className = `message ${role}`;
@@ -877,6 +945,19 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null) 
       }
     });
   }
+  // ── Timestamp ─────────────────────────────────────────────
+  const tsEl = document.createElement("div");
+  tsEl.className = "msg-timestamp";
+  const tsDate = timestamp ? new Date(timestamp) : (isNew ? new Date() : null);
+  if (tsDate) {
+    const now = new Date();
+    const sameDay = tsDate.toDateString() === now.toDateString();
+    tsEl.textContent = sameDay
+      ? tsDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : tsDate.toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + tsDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  el.appendChild(tsEl);
+
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
   return contentDiv;
@@ -908,8 +989,9 @@ function setStreaming(streaming) {
 }
 
 async function sendMessage(text) {
+  exitEmptyState();
+  if (!getActiveChat()) createNewChat();
   const chat = getActiveChat();
-  if (!chat) return;
 
   stopNarration();
   appendMessage("user", text, null, true);
@@ -1074,8 +1156,9 @@ async function blobToWavBlob(blob) {
 }
 
 async function sendDirectVoice(wavBlob) {
+  exitEmptyState();
+  if (!getActiveChat()) createNewChat();
   const chat = getActiveChat();
-  if (!chat) return;
 
   // In transcription mode the recording is thrown away after the LLM sees only the transcript
   // text, so there's no audio worth persisting/playing back - render as a plain text bubble.
@@ -3901,7 +3984,9 @@ async function init() {
   await refreshAvatarStatus();
   await loadChatsFromStorage();
   if (chats.length === 0) {
-    createNewChat();
+    activeChatId = null;
+    renderChatList();
+    renderChatLog();
   } else {
     switchChat(chats[0].id);
   }

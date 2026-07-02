@@ -152,7 +152,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   align-items: center;
   padding: 20px 0 16px;
   flex-shrink: 0;
-  position: relative;
 }
 
 /* Glow ring behind logo */
@@ -174,7 +173,117 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   filter: drop-shadow(0 0 12px rgba(91,95,199,0.5));
 }
 
-/* ── New Chat button — gradient + shimmer ── */
+/* ── New Chat "+" button — sits inline in the search bar ── */
+.new-chat-icon-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--r2);
+  background: var(--hero-grad);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px var(--accent-glow);
+  transition: box-shadow var(--ease), transform var(--ease);
+}
+.new-chat-icon-btn:hover {
+  box-shadow: 0 3px 16px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.new-chat-icon-btn:active { transform: translateY(0); }
+
+/* ── Sidebar search + new-chat row ── */
+.sidebar-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 10px 4px;
+  padding: 5px 6px 5px 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.sidebar-search-wrap > svg { flex-shrink: 0; opacity: 0.6; }
+#chat-search {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: var(--t1);
+  min-width: 0;
+}
+#chat-search::placeholder { color: var(--text-muted); }
+
+/* ── Chat list empty state ── */
+.chat-list-empty {
+  padding: 24px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.55;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ── Welcome screen (shown in chat area when no messages) ── */
+.chat-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1;
+  padding: 24px 24px 28px;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+/* In the centered/empty state, the welcome stacks above the composer */
+.chat-panel.empty .chat-welcome {
+  flex: none;
+  justify-content: center;
+  padding: 0 24px 16px;
+}
+.chat-welcome-logo {
+  width: 90px;
+  height: 90px;
+  object-fit: contain;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 24px var(--accent-glow));
+}
+.chat-welcome-heading {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--t1);
+  margin: 0;
+}
+.chat-welcome-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  opacity: 0.7;
+}
+
+/* ── Empty/centered-composer state ── */
+/* When no chat is active, center the chat-log + composer as a group */
+.chat-panel.empty {
+  justify-content: center;
+}
+.chat-panel.empty .chat-log {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+/* Reset auto-margin so the empty state fills the chat-log width naturally */
+.chat-panel.empty .chat-empty-state {
+  margin: 0 auto;
+}
+
+/* ── (legacy class kept for compatibility — no longer rendered) ── */
 .new-chat-btn {
   position: relative;
   display: flex;
@@ -477,6 +586,16 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 
 .msg-content a { color: var(--accent-2); text-decoration: underline; text-underline-offset: 2px; }
 .message.user .msg-content a { color: #fff; }
+
+.msg-timestamp {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.55;
+  margin-top: 3px;
+  padding: 0 2px;
+  min-height: 14px;
+}
+.message.user .msg-timestamp { text-align: right; }
 .chat-inline-image {
   display: block;
   max-width: 100%;
