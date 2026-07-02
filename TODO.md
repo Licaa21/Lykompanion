@@ -1,12 +1,5 @@
 # TODO
 
-## Needs verification
-
-- [ ] **Chirp voices error on startup; "Refresh Model Lists" fixes it.** Likely cause was fixed
-  (`/api/models/tts` 500'd whenever the OpenRouter catalog fetch failed transiently, emptying
-  all voice dropdowns — now degrades gracefully). If it still reproduces, capture the server
-  log line on startup and dig into `chirp3.list_voices` auth timing.
-
 ## Medium priority
 
 - [ ] **More test coverage** — the core stores are covered (31 tests); still untested:
@@ -21,7 +14,6 @@
   game-state panel, quick-setup, toasts.
 - [ ] **Accessibility pass, part 2** — aria-labels are done; still open: `--t3` contrast check,
   screen-reader usability of the model `<select>`s, focus trapping in modals.
-- [ ] **i18n** — all UI strings are hard-coded English.
 
 ## Ideas / nice-to-have
 
@@ -35,6 +27,6 @@
   runs on a secondary display it may OCR the wrong screen. Follow the foreground window's
   monitor instead.
 - [ ] **Memory growth control** — all matching memories are injected into every prompt; add a cap,
-  relevance ranking, or periodic consolidation pass.
+  relevance ranking, or periodic consolidation pass. Maybe think of using QDrant DB here with RAG retrieval?
 - [ ] **Export/import** — one-click backup of `data/` (chats, memories, settings) for machine moves.
 - [ ] **Persist debug log opt-in across restarts with size cap on disk** for post-mortem debugging.
