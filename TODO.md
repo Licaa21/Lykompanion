@@ -35,3 +35,8 @@
   relevance ranking, or periodic consolidation pass. Maybe think of using QDrant DB here with RAG retrieval?
 - [ ] **Export/import** — one-click backup of `data/` (chats, memories, settings) for machine moves.
 - [ ] **Persist debug log opt-in across restarts with size cap on disk** for post-mortem debugging.
+- [ ] **More Debug** - Expand the current debug view to also show what the LLM did, it's responses what tools it called, etc. We can show it side by side, with the full prompt on the left, and the LLM outputs/actions on the right.
+
+## Random questions
+
+- I think we're sending the main LLM all the previous voice messages too on each prompt, based on the context window setting. Aren't we bombarding the LLM with voice recording all the time, thus increasing costs significantly? Can we ask the LLM, that besides it's normal job, it should also feed us the exact phrase that the user said? We collect it and we update the chat message from recording -> Actual text. With no transcribe model needed at all. We also end up saving costs since we're only sending one voice input each prompt instead of 20, and we don't lose any context.

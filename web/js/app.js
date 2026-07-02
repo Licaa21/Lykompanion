@@ -59,6 +59,9 @@ const gameStateSessionList = document.getElementById("game-state-session-list");
 const settingsModal = document.getElementById("settings-modal");
 const personalDataModal = document.getElementById("personal-data-modal");
 const diagnosticsModal = document.getElementById("diagnostics-modal");
+const debugDetailModal = document.getElementById("debug-detail-modal");
+const debugDetailTitleEl = document.getElementById("debug-detail-title");
+const debugDetailBodyEl = document.getElementById("debug-detail-body");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
@@ -1823,7 +1826,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, personalDataModal, diagnosticsModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -3853,6 +3856,47 @@ function formatDebugMessage(message) {
   return block;
 }
 
+function openDebugDetail(entry) {
+  debugDetailTitleEl.textContent = `${entry.source} · ${entry.model}`;
+  debugDetailBodyEl.innerHTML = "";
+
+  const time = new Date(entry.timestamp).toLocaleString();
+  const headerBlock = document.createElement("div");
+  headerBlock.className = "debug-message-block";
+  headerBlock.innerHTML = `
+    <div class="debug-message-role">metadata</div>
+    <div class="debug-message-content">
+      ${time}\n${entry.prompt_tokens}+${entry.completion_tokens} tok · $${entry.cost_usd.toFixed(4)} · ${entry.duration_ms ? Math.round(entry.duration_ms) + "ms" : "-"}
+    </div>
+  `;
+  debugDetailBodyEl.appendChild(headerBlock);
+
+  for (const message of entry.messages) {
+    debugDetailBodyEl.appendChild(formatDebugMessage(message));
+  }
+
+  if (entry.tools && entry.tools.length > 0) {
+    const toolsBlock = document.createElement("div");
+    toolsBlock.className = "debug-message-block";
+    toolsBlock.innerHTML = `<div class="debug-message-role">tools available</div><div class="debug-message-content">${entry.tools.join(", ")}</div>`;
+    debugDetailBodyEl.appendChild(toolsBlock);
+  }
+
+  if (entry.reply || entry.tool_calls) {
+    const replyBlock = document.createElement("div");
+    replyBlock.className = "debug-message-block";
+    const toolCallsText = entry.tool_calls
+      ? entry.tool_calls.map((tc) => `→ ${tc.name}(${tc.arguments})`).join("\n")
+      : "";
+    replyBlock.innerHTML = `<div class="debug-message-role">result</div><div class="debug-message-content"></div>`;
+    replyBlock.querySelector(".debug-message-content").textContent =
+      [entry.reply, toolCallsText].filter(Boolean).join("\n") || "(empty)";
+    debugDetailBodyEl.appendChild(replyBlock);
+  }
+
+  openModal(debugDetailModal);
+}
+
 function renderDebugRequests(entries) {
   debugRequestsListEl.innerHTML = "";
 
@@ -3878,44 +3922,10 @@ function renderDebugRequests(entries) {
       <span>▾</span>
     `;
 
-    const detail = document.createElement("div");
-    detail.className = "debug-request-detail";
-    detail.hidden = true;
-
-    summary.addEventListener("click", () => {
-      detail.hidden = !detail.hidden;
-    });
+    summary.addEventListener("click", () => openDebugDetail(entry));
 
     card.appendChild(summary);
-    card.appendChild(detail);
     debugRequestsListEl.appendChild(card);
-
-    // Lazily build the (potentially large) detail body only when first expanded.
-    let built = false;
-    summary.addEventListener("click", () => {
-      if (built || detail.hidden) return;
-      built = true;
-      for (const message of entry.messages) {
-        detail.appendChild(formatDebugMessage(message));
-      }
-      if (entry.tools && entry.tools.length > 0) {
-        const toolsBlock = document.createElement("div");
-        toolsBlock.className = "debug-message-block";
-        toolsBlock.innerHTML = `<div class="debug-message-role">tools available</div><div class="debug-message-content">${entry.tools.join(", ")}</div>`;
-        detail.appendChild(toolsBlock);
-      }
-      if (entry.reply || entry.tool_calls) {
-        const replyBlock = document.createElement("div");
-        replyBlock.className = "debug-message-block";
-        const toolCallsText = entry.tool_calls
-          ? entry.tool_calls.map((tc) => `→ ${tc.name}(${tc.arguments})`).join("\n")
-          : "";
-        replyBlock.innerHTML = `<div class="debug-message-role">result</div><div class="debug-message-content"></div>`;
-        replyBlock.querySelector(".debug-message-content").textContent =
-          [entry.reply, toolCallsText].filter(Boolean).join("\n") || "(empty)";
-        detail.appendChild(replyBlock);
-      }
-    });
   }
 }
 
