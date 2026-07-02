@@ -171,6 +171,10 @@
               <span class="cfg-label">Context Window: <span id="cfg-context-window-value">20</span> messages (0 = no limit) <button type="button" class="cfg-help" data-tip="How many of the most recent chat messages are sent to the LLM as context. Lower values cut cost; 0 sends the entire conversation.">?</button></span>
               <input id="cfg-context-window" type="range" min="0" max="100" step="2" value="20" />
             </label>
+            <label>
+              <span class="cfg-label">Game Memory Limit: <span id="cfg-memory-rag-limit-value">30</span> (0 = no limit) <button type="button" class="cfg-help" data-tip="Once the active game/playthrough has more saved memories than this, only the most relevant and most recent ones are sent to the LLM instead of all of them. General (non-game) memories are always sent in full. 0 disables the limit.">?</button></span>
+              <input id="cfg-memory-rag-limit" type="range" min="0" max="100" step="5" value="30" />
+            </label>
             <details class="cfg-advanced">
               <summary>Advanced</summary>
               <label>
@@ -544,7 +548,19 @@
               <button type="button" class="cfg-help" data-tip="Lets the Game-State Model maintain per-game notes on how to decode that game's HUD/UI (learned from the screenshots it sees), fed back into its future passes. See the Training Data tab.">?</button>
             </label>
 
+            <label class="checkbox">
+              <input id="cfg-proactive-enabled" type="checkbox" />
+              Proactive companion — may speak up unprompted with tips or comments while you play
+              <button type="button" class="cfg-help" data-tip="Lets the Game-State Model send a message into your chat on its own (read aloud if narration is on) when it spots something genuinely worth mentioning — a relevant tip, a missed detail, a milestone. Requires background OCR awareness.">?</button>
+            </label>
+
             <div id="game-state-dependent">
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Proactive Message Cooldown: <span id="cfg-proactive-interval-value">15</span> min <button type="button" class="cfg-help" data-tip="Minimum time between two unprompted messages, no matter how chatty the model wants to be.">?</button></span>
+                  <input id="cfg-proactive-interval" type="range" min="1" max="120" step="1" value="15" />
+                </label>
+              </div>
               <div class="cfg-row">
                 <label>
                   <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>

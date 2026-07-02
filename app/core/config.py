@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # Dedicated model for background memory extraction. Falls back to openrouter_model if empty.
     memory_extraction_model: str = ""
 
+    # RAG-lite memory injection for the chat prompt: once the active game/playthrough has more
+    # than this many game/session-scoped memories, only the most relevant/recent ones (up to
+    # this cap) are injected instead of all of them. User-scoped memories are always injected
+    # in full. 0 = disabled (inject everything, the old behavior).
+    memory_rag_limit: int = 30
+
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
@@ -106,6 +112,11 @@ class Settings(BaseSettings):
     # this game's HUD/UI from OCR text), fed back into every future extraction pass for that
     # process. No separate trainer model - the extraction model sees the screenshots itself.
     game_state_training_enabled: bool = False
+    # Proactive companion: lets the game-state extraction pass speak up unprompted (a tip, a
+    # comment on something it saw on screen) as a normal chat message. Off by default; the
+    # interval is a hard floor between two proactive messages regardless of what the model wants.
+    proactive_messages_enabled: bool = False
+    proactive_min_interval_minutes: int = 15
 
     google_tts_api_key: str = ""
     google_tts_voice: str = "en-US-Chirp3-HD-Aoede"

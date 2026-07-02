@@ -11,9 +11,13 @@ from app.core import game_state_trackers
 from app.core import game_state_training_data
 from app.core import memory as memory_store
 from app.core import observations as observations_store
+from app.core import reminders as reminders_store
 from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
+from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
+from app.services.llm.observation_confirmation import maybe_schedule_confirmation
+from app.services.llm.web_search_tool import execute_web_search
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
@@ -49,6 +53,25 @@ _last_frame_b64: str | None = None
 # many consecutive ticks in a row, since that's what actually indicates a persistent problem.
 _EMPTY_OCR_WARN_THRESHOLD = 10
 _empty_ocr_streak = 0
+
+# When the last proactive message was delivered (time.monotonic), enforcing the user-configured
+# minimum interval between two of them no matter how chatty the model wants to be.
+_last_proactive_at: float | None = None
+
+
+def _proactive_allowed() -> bool:
+    if not settings.proactive_messages_enabled:
+        return False
+    if _last_proactive_at is None:
+        return True
+    return time.monotonic() - _last_proactive_at >= settings.proactive_min_interval_minutes * 60
+
+
+# Appended to the extraction system prompt only when a proactive message is actually allowed
+# right now - offering the field while it would be dropped just trains the model to waste it.
+_PROACTIVE_PROMPT_ADDON = """
+Additionally, you MAY include a **"proactive_message"** field: a short, natural, spoken-style message from the companion to the player, delivered unprompted into their chat (and read aloud). Use it ONLY when you have something genuinely worth interrupting the player for - a relevant tip for exactly the situation on screen, a warning about something they seem to have missed, or a brief comment on a real milestone. It must feel like a friend watching over their shoulder speaking up at the right moment, not a narrator or a coach spamming advice. The bar is high: most windows deserve none - set it to null unless the moment truly calls for it. Never use it to describe what's on screen back to the player (they can see it), never repeat something you (or the chat) already told them, and keep it to one or two conversational sentences.
+"""
 
 
 def _reset_window() -> None:
@@ -87,10 +110,13 @@ def _format_tracker_fields(trackers: list[dict], previous_values: dict[str, str]
     return "Fields to track for this process:\n" + "\n".join(lines) + f"\n\nPrevious values: {previous_text}"
 
 
-async def _call_extraction(user_content, model: str | None, provider: str) -> dict:
+async def _call_extraction(user_content, model: str | None, provider: str, allow_proactive: bool = False) -> dict:
+    system = load_prompt("game_state_extraction")
+    if allow_proactive:
+        system += "\n" + _PROACTIVE_PROMPT_ADDON.strip()
     raw = await chat_completion(
         [
-            {"role": "system", "content": load_prompt("game_state_extraction")},
+            {"role": "system", "content": system},
             {"role": "user", "content": user_content},
         ],
         model=model,
@@ -127,6 +153,14 @@ async def extract_and_apply_game_state(
     trackers = game_state_trackers.get_trackers(process)
     known_facts = memory_store.format_memories_for_prompt(active_process=process, active_session_id=active_session_id) or "Known facts about the user: none yet."
     training_data = game_state_training_data.format_training_data_for_prompt(process)
+    if not training_data and settings.game_state_training_enabled:
+        # A blank document reads as "don't build one" to most models - be explicit that this
+        # game has no notes yet and the pass is expected to start the document itself.
+        training_data = (
+            "There is no training data document for this game yet. You are expected to START one "
+            "via \"training_data_update\" as soon as this window teaches you anything about how to "
+            "decode this game's UI/HUD/terms - don't wait for a complete picture."
+        )
     text_content = (
         f"Foreground process: {process}\n\n{known_facts}\n\n"
         + (f"{training_data}\n\n" if training_data else "")
@@ -153,8 +187,9 @@ async def extract_and_apply_game_state(
 
     model = settings.game_state_model or None
     provider = settings.game_state_provider or settings.llm_provider
+    allow_proactive = _proactive_allowed()
     try:
-        data = await _call_extraction(content, model, provider)
+        data = await _call_extraction(content, model, provider, allow_proactive)
     except Exception:
         if len(content) == 1:
             logger.exception("Game-state extraction failed")
@@ -168,10 +203,32 @@ async def extract_and_apply_game_state(
             exc_info=True,
         )
         try:
-            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider)
+            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider, allow_proactive)
         except Exception:
             logger.exception("Game-state extraction failed")
             return
+
+    # One research round: the model flagged something on screen it can't decode (an unknown
+    # game-specific term/stat/UI element) - run the search and re-call with the results so it can
+    # interpret correctly and bank what it learned into the training data.
+    search_query = data.get("web_search_query")
+    if isinstance(search_query, str) and search_query.strip():
+        search_query = search_query.strip()
+        logger.info("Game-state poll: extraction pass requested web search %r for process=%r", search_query, process)
+        try:
+            results = await execute_web_search({"query": search_query})
+            enriched = content + [{
+                "type": "text",
+                "text": (
+                    f"Web search results for your query \"{search_query}\" (requested by your own "
+                    f"previous pass - use them to interpret the screen and update the training "
+                    f"data; do not request another search):\n{results}"
+                ),
+            }]
+            data = await _call_extraction(enriched, model, provider, allow_proactive)
+        except Exception:
+            # Keep the first pass's output - a failed search must not cost us the whole window.
+            logger.exception("Game-state extraction web-search round failed for process=%r", process)
 
     new_values = {}
     for tracker in trackers:
@@ -202,6 +259,20 @@ async def extract_and_apply_game_state(
         added = observations_store.add_observations(process, active_session_id, observed)
         if added:
             logger.info("Game-state poll: recorded %d observation(s) for process=%r", len(added), process)
+            # Enough pending observations -> background confirmation pass promotes the ones that
+            # hold up into scoped memories, so silent play sessions still build memory.
+            maybe_schedule_confirmation(process, active_session_id)
+
+    # Proactive companion message: delivered through the reminders pending queue, which the
+    # frontend already polls and injects into the active chat (and narrates) like a normal
+    # unprompted assistant message. Re-check the gate at delivery time - a slow LLM call could
+    # otherwise let two overlapping passes both deliver.
+    proactive = data.get("proactive_message")
+    if allow_proactive and isinstance(proactive, str) and proactive.strip() and _proactive_allowed():
+        global _last_proactive_at
+        _last_proactive_at = time.monotonic()
+        reminders_store.add_pending(proactive.strip())
+        logger.info("Game-state poll: proactive message queued for process=%r", process)
 
     divergence = data.get("divergence_warning")
     if isinstance(divergence, str) and divergence.strip():
@@ -264,6 +335,9 @@ async def _capture_tick() -> None:
         # right away if any exist, empty otherwise) instead of waiting a full poll window for the
         # first LLM call to populate anything.
         game_state.start_tracking(process)
+        # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
+        # seed game-specific trackers + starting training data (no-op if already done/customized).
+        schedule_bootstrap(process)
 
     if _window_started_at is None:
         _window_started_at = time.time()

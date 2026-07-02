@@ -96,7 +96,22 @@ def _screenshot_message() -> dict:
     }
 
 
-def _build_base_messages() -> list[dict]:
+def _retrieval_query(history: list[dict]) -> str:
+    """Text the RAG-lite memory selection ranks against: the last few text messages of the
+    conversation plus the live game activity. Voice messages carry no text (raw audio), so this
+    can legitimately come back empty - retrieval then falls back to recency."""
+    parts = []
+    for m in history[-6:]:
+        content = m.get("content")
+        if isinstance(content, str) and content.strip():
+            parts.append(content)
+    gs = game_state.get_game_state()
+    if gs:
+        parts.extend(str(v) for v in gs["values"].values() if v)
+    return "\n".join(parts)
+
+
+def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     system_content = load_prompt("system_companion")
 
     custom_instructions = load_custom_instructions().strip()
@@ -116,7 +131,12 @@ def _build_base_messages() -> list[dict]:
     gs = game_state.get_game_state()
     tracked_process = gs["process"] if gs else None
     tracked_session = gs["session_id"] if gs else None
-    memories = memory.format_memories_for_prompt(tracked_process, tracked_session)
+    memories = memory.format_memories_for_prompt(
+        tracked_process,
+        tracked_session,
+        retrieval_query=_retrieval_query(history or []),
+        game_memory_limit=settings.memory_rag_limit,
+    )
     if memories:
         system_content += "\n\n" + memories
 
@@ -309,8 +329,9 @@ async def _stream_chat_with_tools(
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    messages = _build_base_messages()
-    messages.extend(_limit_history([m.model_dump() for m in request.messages]))
+    history = _limit_history([m.model_dump() for m in request.messages])
+    messages = _build_base_messages(history)
+    messages.extend(history)
     if request.include_screenshot:
         # Right before the newest user message: screenshot as context, then the question.
         messages.insert(max(1, len(messages) - 1), _screenshot_message())
@@ -332,8 +353,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @router.post("/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
-    messages = _build_base_messages()
-    messages.extend(_limit_history([m.model_dump() for m in request.messages]))
+    history = _limit_history([m.model_dump() for m in request.messages])
+    messages = _build_base_messages(history)
+    messages.extend(history)
     if request.include_screenshot:
         messages.insert(max(1, len(messages) - 1), _screenshot_message())
     last_user_message = request.messages[-1].content if request.messages else ""
@@ -367,8 +389,9 @@ async def chat_voice(
     """Sends voice audio to the LLM. In transcription mode, a dedicated audio-input model
     transcribes it first and the main model only ever sees text; otherwise the raw audio goes
     straight to the (audio-capable) main model, skipping local STT."""
-    messages = _build_base_messages()
-    messages.extend(_parse_history_form(history))
+    history_messages = _parse_history_form(history)
+    messages = _build_base_messages(history_messages)
+    messages.extend(history_messages)
     if include_screenshot:
         # Right before the voice message it accompanies: screenshot as context, then the question.
         messages.append(_screenshot_message())
@@ -419,8 +442,9 @@ async def chat_voice_stream(
 ) -> StreamingResponse:
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
     but emits SSE deltas so the reply types in live rather than appearing all at once."""
-    messages = _build_base_messages()
-    messages.extend(_parse_history_form(history))
+    history_messages = _parse_history_form(history)
+    messages = _build_base_messages(history_messages)
+    messages.extend(history_messages)
     if include_screenshot:
         messages.append(_screenshot_message())
 

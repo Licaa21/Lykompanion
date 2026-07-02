@@ -24,6 +24,9 @@ async def get_config() -> CompanionConfig:
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
         game_state_model=settings.game_state_model or None,
         game_state_training_enabled=settings.game_state_training_enabled,
+        proactive_messages_enabled=settings.proactive_messages_enabled,
+        proactive_min_interval_minutes=settings.proactive_min_interval_minutes,
+        memory_rag_limit=settings.memory_rag_limit,
         google_tts_api_key_set=bool(settings.google_tts_api_key),
         google_tts_voice=settings.google_tts_voice or None,
         transcription_enabled=settings.transcription_enabled,
@@ -137,6 +140,14 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     settings.game_state_training_enabled = config.game_state_training_enabled
     env_updates["GAME_STATE_TRAINING_ENABLED"] = str(config.game_state_training_enabled)
+
+    settings.proactive_messages_enabled = config.proactive_messages_enabled
+    env_updates["PROACTIVE_MESSAGES_ENABLED"] = str(config.proactive_messages_enabled)
+    settings.proactive_min_interval_minutes = config.proactive_min_interval_minutes
+    env_updates["PROACTIVE_MIN_INTERVAL_MINUTES"] = str(config.proactive_min_interval_minutes)
+
+    settings.memory_rag_limit = config.memory_rag_limit
+    env_updates["MEMORY_RAG_LIMIT"] = str(config.memory_rag_limit)
 
     if config.google_tts_api_key is not None:
         settings.google_tts_api_key = config.google_tts_api_key

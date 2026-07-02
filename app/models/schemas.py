@@ -53,6 +53,9 @@ class CompanionConfig(BaseModel):
     game_state_capture_interval_seconds: int = 1
     game_state_model: str | None = None
     game_state_training_enabled: bool = False
+    proactive_messages_enabled: bool = False
+    proactive_min_interval_minutes: int = 15
+    memory_rag_limit: int = 30
     web_search_provider: Literal["openrouter", "searxng"] = "openrouter"
     searxng_base_url: str = "http://localhost:8080"
     tts_provider: Literal["kokoro", "openrouter", "chirp3"] = "kokoro"

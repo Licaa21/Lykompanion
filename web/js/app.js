@@ -2120,6 +2120,20 @@ gameStateIntervalInput.addEventListener("input", () => {
   gameStateIntervalValue.textContent = gameStateIntervalInput.value;
 });
 
+const memoryRagLimitInput = document.getElementById("cfg-memory-rag-limit");
+const memoryRagLimitValue = document.getElementById("cfg-memory-rag-limit-value");
+
+memoryRagLimitInput.addEventListener("input", () => {
+  memoryRagLimitValue.textContent = memoryRagLimitInput.value === "0" ? "all" : memoryRagLimitInput.value;
+});
+
+const proactiveIntervalInput = document.getElementById("cfg-proactive-interval");
+const proactiveIntervalValue = document.getElementById("cfg-proactive-interval-value");
+
+proactiveIntervalInput.addEventListener("input", () => {
+  proactiveIntervalValue.textContent = proactiveIntervalInput.value;
+});
+
 const gameStateCaptureIntervalInput = document.getElementById("cfg-game-state-capture-interval");
 const gameStateCaptureIntervalValue = document.getElementById("cfg-game-state-capture-interval-value");
 
@@ -2307,6 +2321,11 @@ function applyConfigToForm(cfg) {
   gameStateEnabledInput.checked = cfg.game_state_ocr_enabled;
   updateGameStateDependentVisibility();
   document.getElementById("cfg-game-state-training-enabled").checked = cfg.game_state_training_enabled;
+  document.getElementById("cfg-proactive-enabled").checked = cfg.proactive_messages_enabled;
+  document.getElementById("cfg-proactive-interval").value = cfg.proactive_min_interval_minutes ?? 15;
+  document.getElementById("cfg-proactive-interval-value").textContent = cfg.proactive_min_interval_minutes ?? 15;
+  document.getElementById("cfg-memory-rag-limit").value = cfg.memory_rag_limit ?? 30;
+  document.getElementById("cfg-memory-rag-limit-value").textContent = (cfg.memory_rag_limit ?? 30) === 0 ? "all" : cfg.memory_rag_limit ?? 30;
   document.getElementById("cfg-openrouter-base-url").value = cfg.openrouter_base_url || "";
   document.getElementById("cfg-kokoro-base-url").value = cfg.kokoro_base_url || "";
   gameStateIntervalInput.value = cfg.game_state_poll_interval_seconds;
@@ -2448,6 +2467,9 @@ async function saveSettings(saveButton) {
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
     game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
+    proactive_messages_enabled: document.getElementById("cfg-proactive-enabled").checked,
+    proactive_min_interval_minutes: parseInt(document.getElementById("cfg-proactive-interval").value, 10),
+    memory_rag_limit: parseInt(document.getElementById("cfg-memory-rag-limit").value, 10),
     wake_word_enabled: wakeWordEnabledInput.checked,
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
     wake_word_max_failures: wakeWordMaxFailures,

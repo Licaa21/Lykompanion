@@ -156,7 +156,17 @@ def remove_memory(memory_id: str) -> bool:
         return True
 
 
-def format_memories_for_prompt(active_process: str | None = None, active_session_id: str | None = None) -> str:
+def format_memories_for_prompt(
+    active_process: str | None = None,
+    active_session_id: str | None = None,
+    retrieval_query: str | None = None,
+    game_memory_limit: int = 0,
+) -> str:
+    """`retrieval_query` + `game_memory_limit` enable RAG-lite injection: user-scope memories
+    are always included in full, but once the matching game/session memories exceed the limit,
+    only the most relevant/recent `limit` of them make the prompt (see memory_retrieval.py).
+    Background extraction passes must NOT pass these - they need every fact to dedupe/remove
+    correctly."""
     memories = load_memories()
     if active_process is not None:
         def _include(m: dict) -> bool:
@@ -177,6 +187,15 @@ def format_memories_for_prompt(active_process: str | None = None, active_session
             # Session-specific — only include when the session matches
             return m_session == active_session_id
         memories = [m for m in memories if _include(m)]
+    if game_memory_limit > 0 and retrieval_query is not None:
+        from app.core.memory_retrieval import select_relevant
+
+        user_scoped = [m for m in memories if m["scope"] == "user"]
+        game_scoped = [m for m in memories if m["scope"] != "user"]
+        if len(game_scoped) > game_memory_limit:
+            selected = select_relevant(game_scoped, retrieval_query, game_memory_limit)
+            kept_ids = {m["id"] for m in selected} | {m["id"] for m in user_scoped}
+            memories = [m for m in memories if m["id"] in kept_ids]
     if not memories:
         return ""
     lines = []
