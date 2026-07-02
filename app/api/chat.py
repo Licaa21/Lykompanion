@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openai import APIError
+from pydantic import ValidationError
 
 from app.core import debug_log, game_state, memory, reminders as reminders_store
 from app.core.config import settings
@@ -70,6 +71,15 @@ def _format_reminders_for_prompt() -> str:
         else:
             lines.append(f"- [{e['id']}] one-time alarm at {e['fire_at']} while {e['process']} is played: \"{e['message']}\"")
     return "Active reminders/alarms the user has set (reference the id to remove/cancel one):\n" + "\n".join(lines)
+
+
+def _parse_history_form(history: str) -> list[dict]:
+    """Parses the voice endpoints' history form field, turning malformed input into a 400
+    instead of an unhandled 500."""
+    try:
+        return _limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)])
+    except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid history payload: {exc}") from exc
 
 
 def _screenshot_message() -> dict:
@@ -196,15 +206,17 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
     return execute_tool_call(name, arguments), None, None
 
 
-async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
-    parsed = []
-    for tool_call in tool_calls:
-        try:
-            arguments = json.loads(tool_call.function.arguments or "{}")
-        except json.JSONDecodeError:
-            arguments = {}
-        parsed.append((tool_call.id, tool_call.function.name, arguments))
+def _safe_json_args(raw: str | None) -> dict:
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
 
+
+async def _execute_parsed_tool_calls(messages: list[dict], parsed: list[tuple[str, str, dict]]) -> list[dict]:
+    """Executes (id, name, args) tool calls in parallel, appends their tool messages (and any
+    extra messages, e.g. screenshots) to the conversation, and returns collected side effects.
+    Shared by the streaming and non-streaming paths - keep them behaviorally identical."""
     results = await asyncio.gather(*[_execute_tool(name, args) for _, name, args in parsed])
 
     side_effects = []
@@ -215,6 +227,11 @@ async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
         if side_effect:
             side_effects.append(side_effect)
     return side_effects
+
+
+async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
+    parsed = [(tc.id, tc.function.name, _safe_json_args(tc.function.arguments)) for tc in tool_calls]
+    return await _execute_parsed_tool_calls(messages, parsed)
 
 
 async def _run_chat_with_tools(messages: list[dict], model: str | None = None, source: str = "chat") -> tuple[str, bool]:
@@ -277,23 +294,9 @@ async def _stream_chat_with_tools(
         # iteration can't see what it already said and restarts the reply from scratch, so the
         # user gets the same greeting stacked 3-4 times in one bubble.
         messages.append(_tool_calls_to_dict(tool_calls, round_text or None))
-        tc_list = list(tool_calls.values())
-        parsed = []
-        for tc in tc_list:
-            try:
-                arguments = json.loads(tc["arguments"] or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-            parsed.append((tc["id"], tc["name"], arguments))
-
-        results = await asyncio.gather(*[_execute_tool(name, args) for _, name, args in parsed])
-
-        for (tool_call_id, _, _), (result, extra_messages, side_effect) in zip(parsed, results):
-            messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": result})
-            if extra_messages:
-                messages.extend(extra_messages)
-            if side_effect:
-                yield side_effect
+        parsed = [(tc["id"], tc["name"], _safe_json_args(tc["arguments"])) for tc in tool_calls.values()]
+        for side_effect in await _execute_parsed_tool_calls(messages, parsed):
+            yield side_effect
 
     # Mirror the non-streaming fallback - without this, exhausting the tool budget ends the
     # stream silently and the user is left staring at an empty bubble.
@@ -361,7 +364,7 @@ async def chat_voice(
     transcribes it first and the main model only ever sees text; otherwise the raw audio goes
     straight to the (audio-capable) main model, skipping local STT."""
     messages = _build_base_messages()
-    messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
+    messages.extend(_parse_history_form(history))
     if include_screenshot:
         # Right before the voice message it accompanies: screenshot as context, then the question.
         messages.append(_screenshot_message())
@@ -413,7 +416,7 @@ async def chat_voice_stream(
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
     but emits SSE deltas so the reply types in live rather than appearing all at once."""
     messages = _build_base_messages()
-    messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
+    messages.extend(_parse_history_form(history))
     if include_screenshot:
         messages.append(_screenshot_message())
 

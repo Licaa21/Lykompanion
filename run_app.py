@@ -3,6 +3,7 @@ native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window t
 
 import json
 import os
+import secrets
 import socket
 import sys
 import time
@@ -22,6 +23,12 @@ os.environ.setdefault(
 PORT = 6692
 URL = f"http://localhost:{PORT}"
 ROOT = Path(__file__).resolve().parent
+
+# Per-launch API token: the server (same process) reads it from the environment and rejects
+# /api/* requests without it; the webview receives it via the initial URL. Keeps other local
+# processes from silently using the unauthenticated API (chats, settings, screenshots).
+API_TOKEN = secrets.token_urlsafe(32)
+os.environ["LYKO_API_TOKEN"] = API_TOKEN
 
 
 def _build_icon() -> str:
@@ -172,7 +179,7 @@ def main() -> None:
 
     win = webview.create_window(
         "Lykompanion",
-        URL,
+        f"{URL}/?token={API_TOKEN}",
         width=1280,
         height=820,
         min_size=(800, 600),

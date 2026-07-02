@@ -1,3 +1,33 @@
+// --- API auth token ---
+// The desktop launcher (run_app.py) generates a per-launch token, hands it over via the
+// initial URL, and the server rejects /api/* requests without it. Stored in sessionStorage
+// so in-app reloads keep working; stripped from the address bar immediately.
+const API_TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get("token");
+  if (fromUrl) {
+    sessionStorage.setItem("lyko-api-token", fromUrl);
+    history.replaceState(null, "", location.pathname);
+    return fromUrl;
+  }
+  return sessionStorage.getItem("lyko-api-token") || "";
+})();
+
+if (API_TOKEN) {
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    headers.set("X-Lyko-Token", API_TOKEN);
+    return _origFetch(input, { ...init, headers });
+  };
+}
+
+// For URLs loaded by <img>/<audio> elements, which can't send headers - the server also
+// accepts the token as a query param.
+function apiUrl(path) {
+  if (!API_TOKEN) return path;
+  return path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(API_TOKEN);
+}
+
 const chatLog = document.getElementById("chat-log");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
@@ -45,7 +75,7 @@ function userAvatarFallback() {
 }
 
 function userAvatarMarkup() {
-  return hasUserAvatar ? `<img src="/api/profile/avatar?v=${avatarVersion}" alt="" />` : userAvatarFallback();
+  return hasUserAvatar ? `<img src="${apiUrl(`/api/profile/avatar?v=${avatarVersion}`)}" alt="" />` : userAvatarFallback();
 }
 
 // Already-rendered messages don't re-run appendMessage when the user changes their picture or
@@ -318,11 +348,13 @@ async function loadChatsFromStorage() {
   }
 }
 
-function saveChatsToStorage() {
-  fetch("/api/chats", {
+// Saves ONE chat (upsert by id) - sending the whole history of every conversation on every
+// message made the payload grow with total history size.
+function saveChat(chat) {
+  fetch(`/api/chats/${encodeURIComponent(chat.id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chats }),
+    body: JSON.stringify(chat),
   }).catch(() => {});
 }
 
@@ -340,7 +372,7 @@ function createNewChat() {
   };
   chats.unshift(chat);
   activeChatId = chat.id;
-  saveChatsToStorage();
+  saveChat(chat);
   renderChatList();
   // Don't call renderChatLog here — the caller (sendMessage / sendDirectVoice)
   // immediately appends the first message, so renderChatLog would see an empty
@@ -364,7 +396,7 @@ function deleteChat(id) {
     }
   }
   chats = chats.filter((c) => c.id !== id);
-  saveChatsToStorage();
+  fetch(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
   if (activeChatId === id) {
     if (chats.length > 0) {
       switchChat(chats[0].id);
@@ -384,7 +416,7 @@ function addMessageToChat(chat, role, content, audioId) {
     chat.title = content.slice(0, 40) || "New Chat";
     renderChatList();
   }
-  saveChatsToStorage();
+  saveChat(chat);
 }
 
 // --- Voice message audio storage (server-side) ---
@@ -418,7 +450,7 @@ async function maybeGenerateTitle(chat, userText, assistantText) {
     const data = await response.json();
     if (data.title) {
       chat.title = data.title;
-      saveChatsToStorage();
+      saveChat(chat);
       renderChatList();
     }
   } catch (err) {
@@ -511,7 +543,12 @@ function renderEmptyState() {
 
   const chips = document.createElement("div");
   chips.className = "chat-empty-chips";
-  for (const suggestion of EMPTY_STATE_SUGGESTIONS) {
+  // Context-aware first chip while a game is tracked (lastTrackedProcess is kept fresh by the
+  // game-state panel's 2s poll).
+  const suggestions = lastTrackedProcess
+    ? [`Catch me up on my ${lastTrackedProcess.replace(/\.exe$/i, "")} session`, ...EMPTY_STATE_SUGGESTIONS]
+    : EMPTY_STATE_SUGGESTIONS;
+  for (const suggestion of suggestions) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chat-empty-chip";
@@ -524,7 +561,13 @@ function renderEmptyState() {
   chatLog.appendChild(wrap);
 }
 
+// Blob URLs created for freshly-recorded voice bubbles - revoked whenever the log is wiped
+// (chat switch/delete), since re-rendered bubbles stream from the server instead.
+let _voicePlayerBlobUrls = [];
+
 function renderChatLog() {
+  for (const url of _voicePlayerBlobUrls) URL.revokeObjectURL(url);
+  _voicePlayerBlobUrls = [];
   chatLog.innerHTML = "";
   const chat = getActiveChat();
   if (!chat || chat.messages.length === 0) {
@@ -613,8 +656,8 @@ const EMOJI_REGEX = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{
 
 function stripMarkdownForNarration(text) {
   return text
-    .replace(/!\[([^\]]*)\]\(https?:\/\/[^\s)]+\)/g, "")
-    .replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g, (_m, label) => label)
+    .replace(/!\[([^\]]*)\]\((?:https?:\/\/|\/api\/)[^\s)]+\)/g, "")
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/|\/api\/)[^\s)]+\)/g, (_m, label) => label)
     .replace(/https?:\/\/[^\s<>"']+/g, "")
     .replace(EMOJI_REGEX, "")
     .replace(/[ \t]{2,}/g, " ")
@@ -735,7 +778,12 @@ chatLog.addEventListener(
 function renderMessageMarkup(text) {
   let html = escapeHtml(text);
 
-  // Images: ![alt](https://...)
+  // Images: ![alt](https://...) — also matches the relative /api/proxy/image?url=... URLs the
+  // SearXNG image search returns (the https-only pattern rendered those as literal text), and
+  // appends the API token those <img> loads need since elements can't send headers.
+  html = html.replace(/!\[([^\]]*)\]\((\/api\/proxy\/image\?[^\s)]+)\)/g, (_m, alt, url) => {
+    return `<img src="${apiUrl(url)}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
+  });
   html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (_m, alt, url) => {
     return `<img src="${url}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
   });
@@ -838,7 +886,13 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   if (audioId) {
     // Use a local blob URL for immediate playback on new messages so the player
     // works instantly without waiting for the server upload to complete.
-    const audioSrc = audioBlob ? URL.createObjectURL(audioBlob) : `/api/voice/${audioId}`;
+    let audioSrc;
+    if (audioBlob) {
+      audioSrc = URL.createObjectURL(audioBlob);
+      _voicePlayerBlobUrls.push(audioSrc);
+    } else {
+      audioSrc = apiUrl(`/api/voice/${audioId}`);
+    }
     const audio = new Audio(audioSrc);
 
     const player = document.createElement("div");
@@ -1021,7 +1075,11 @@ async function sendMessage(text) {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({}));
-      assistantEl.innerHTML = renderMessageMarkup(`⚠️ ${error.detail || "Chat request failed."}`);
+      const errText = `⚠️ ${error.detail || "Chat request failed."}`;
+      assistantEl.innerHTML = renderMessageMarkup(errText);
+      // Persist the error bubble too - otherwise it vanishes on chat switch/reload and the
+      // conversation shows a user message with no reply at all.
+      addMessageToChat(chat, "assistant", errText);
       return;
     }
 
@@ -1087,7 +1145,11 @@ async function sendMessage(text) {
     maybeGenerateTitle(chat, text, fullReply);
   } catch (err) {
     if (err.name !== "AbortError") {
-      assistantEl.innerHTML = renderMessageMarkup(fullReply || "⚠️ Chat request failed.");
+      const errText = fullReply
+        ? `${fullReply}\n⚠️ Connection lost mid-reply.`
+        : "⚠️ Chat request failed.";
+      assistantEl.innerHTML = renderMessageMarkup(errText);
+      addMessageToChat(chat, "assistant", errText);
     } else if (fullReply) {
       addMessageToChat(chat, "assistant", fullReply);
     }
@@ -1202,7 +1264,9 @@ async function sendDirectVoice(wavBlob) {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      appendMessage("assistant", `⚠️ ${error.detail || "Voice chat failed."}`, null, true);
+      const errText = `⚠️ ${error.detail || "Voice chat failed."}`;
+      appendMessage("assistant", errText, null, true);
+      addMessageToChat(chat, "assistant", errText);
       setVoiceStatus(liveMicEnabled ? "Listening..." : "");
       return;
     }
@@ -1234,7 +1298,9 @@ async function sendDirectVoice(wavBlob) {
         const payload = JSON.parse(rawEvent.slice(6));
 
         if (payload.error) {
-          assistantEl.innerHTML = renderMessageMarkup(`⚠️ ${payload.error}`);
+          const errText = fullReply ? `${fullReply}\n⚠️ ${payload.error}` : `⚠️ ${payload.error}`;
+          assistantEl.innerHTML = renderMessageMarkup(errText);
+          addMessageToChat(chat, "assistant", errText);
           return;
         }
         if (payload.delta) {
@@ -1621,9 +1687,13 @@ wakeWordMaxFailuresInput.addEventListener("input", () => {
 });
 
 function normalizeForWakeMatch(text) {
+  // Unicode-aware: NFD + combining-mark strip folds diacritics (ș→s, ă→a) so a wake phrase in
+  // e.g. Romanian still matches; the old [^a-z0-9] filter deleted every accented letter outright.
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1926,7 +1996,7 @@ function effectiveProvider(providerSelectId) {
   return value || document.getElementById("cfg-llm-provider").value || "openrouter";
 }
 
-async function reloadModelSelect(featureKey, selectedValue) {
+async function reloadModelSelect(featureKey, selectedValue, force = false) {
   const spec = PROVIDER_FEATURES[featureKey];
   const selectEl = document.getElementById(spec.selectId);
   const currentValue = selectedValue !== undefined ? selectedValue : selectEl.value;
@@ -1935,7 +2005,7 @@ async function reloadModelSelect(featureKey, selectedValue) {
 
   let models = [];
   try {
-    const response = await fetch(`${endpoint}?provider=${encodeURIComponent(provider)}`);
+    const response = await fetch(`${endpoint}?provider=${encodeURIComponent(provider)}${force ? "&force=true" : ""}`);
     if (response.ok) models = await response.json();
   } catch (err) {
     models = [];
@@ -1972,15 +2042,16 @@ async function loadModels(
   selectedChirp3Voice,
   selectedGameStateModel,
   selectedGameStateTrainingModel,
-  selectedTranscriptionModel
+  selectedTranscriptionModel,
+  force = false
 ) {
   const [ttsModels] = await Promise.all([
-    fetch("/api/models/tts").then((r) => r.json()),
-    reloadModelSelect("llm", selectedLlm),
-    reloadModelSelect("memory", selectedMemoryModel),
-    reloadModelSelect("gameState", selectedGameStateModel),
-    reloadModelSelect("gameStateTraining", selectedGameStateTrainingModel),
-    reloadModelSelect("transcription", selectedTranscriptionModel),
+    fetch(`/api/models/tts${force ? "?force=true" : ""}`).then((r) => r.json()),
+    reloadModelSelect("llm", selectedLlm, force),
+    reloadModelSelect("memory", selectedMemoryModel, force),
+    reloadModelSelect("gameState", selectedGameStateModel, force),
+    reloadModelSelect("gameStateTraining", selectedGameStateTrainingModel, force),
+    reloadModelSelect("transcription", selectedTranscriptionModel, force),
   ]);
 
   const speechModels = ttsModels.openrouter_speech_models || [];
@@ -2234,6 +2305,7 @@ function applyConfigToForm(cfg) {
   narrationSpeedValue.textContent = cfg.narration_speed;
 
   applyNarrationVolume(cfg.narration_volume);
+  document.getElementById("cfg-narrate").checked = cfg.narrate_enabled !== false;
 
   contextWindowInput.value = cfg.context_window_messages;
   contextWindowValue.textContent = cfg.context_window_messages === 0 ? "all" : cfg.context_window_messages;
@@ -2330,7 +2402,8 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-chirp3-voice").value,
     document.getElementById("cfg-game-state-model").value,
     document.getElementById("cfg-game-state-training-model").value,
-    document.getElementById("cfg-transcription-model").value
+    document.getElementById("cfg-transcription-model").value,
+    true // bypass the server-side catalog cache - that's the whole point of this button
   );
 });
 
@@ -2374,6 +2447,7 @@ document.getElementById("cfg-save").addEventListener("click", async (event) => {
     openrouter_management_key: keyFieldValue("cfg-management-key"),
     narration_speed: parseFloat(narrationSpeedInput.value),
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
+    narrate_enabled: document.getElementById("cfg-narrate").checked,
     context_window_messages: parseInt(contextWindowInput.value, 10),
     screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
     screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
@@ -3919,7 +3993,7 @@ async function qsAdvance() {
     document.getElementById("cfg-narrate").checked = qsNarrateInput.checked;
     qsNextBtn.disabled = true;
     try {
-      await saveConfigPatch({ tts_provider: qsTtsProviderSelect.value });
+      await saveConfigPatch({ tts_provider: qsTtsProviderSelect.value, narrate_enabled: qsNarrateInput.checked });
     } catch (err) { /* recoverable later in Settings */ }
     qsNextBtn.disabled = false;
   }

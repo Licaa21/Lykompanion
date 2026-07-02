@@ -1,10 +1,15 @@
 import json
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REMINDERS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reminders.json"
 PENDING_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reminders_pending.json"
+
+# Serializes read-modify-write cycles - concurrent tool calls (asyncio.gather) or the poller
+# firing while a tool mutates the same file must not overwrite each other's changes.
+_lock = threading.Lock()
 
 
 def _now() -> datetime:
@@ -31,50 +36,54 @@ def list_alarms() -> list[dict]:
 
 
 def add_reminder(message: str, process: str, interval_minutes: int) -> dict:
-    entries = load_entries()
-    entry = {
-        "id": uuid.uuid4().hex[:8],
-        "kind": "reminder",
-        "message": message,
-        "process": process,
-        "interval_minutes": interval_minutes,
-        "next_fire_at": (_now() + timedelta(minutes=interval_minutes)).isoformat(),
-    }
-    entries.append(entry)
-    save_entries(entries)
-    return entry
+    with _lock:
+        entries = load_entries()
+        entry = {
+            "id": uuid.uuid4().hex[:8],
+            "kind": "reminder",
+            "message": message,
+            "process": process,
+            "interval_minutes": interval_minutes,
+            "next_fire_at": (_now() + timedelta(minutes=interval_minutes)).isoformat(),
+        }
+        entries.append(entry)
+        save_entries(entries)
+        return entry
 
 
 def remove_reminder(reminder_id: str) -> bool:
-    entries = load_entries()
-    filtered = [e for e in entries if not (e["kind"] == "reminder" and e["id"] == reminder_id)]
-    if len(filtered) == len(entries):
-        return False
-    save_entries(filtered)
-    return True
+    with _lock:
+        entries = load_entries()
+        filtered = [e for e in entries if not (e["kind"] == "reminder" and e["id"] == reminder_id)]
+        if len(filtered) == len(entries):
+            return False
+        save_entries(filtered)
+        return True
 
 
 def add_alarm(message: str, process: str, fire_at: str) -> dict:
-    entries = load_entries()
-    entry = {
-        "id": uuid.uuid4().hex[:8],
-        "kind": "alarm",
-        "message": message,
-        "process": process,
-        "fire_at": fire_at,
-    }
-    entries.append(entry)
-    save_entries(entries)
-    return entry
+    with _lock:
+        entries = load_entries()
+        entry = {
+            "id": uuid.uuid4().hex[:8],
+            "kind": "alarm",
+            "message": message,
+            "process": process,
+            "fire_at": fire_at,
+        }
+        entries.append(entry)
+        save_entries(entries)
+        return entry
 
 
 def cancel_alarm(alarm_id: str) -> bool:
-    entries = load_entries()
-    filtered = [e for e in entries if not (e["kind"] == "alarm" and e["id"] == alarm_id)]
-    if len(filtered) == len(entries):
-        return False
-    save_entries(filtered)
-    return True
+    with _lock:
+        entries = load_entries()
+        filtered = [e for e in entries if not (e["kind"] == "alarm" and e["id"] == alarm_id)]
+        if len(filtered) == len(entries):
+            return False
+        save_entries(filtered)
+        return True
 
 
 def _parse_when(value: str) -> datetime:
@@ -110,15 +119,16 @@ def due_entries(foreground_process: str | None) -> list[dict]:
 
 def mark_fired(entry: dict) -> None:
     """Reschedules a fired reminder for its next interval, or removes a one-time alarm."""
-    entries = load_entries()
-    if entry["kind"] == "alarm":
-        entries = [e for e in entries if e["id"] != entry["id"]]
-    else:
-        for e in entries:
-            if e["id"] == entry["id"]:
-                e["next_fire_at"] = (_now() + timedelta(minutes=e["interval_minutes"])).isoformat()
-                break
-    save_entries(entries)
+    with _lock:
+        entries = load_entries()
+        if entry["kind"] == "alarm":
+            entries = [e for e in entries if e["id"] != entry["id"]]
+        else:
+            for e in entries:
+                if e["id"] == entry["id"]:
+                    e["next_fire_at"] = (_now() + timedelta(minutes=e["interval_minutes"])).isoformat()
+                    break
+        save_entries(entries)
 
 
 def load_pending() -> list[dict]:
@@ -133,17 +143,19 @@ def save_pending(pending: list[dict]) -> None:
 
 
 def add_pending(text: str) -> dict:
-    pending = load_pending()
-    entry = {"id": uuid.uuid4().hex[:8], "text": text}
-    pending.append(entry)
-    save_pending(pending)
-    return entry
+    with _lock:
+        pending = load_pending()
+        entry = {"id": uuid.uuid4().hex[:8], "text": text}
+        pending.append(entry)
+        save_pending(pending)
+        return entry
 
 
 def remove_pending(pending_id: str) -> bool:
-    pending = load_pending()
-    filtered = [p for p in pending if p["id"] != pending_id]
-    if len(filtered) == len(pending):
-        return False
-    save_pending(filtered)
-    return True
+    with _lock:
+        pending = load_pending()
+        filtered = [p for p in pending if p["id"] != pending_id]
+        if len(filtered) == len(pending):
+            return False
+        save_pending(filtered)
+        return True

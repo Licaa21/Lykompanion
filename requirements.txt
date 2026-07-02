@@ -31,3 +31,6 @@ winrt-Windows.Foundation
 # specific app/game up or down in the Windows volume mixer, separate from its own narration volume.
 pycaw
 
+
+# Dev only: unit tests (run with `python -m pytest tests`).
+pytest

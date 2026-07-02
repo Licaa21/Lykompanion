@@ -1,9 +1,14 @@
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 MEMORY_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "memory.json"
+
+# Serializes read-modify-write cycles - two concurrent save_*_memory tool calls (they run via
+# asyncio.gather) or a background extraction pass must not overwrite each other's entry.
+_lock = threading.Lock()
 
 
 def load_memories() -> list[dict]:
@@ -18,40 +23,43 @@ def save_memories(memories: list[dict]) -> None:
 
 
 def add_memory(content: str, process: str | None = None, session_id: str | None = None) -> dict:
-    memories = load_memories()
-    entry = {
-        "id": uuid.uuid4().hex[:8],
-        "content": content,
-        "process": process,
-        "session_id": session_id,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-    memories.append(entry)
-    save_memories(memories)
-    return entry
+    with _lock:
+        memories = load_memories()
+        entry = {
+            "id": uuid.uuid4().hex[:8],
+            "content": content,
+            "process": process,
+            "session_id": session_id,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        memories.append(entry)
+        save_memories(memories)
+        return entry
 
 
 def update_memory(memory_id: str, content: str, process: str | None = None, session_id: str | None = None) -> dict | None:
-    memories = load_memories()
-    for m in memories:
-        if m["id"] == memory_id:
-            m["content"] = content
-            m["process"] = process
-            m["session_id"] = session_id
-            # saved_at is intentionally not updated — it marks the original creation time,
-            # which is what rollback uses to find memories from a specific time window.
-            save_memories(memories)
-            return m
-    return None
+    with _lock:
+        memories = load_memories()
+        for m in memories:
+            if m["id"] == memory_id:
+                m["content"] = content
+                m["process"] = process
+                m["session_id"] = session_id
+                # saved_at is intentionally not updated — it marks the original creation time,
+                # which is what rollback uses to find memories from a specific time window.
+                save_memories(memories)
+                return m
+        return None
 
 
 def remove_memory(memory_id: str) -> bool:
-    memories = load_memories()
-    filtered = [m for m in memories if m["id"] != memory_id]
-    if len(filtered) == len(memories):
-        return False
-    save_memories(filtered)
-    return True
+    with _lock:
+        memories = load_memories()
+        filtered = [m for m in memories if m["id"] != memory_id]
+        if len(filtered) == len(memories):
+            return False
+        save_memories(filtered)
+        return True
 
 
 def format_memories_for_prompt(active_process: str | None = None, active_session_id: str | None = None) -> str:

@@ -285,9 +285,15 @@ async def fetch_account_balance(provider: str = "openrouter") -> "AccountBalance
         return AccountBalance(available=False, provider=provider, reason=str(exc))
 
 
-async def list_models(provider: str = "openrouter") -> list[dict]:
+# Short-TTL catalog cache - the Settings modal fires half a dozen model-list fetches per open,
+# and the catalogs barely change. "Refresh Model Lists" bypasses with force=True.
+_MODELS_CACHE_TTL_SECONDS = 300
+_models_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+async def list_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
     """Fetch models available for a provider, with input/output modality info where the provider
-    exposes it.
+    exposes it. Results are cached for a few minutes per provider unless force=True.
 
     OpenRouter's /models endpoint only returns chat-completion-style models by default -
     dedicated Speech/Transcription-category models (e.g. Kokoro, Voxtral Mini TTS) are omitted
@@ -295,12 +301,16 @@ async def list_models(provider: str = "openrouter") -> list[dict]:
     a custom endpoint) only expose a bare model id via the standard SDK model-list call, with no
     modality metadata - callers should not modality-filter those results.
     """
+    cached = _models_cache.get(provider)
+    if not force and cached and time.monotonic() - cached[0] < _MODELS_CACHE_TTL_SECONDS:
+        return cached[1]
+
     if provider != "openrouter":
         try:
             response = await get_client(provider).models.list()
         except Exception:
             return []
-        return [
+        models = [
             {
                 "id": m.id,
                 "name": m.id,
@@ -312,6 +322,8 @@ async def list_models(provider: str = "openrouter") -> list[dict]:
             }
             for m in response.data
         ]
+        _models_cache[provider] = (time.monotonic(), models)
+        return models
 
     async with httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=15) as http_client:
         response = await http_client.get("/models", params={"output_modalities": "all"})
@@ -332,4 +344,5 @@ async def list_models(provider: str = "openrouter") -> list[dict]:
                 "supported_parameters": model.get("supported_parameters") or [],
             }
         )
+    _models_cache[provider] = (time.monotonic(), models)
     return models

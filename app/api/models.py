@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 
 
 @router.get("/llm")
-async def get_llm_models(provider: str = "openrouter") -> list[dict]:
+async def get_llm_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
     """Chat-capable models that also accept raw audio and image input, since the main chat model
     doubles as the voice model (voice messages go straight to it - this is a voice companion, not
     a text chatbot) and can also be handed its own screenshots via the take_screenshot tool.
@@ -19,7 +19,7 @@ async def get_llm_models(provider: str = "openrouter") -> list[dict]:
     providers (Google AI Studio, a custom endpoint) return a bare model id list, so every model
     is returned unfiltered and the user picks based on what they know the model supports.
     """
-    models = await list_models(provider)
+    models = await list_models(provider, force=force)
     if provider != "openrouter":
         return models
     return [
@@ -30,17 +30,17 @@ async def get_llm_models(provider: str = "openrouter") -> list[dict]:
 
 
 @router.get("/llm/text")
-async def get_text_llm_models(provider: str = "openrouter") -> list[dict]:
+async def get_text_llm_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
     """Chat-capable models with no input-modality requirement - for background passes (memory
     extraction, game-state extraction) that only ever receive plain text, never audio or images."""
-    models = await list_models(provider)
+    models = await list_models(provider, force=force)
     if provider != "openrouter":
         return models
     return [m for m in models if "text" in m["output_modalities"]]
 
 
 @router.get("/llm/audio")
-async def get_audio_llm_models() -> list[dict]:
+async def get_audio_llm_models(force: bool = False) -> list[dict]:
     """Dedicated speech-to-text models (Whisper, Chirp, Parakeet, etc.) - for transcription mode,
     where one of these transcribes voice messages before the text reaches the main chat model.
 
@@ -50,22 +50,22 @@ async def get_audio_llm_models() -> list[dict]:
     model. They're also called through OpenRouter's separate /audio/transcriptions endpoint, not
     chat completions, so this list (and transcription mode) is OpenRouter-only.
     """
-    models = await list_models("openrouter")
+    models = await list_models("openrouter", force=force)
     return [m for m in models if m["output_modalities"] == ["transcription"]]
 
 
 @router.get("/llm/vision")
-async def get_vision_llm_models(provider: str = "openrouter") -> list[dict]:
+async def get_vision_llm_models(provider: str = "openrouter", force: bool = False) -> list[dict]:
     """Chat-capable models that accept image input - for the game-state training pass, which is
     sent a screenshot alongside the OCR text."""
-    models = await list_models(provider)
+    models = await list_models(provider, force=force)
     if provider != "openrouter":
         return models
     return [m for m in models if "text" in m["output_modalities"] and "image" in m["input_modalities"]]
 
 
 @router.get("/tts")
-async def get_tts_models() -> dict:
+async def get_tts_models(force: bool = False) -> dict:
     """TTS options: local Kokoro voices and real OpenRouter Speech-category models.
 
     Must filter on "speech" output modality, not "audio" — models like Lyria
@@ -75,7 +75,7 @@ async def get_tts_models() -> dict:
     # A transient OpenRouter failure must not 500 the whole endpoint - that would empty every
     # voice dropdown (Kokoro and Chirp included) until the user hits "Refresh Model Lists".
     try:
-        openrouter_models = await list_models("openrouter")
+        openrouter_models = await list_models("openrouter", force=force)
     except Exception:
         openrouter_models = []
     speech_models = [m for m in openrouter_models if "speech" in m["output_modalities"]]

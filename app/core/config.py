@@ -14,7 +14,8 @@ def persist_env_value(key: str, value: str) -> None:
 def persist_env_values(values: dict[str, str]) -> None:
     """Write multiple KEY=value pairs into the .env file in a single read/write pass."""
     lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
-    remaining = dict(values)
+    # A newline inside a value (e.g. pasted into a key field) would corrupt the whole file.
+    remaining = {k: str(v).replace("\r", " ").replace("\n", " ") for k, v in values.items()}
     for i, line in enumerate(lines):
         for key, value in list(remaining.items()):
             if line.startswith(f"{key}="):
@@ -60,6 +61,9 @@ class Settings(BaseSettings):
     openrouter_voice: str = ""
     tts_speed: float = 1.0
     tts_volume: float = 1.0
+    # Whether replies are narrated aloud at all - the checkbox used to be client-side only and
+    # reset to checked on every restart.
+    narrate_enabled: bool = True
 
     # "openrouter" (web-grounded chat completion, text-only) or "searxng" (self-hosted
     # metasearch with a real image-search endpoint).

@@ -73,13 +73,15 @@ class CompanionConfig(BaseModel):
     openrouter_management_key_set: bool = False
     narration_speed: float = 1.0
     narration_volume: float = 1.0
+    narrate_enabled: bool = True
     context_window_messages: int = 20
     screenshot_max_width: int = 960
     wake_word_enabled: bool = False
     wake_word_phrase: str = "Hey Buddy"
     wake_word_max_failures: int = 3
     vad_threshold: int = 8
-    vad_silence_ms: int = 1200
+    # Keep in sync with Settings.vad_silence_ms (app/core/config.py).
+    vad_silence_ms: int = 3000
     vad_min_speech_ms: int = 300
     pre_roll_ms: int = 1000
     post_roll_ms: int = 500

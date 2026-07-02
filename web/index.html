@@ -20,7 +20,7 @@
       <div class="sidebar-search-wrap">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="chat-search" type="text" placeholder="Search…" autocomplete="off" />
-        <button id="new-chat-btn" class="new-chat-icon-btn" title="New conversation">
+        <button id="new-chat-btn" class="new-chat-icon-btn" title="New conversation" aria-label="New conversation">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
@@ -31,15 +31,15 @@
       <div class="sidebar-divider"></div>
       <div class="sidebar-tools">
 
-        <button id="personal-data-btn" class="tool-btn" title="Personal Data">
+        <button id="personal-data-btn" class="tool-btn" title="Personal Data" aria-label="Personal Data">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         </button>
 
-        <button id="diagnostics-btn" class="tool-btn" title="Usage &amp; Debug">
+        <button id="diagnostics-btn" class="tool-btn" title="Usage &amp; Debug" aria-label="Usage and Debug">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         </button>
 
-        <button id="settings-btn" class="tool-btn" title="Settings">
+        <button id="settings-btn" class="tool-btn" title="Settings" aria-label="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
 
@@ -63,15 +63,15 @@
         </div>
         <form id="chat-form" class="chat-form">
           <!-- Screenshot toggle -->
-          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off">
+          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off" aria-label="Include screenshot with next message">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
           <!-- Hands-free / live mic toggle -->
-          <button type="button" id="live-mic-toggle" class="icon-btn" title="Hands-free: auto-record and send when you speak">
+          <button type="button" id="live-mic-toggle" class="icon-btn" title="Hands-free: auto-record and send when you speak" aria-label="Toggle hands-free listening">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
           </button>
           <!-- Push-to-talk mic -->
-          <button type="button" id="mic-btn" class="icon-btn" title="Voice input (push to talk)">
+          <button type="button" id="mic-btn" class="icon-btn" title="Voice input (push to talk)" aria-label="Voice input, push to talk">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </button>
 
@@ -80,7 +80,7 @@
           <button type="submit" class="send-btn">Send</button>
 
           <!-- Stop narration — hidden until TTS is playing -->
-          <button type="button" id="stop-narration-btn" class="icon-btn" title="Stop narration" hidden>
+          <button type="button" id="stop-narration-btn" class="icon-btn" title="Stop narration" aria-label="Stop narration" hidden>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
           </button>
         </form>
