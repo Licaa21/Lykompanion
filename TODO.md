@@ -21,10 +21,12 @@ self-reinforcing; (6) `confidence` gates only training — low-confidence window
   memory-writer to observer — it appends to a per-session observation journal, and promotion
   to real memory happens only via the chat extraction pass (corroborated by conversation) or a
   consolidation pass (seen in ≥2 windows / high confidence).
-- [ ] **Layer 3 (vision-grounded extraction):** `game_state_extraction_mode: ocr|hybrid|vision`
-  — keep OCR for free change-detection/dedup, attach downscaled screenshots to the structuring
-  pass (hybrid: only for choice/milestone-shaped windows or after low confidence). Fixes the
-  BG3/minimal-UI class of errors; largely obsoletes the training-pass workaround.
+- [x] **Layer 3 (vision-grounded extraction)** — done 2026-07-02: the first and most recent
+  kept frames of each poll window are attached to the extraction pass as screenshots (OCR still
+  does free change-detection/dedup; middle frames stay text-only; non-vision models retried
+  text-only). Training pass now reuses the window's last frame instead of a mismatched GDI
+  re-capture. Remaining follow-up: consider whether the training pass is still needed at all
+  now that extraction sees pixels directly.
 
 ## Medium priority
 

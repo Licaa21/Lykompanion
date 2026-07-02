@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
 from app.services.ocr import windows_ocr
-from app.services.screenshot.capture import capture_monitor_b64
+from app.services.screenshot.capture import capture_monitor_b64, image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
 from app.services.system.processes import get_foreground_process_name, is_process_running
 
@@ -48,6 +48,13 @@ _last_kept_text: str | None = None
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
+# Base64 JPEGs of the first and most recent *kept* frames of the current poll window, attached to
+# the extraction LLM call as actual screenshots (the middle frames travel as OCR text only). The
+# pixels carry what OCR structurally cannot - which dialogue/menu option is highlighted/selected,
+# who's speaking, spatial layout - which is exactly where text-only extraction hallucinated.
+_first_frame_b64: str | None = None
+_last_frame_b64: str | None = None
+
 # A single empty OCR result is routine (loading screens, blank/solid-color frames, a menu with no
 # text) and not worth logging every tick - only warn once capture/OCR has come back empty this
 # many consecutive ticks in a row, since that's what actually indicates a persistent problem.
@@ -60,10 +67,13 @@ def _reset_window() -> None:
     state). Doesn't touch persisted tracker values - those live independently in game_state.py,
     keyed by process, and survive a process switch or the companion restarting."""
     global _frames, _last_kept_text, _window_started_at, _empty_ocr_streak
+    global _first_frame_b64, _last_frame_b64
     _frames = []
     _last_kept_text = None
     _window_started_at = None
     _empty_ocr_streak = 0
+    _first_frame_b64 = None
+    _last_frame_b64 = None
 
 
 def _frames_similar(a: str, b: str) -> bool:
@@ -158,50 +168,91 @@ def _maybe_start_training_pass(process: str, confidence, ocr_text: str, screensh
     task.add_done_callback(_training_tasks.discard)
 
 
-async def extract_and_apply_game_state(process: str, frames: list[tuple[float, str]]) -> None:
+async def _call_extraction(user_content, model: str | None, provider: str) -> dict:
+    raw = await chat_completion(
+        [
+            {"role": "system", "content": load_prompt("game_state_extraction")},
+            {"role": "user", "content": user_content},
+        ],
+        model=model,
+        response_format={"type": "json_object"},
+        source="game_state_extraction",
+        provider=provider,
+        on_usage=lambda cost: game_state.record_extraction_call(cost),
+    )
+    return json.loads(raw)
+
+
+def _image_part(b64: str) -> dict:
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+
+
+async def extract_and_apply_game_state(
+    process: str,
+    frames: list[tuple[float, str]],
+    first_frame_b64: str | None = None,
+    last_frame_b64: str | None = None,
+) -> None:
     """Runs a dedicated, non-conversational LLM pass to turn one poll window's worth of raw OCR
     frames into structured game state. Fire-and-forget by design (see memory_extraction.
     extract_and_apply_memory for the same pattern) - failures here must never raise into the
-    poller loop."""
-    # Capture the screenshot now, before the extraction LLM call, so a training pass that fires
-    # afterwards gets a frame that matches the OCR text being trained on — not whatever happens to
-    # be on screen several seconds later when the training task actually starts.
-    screenshot_b64 = capture_monitor_b64()
+    poller loop.
+
+    When available, the first and most recent kept frames of the window are attached as actual
+    screenshots so a vision-capable extraction model can ground its answers in pixels (selection/
+    highlight state, layout) instead of guessing from OCR text alone. If the configured model
+    turns out not to accept images, the call is retried once text-only."""
     previous = game_state.get_game_state()
     previous_values = (previous or {}).get("values", {})
     active_session_id = (previous or {}).get("session_id")
     trackers = game_state_trackers.get_trackers(process)
     known_facts = memory_store.format_memories_for_prompt(active_process=process, active_session_id=active_session_id) or "Known facts about the user: none yet."
     training_data = game_state_training_data.format_training_data_for_prompt(process)
-    messages = [
-        {"role": "system", "content": load_prompt("game_state_extraction")},
-        {
-            "role": "user",
-            "content": (
-                f"Foreground process: {process}\n\n{known_facts}\n\n"
-                + (f"{training_data}\n\n" if training_data else "")
-                + f"{_format_tracker_fields(trackers, previous_values)}\n\n{_format_frames(frames)}"
-            ),
-        },
-    ]
+    text_content = (
+        f"Foreground process: {process}\n\n{known_facts}\n\n"
+        + (f"{training_data}\n\n" if training_data else "")
+        + f"{_format_tracker_fields(trackers, previous_values)}\n\n{_format_frames(frames)}"
+    )
 
+    content: list[dict] = [{"type": "text", "text": text_content}]
+    if first_frame_b64 and last_frame_b64 and first_frame_b64 != last_frame_b64:
+        content.append({
+            "type": "text",
+            "text": (
+                "Attached below, in order: the FIRST kept frame of this poll window, then the "
+                "MOST RECENT one, as actual screenshots. The other frames exist as OCR text only."
+            ),
+        })
+        content.append(_image_part(first_frame_b64))
+        content.append(_image_part(last_frame_b64))
+    elif last_frame_b64:
+        content.append({
+            "type": "text",
+            "text": "Attached below: the actual screenshot the most recent OCR text was read from.",
+        })
+        content.append(_image_part(last_frame_b64))
+
+    model = settings.game_state_model or None
+    provider = settings.game_state_provider or settings.llm_provider
     try:
-        model = settings.game_state_model or None
-        provider = settings.game_state_provider or settings.llm_provider
-        cost_holder = {"cost": 0.0}
-        raw = await chat_completion(
-            messages,
-            model=model,
-            response_format={"type": "json_object"},
-            source="game_state_extraction",
-            provider=provider,
-            on_usage=lambda cost: cost_holder.__setitem__("cost", cost),
-        )
-        game_state.record_extraction_call(cost_holder["cost"])
-        data = json.loads(raw)
+        data = await _call_extraction(content, model, provider)
     except Exception:
-        logger.exception("Game-state extraction failed")
-        return
+        if len(content) == 1:
+            logger.exception("Game-state extraction failed")
+            return
+        # Most likely a non-vision model rejecting the image parts - retry once text-only so a
+        # text-only GAME_STATE_MODEL keeps working (without the screenshots' grounding benefits).
+        logger.warning(
+            "Game-state extraction with attached screenshots failed (model=%r) - retrying "
+            "text-only; if this repeats, set GAME_STATE_MODEL to a vision-capable model",
+            model,
+            exc_info=True,
+        )
+        try:
+            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider)
+        except Exception:
+            logger.exception("Game-state extraction failed")
+            return
 
     new_values = {}
     for tracker in trackers:
@@ -225,13 +276,19 @@ async def extract_and_apply_game_state(process: str, frames: list[tuple[float, s
         logger.info("Game-state poll: divergence detected for process=%r session=%r: %s", process, active_session_id, divergence.strip())
         game_state.set_pending_divergence(process, divergence.strip())
 
-    _maybe_start_training_pass(process, data.get("confidence"), frames[-1][1], screenshot_b64)
+    # The training pass reuses the window's most recent kept frame, so the screenshot it studies
+    # is exactly the one the OCR text came from (the old GDI re-capture here could show whatever
+    # was on screen seconds later). Fallback capture only if no frame image survived the window.
+    _maybe_start_training_pass(
+        process, data.get("confidence"), frames[-1][1], last_frame_b64 or capture_monitor_b64()
+    )
 
 
 async def _capture_tick() -> None:
     """Captures+OCRs one frame locally (no LLM call) and, once a full poll window's worth of
     frames has accumulated, batches them into a single structuring LLM call."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
+    global _first_frame_b64, _last_frame_b64
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -289,6 +346,12 @@ async def _capture_tick() -> None:
         if _last_kept_text is None or not _frames_similar(normalized, _last_kept_text):
             _frames.append((time.time(), ocr_text))
             _last_kept_text = normalized
+            # Keep the pixels too (downscaled per the screenshot settings) - the first and most
+            # recent kept frames of the window get attached to the extraction call as images.
+            frame_b64 = image_to_b64(image)
+            if _first_frame_b64 is None:
+                _first_frame_b64 = frame_b64
+            _last_frame_b64 = frame_b64
         else:
             logger.debug("Game-state poll: skipping near-duplicate OCR frame for process=%r", process)
     else:
@@ -311,7 +374,10 @@ async def _capture_tick() -> None:
         return
 
     frames_to_send = _frames
+    first_b64, last_b64 = _first_frame_b64, _last_frame_b64
     _frames = []
+    _first_frame_b64 = None
+    _last_frame_b64 = None
     _window_started_at = None
     if not frames_to_send:
         logger.debug(
@@ -324,7 +390,7 @@ async def _capture_tick() -> None:
         len(frames_to_send),
         process,
     )
-    await extract_and_apply_game_state(process, frames_to_send)
+    await extract_and_apply_game_state(process, frames_to_send, first_b64, last_b64)
 
 
 async def run_game_state_poller() -> None:

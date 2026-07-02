@@ -59,12 +59,12 @@ def capture_monitor_image(monitor_index: int | None = None) -> Image.Image:
     return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
 
 
-def capture_monitor_b64(monitor_index: int | None = None, max_width: int | None = None, quality: int | None = None) -> str:
-    """Capture one monitor (1-based index) and return a base64-encoded JPEG, downscaled for LLM context."""
+def image_to_b64(image: Image.Image, max_width: int | None = None, quality: int | None = None) -> str:
+    """Downscale and JPEG-encode an already-captured PIL image to base64 for LLM context,
+    using the configured screenshot settings by default."""
     max_width = max_width or settings.screenshot_max_width
     quality = quality or settings.screenshot_jpeg_quality
 
-    image = capture_monitor_image(monitor_index)
     if image.width > max_width:
         ratio = max_width / image.width
         image = image.resize((max_width, int(image.height * ratio)))
@@ -72,6 +72,11 @@ def capture_monitor_b64(monitor_index: int | None = None, max_width: int | None 
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=quality)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def capture_monitor_b64(monitor_index: int | None = None, max_width: int | None = None, quality: int | None = None) -> str:
+    """Capture one monitor (1-based index) and return a base64-encoded JPEG, downscaled for LLM context."""
+    return image_to_b64(capture_monitor_image(monitor_index), max_width, quality)
 
 
 def capture_primary_monitor_b64(max_width: int | None = None, quality: int | None = None) -> str:
