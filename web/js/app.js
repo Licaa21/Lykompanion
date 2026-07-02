@@ -3155,13 +3155,23 @@ gameStatePanelCloseBtn.addEventListener("click", () => {
   gameStatePanel.hidden = true;
 });
 
-// Restore a dragged position, or fall back to the default top-right CSS anchor.
+// Restore a dragged position, or fall back to the default top-right CSS anchor. A saved
+// position is only applied when it's valid finite numbers, clamped into the current viewport -
+// a corrupt entry (a click-without-drag used to persist {top: null, left: null}) or a window
+// that shrank since the drag would otherwise strand the panel off-screen while "visible".
 (() => {
-  const saved = JSON.parse(localStorage.getItem(GAME_STATE_POS_KEY) || "null");
-  if (saved) {
-    gameStatePanel.style.top = `${saved.top}px`;
-    gameStatePanel.style.left = `${saved.left}px`;
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(GAME_STATE_POS_KEY) || "null");
+  } catch (err) { /* corrupt entry - fall through to the CSS anchor */ }
+  if (saved && Number.isFinite(saved.top) && Number.isFinite(saved.left)) {
+    const maxLeft = Math.max(0, window.innerWidth - 260);  // panel CSS width
+    const maxTop = Math.max(0, window.innerHeight - 40);   // keep at least the header on-screen
+    gameStatePanel.style.top = `${Math.min(Math.max(0, saved.top), maxTop)}px`;
+    gameStatePanel.style.left = `${Math.min(Math.max(0, saved.left), maxLeft)}px`;
     gameStatePanel.style.right = "auto";
+  } else if (saved !== null) {
+    localStorage.removeItem(GAME_STATE_POS_KEY);
   }
 })();
 
@@ -3193,10 +3203,14 @@ gameStatePanelCloseBtn.addEventListener("click", () => {
   window.addEventListener("mouseup", () => {
     if (!dragging) return;
     dragging = false;
-    localStorage.setItem(
-      GAME_STATE_POS_KEY,
-      JSON.stringify({ top: parseFloat(gameStatePanel.style.top), left: parseFloat(gameStatePanel.style.left) })
-    );
+    const top = parseFloat(gameStatePanel.style.top);
+    const left = parseFloat(gameStatePanel.style.left);
+    // A click on the header without any movement never sets style.top/left - parseFloat("")
+    // is NaN, which used to get persisted as {top: null, left: null} and strand the panel
+    // off-screen on every subsequent load. Only persist an actual dragged position.
+    if (Number.isFinite(top) && Number.isFinite(left)) {
+      localStorage.setItem(GAME_STATE_POS_KEY, JSON.stringify({ top, left }));
+    }
   });
 })();
 
