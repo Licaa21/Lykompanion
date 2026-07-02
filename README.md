@@ -82,7 +82,7 @@ pip install -r requirements.txt
 **Plain server (for development):**
 
 ```bash
-.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 6692 --reload
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 6692 --reload
 ```
 
 Then open `http://localhost:6692` in a browser. Use this instead of `RUN.cmd` when iterating on backend code, since `--reload` picks up Python changes automatically — `run_app.py` does not reload.

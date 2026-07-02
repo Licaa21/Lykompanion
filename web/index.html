@@ -45,6 +45,12 @@
 
     <!-- ── MAIN CHAT PANEL ──────────────────────────────────────────── -->
     <main class="chat-panel">
+      <!-- First-run setup nudge — shown only while the active LLM provider has no API key -->
+      <div id="setup-banner" class="setup-banner" hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="setup-banner-text">Almost ready — add an API key for your LLM provider to start chatting.</span>
+        <button type="button" id="setup-banner-btn" class="setup-banner-btn">Set up now</button>
+      </div>
       <div id="chat-log" class="chat-log"></div>
 
       <div class="composer">
@@ -523,6 +529,7 @@
       </div>
 
       <div class="modal-footer">
+        <button type="button" id="cfg-quick-setup" class="secondary-btn">Quick Setup…</button>
         <button type="button" id="cfg-refresh-models" class="secondary-btn">Refresh Model Lists</button>
         <button type="button" id="cfg-save" class="primary-btn">Save Settings</button>
       </div>
@@ -675,6 +682,105 @@
             <div id="debug-requests-list" class="debug-requests-list"></div>
           </section>
 
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── QUICK SETUP WIZARD ─────────────────────────────────────────── -->
+  <!-- Auto-opens on first run (no API key configured yet); re-launchable from Settings. -->
+  <div id="quick-setup-modal" class="modal-overlay" hidden>
+    <div class="modal qs-modal">
+      <div class="qs-progress" id="qs-progress"></div>
+      <div class="qs-body modal-body">
+
+        <section class="qs-step" data-step="0">
+          <img src="img/logo.png" alt="" class="qs-logo" />
+          <h2>Welcome to Lykompanion</h2>
+          <p class="qs-lead">
+            Your AI gaming companion — talk to it by voice or text while you play, let it see your
+            screen when you want, and it remembers what matters. Setup takes under a minute.
+          </p>
+          <label class="qs-field">
+            <span>What should I call you?</span>
+            <input id="qs-name" type="text" placeholder="Your name" autocomplete="off" />
+          </label>
+        </section>
+
+        <section class="qs-step" data-step="1" hidden>
+          <h2>Connect your AI</h2>
+          <p class="qs-lead">Pick the provider that powers the conversation.</p>
+          <div class="qs-provider-cards">
+            <button type="button" class="qs-provider-card active" data-provider="openrouter">
+              <strong>OpenRouter</strong>
+              <span>Recommended — one key unlocks hundreds of models, pay per use.</span>
+            </button>
+            <button type="button" class="qs-provider-card" data-provider="google_ai_studio">
+              <strong>Google AI Studio</strong>
+              <span>Gemini models, free-tier API key available.</span>
+            </button>
+            <button type="button" class="qs-provider-card" data-provider="custom">
+              <strong>Custom</strong>
+              <span>Any OpenAI-compatible endpoint (self-hosted, aggregator).</span>
+            </button>
+          </div>
+          <label class="qs-field" id="qs-custom-url-field" hidden>
+            <span>Base URL</span>
+            <input id="qs-custom-url" type="text" placeholder="https://api.example.com/v1" autocomplete="off" />
+          </label>
+          <label class="qs-field">
+            <span>API key</span>
+            <input id="qs-api-key" type="password" placeholder="Paste your API key" autocomplete="off" />
+          </label>
+          <p class="qs-hint" id="qs-key-hint"></p>
+        </section>
+
+        <section class="qs-step" data-step="2" hidden>
+          <h2>Pick your model</h2>
+          <p class="qs-lead" id="qs-model-lead">
+            This model drives every reply. For voice chat it needs audio and image input — the list
+            is already filtered to models that qualify.
+          </p>
+          <input id="qs-model-search" type="text" class="model-search" placeholder="Search models…" autocomplete="off" />
+          <select id="qs-model" size="8" class="qs-model-select"></select>
+          <p class="qs-hint">You can change this any time in Settings → General.</p>
+        </section>
+
+        <section class="qs-step" data-step="3" hidden>
+          <h2>Voice</h2>
+          <p class="qs-lead">Lykompanion can read its replies aloud — pick how, or turn narration off.</p>
+          <label class="checkbox">
+            <input id="qs-narrate" type="checkbox" checked />
+            Narrate replies out loud
+          </label>
+          <label class="qs-field" id="qs-tts-field">
+            <span>Text-to-speech engine</span>
+            <select id="qs-tts-provider">
+              <option value="kokoro">Kokoro — free, runs locally (needs the Kokoro server running)</option>
+              <option value="openrouter">OpenRouter — cloud voices, uses your OpenRouter key</option>
+              <option value="chirp3">Google Chirp 3 HD — needs a Google Cloud TTS key</option>
+            </select>
+          </label>
+          <p class="qs-hint">Voices, speed, hands-free listening and the wake word live in Settings → Voice &amp; Narration.</p>
+        </section>
+
+        <section class="qs-step" data-step="4" hidden>
+          <h2>You're all set!</h2>
+          <ul class="qs-tips">
+            <li><strong>Push-to-talk</strong> — the mic button records until you click it again.</li>
+            <li><strong>Hands-free</strong> — the headset toggle keeps the mic open while you game; just start talking.</li>
+            <li><strong>Screenshots</strong> — the camera toggle attaches your screen to the next message.</li>
+            <li><strong>Memory</strong> — it saves useful facts automatically; review them under Personal Data.</li>
+            <li><strong>Game Awareness</strong> — optional background OCR that follows your quest/location; enable it in Settings.</li>
+          </ul>
+        </section>
+
+      </div>
+      <div class="qs-footer">
+        <button type="button" id="qs-skip" class="secondary-btn">Skip for now</button>
+        <div class="qs-footer-right">
+          <button type="button" id="qs-back" class="secondary-btn">Back</button>
+          <button type="button" id="qs-next" class="primary-btn">Next</button>
         </div>
       </div>
     </div>

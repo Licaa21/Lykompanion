@@ -49,7 +49,9 @@ def _get_downloads_dir() -> str:
 
 def _start_server() -> None:
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, log_level="info")
+    # localhost-only on purpose: the API has no authentication, and exposes chats, settings
+    # (API keys), and live desktop screenshots - it must not be reachable from the LAN.
+    uvicorn.run("app.main:app", host="127.0.0.1", port=PORT, log_level="info")
 
 
 def _wait_for_server(timeout: float = 90.0) -> bool:

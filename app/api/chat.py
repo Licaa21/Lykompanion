@@ -275,6 +275,10 @@ async def _stream_chat_with_tools(
             if side_effect:
                 yield side_effect
 
+    # Mirror the non-streaming fallback - without this, exhausting the tool budget ends the
+    # stream silently and the user is left staring at an empty bubble.
+    yield {"type": "delta", "text": "Sorry, I got stuck juggling tools just now - try asking again?"}
+
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:

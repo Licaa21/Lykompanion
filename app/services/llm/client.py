@@ -40,7 +40,10 @@ def get_client(provider: str) -> AsyncOpenAI:
     if cached is not None:
         return cached
     fresh = AsyncOpenAI(api_key=api_key, base_url=base_url)
-    _client_cache.clear()
+    # Evict only this provider's stale entries (credentials/URL changed) - clearing the whole
+    # cache would make two configured providers evict each other on every alternating call.
+    for key in [k for k in _client_cache if k[0] == provider]:
+        del _client_cache[key]
     _client_cache[cache_key] = fresh
     return fresh
 

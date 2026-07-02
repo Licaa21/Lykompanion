@@ -77,6 +77,16 @@ def cancel_alarm(alarm_id: str) -> bool:
     return True
 
 
+def _parse_when(value: str) -> datetime:
+    """Alarm fire_at strings come from the LLM as naive local datetimes ('2026-07-01T21:00:00'),
+    while reminder next_fire_at strings are UTC-aware - naive values are interpreted as local
+    time so the two can be compared against the same aware 'now'."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt
+
+
 def due_entries(foreground_process: str | None) -> list[dict]:
     """Entries whose scheduled time has passed AND whose process filter matches the game
     currently in the foreground - a reminder/alarm never fires while its game isn't being
@@ -89,8 +99,12 @@ def due_entries(foreground_process: str | None) -> list[dict]:
         if entry["process"].lower() != foreground_process.lower():
             continue
         when = entry["next_fire_at"] if entry["kind"] == "reminder" else entry["fire_at"]
-        if datetime.fromisoformat(when) <= now:
-            due.append(entry)
+        try:
+            if _parse_when(when) <= now:
+                due.append(entry)
+        except ValueError:
+            # One malformed timestamp must not stall every other reminder/alarm forever.
+            continue
     return due
 
 

@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     web_search_provider: str = "openrouter"
     searxng_base_url: str = "http://localhost:8080"
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
 
     # Max number of most-recent chat messages sent to the LLM as context. 0 = no limit.

@@ -438,10 +438,56 @@ function renderChatList() {
   }
 }
 
+// Welcome screen for a brand-new/empty chat - the log used to be a blank void with no hint of
+// what the companion can do or how to talk to it. The suggestion chips send a real message.
+const EMPTY_STATE_SUGGESTIONS = [
+  "What can you do?",
+  "Recommend me a game for tonight",
+  "What's new in gaming this week?",
+];
+
+function renderEmptyState() {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-empty-state";
+
+  const logo = document.createElement("img");
+  logo.src = "img/logo.png";
+  logo.alt = "";
+  logo.className = "chat-empty-logo";
+  wrap.appendChild(logo);
+
+  const heading = document.createElement("h1");
+  heading.textContent = "What are we playing today?";
+  wrap.appendChild(heading);
+
+  const sub = document.createElement("p");
+  sub.textContent =
+    "Type below, or talk to me — the mic button is push-to-talk, and the headset button keeps me listening hands-free while you game.";
+  wrap.appendChild(sub);
+
+  const chips = document.createElement("div");
+  chips.className = "chat-empty-chips";
+  for (const suggestion of EMPTY_STATE_SUGGESTIONS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chat-empty-chip";
+    chip.textContent = suggestion;
+    chip.addEventListener("click", () => sendMessage(suggestion));
+    chips.appendChild(chip);
+  }
+  wrap.appendChild(chips);
+
+  chatLog.appendChild(wrap);
+}
+
 function renderChatLog() {
   chatLog.innerHTML = "";
   const chat = getActiveChat();
   if (!chat) return;
+  if (chat.messages.length === 0) {
+    renderEmptyState();
+    return;
+  }
   for (const message of chat.messages) {
     appendMessage(message.role, message.content, message.audioId);
   }
@@ -532,10 +578,12 @@ async function processTtsQueue() {
   isNarrating = true;
   stopNarrationBtn.hidden = false;
   const item = ttsQueue.shift();
+  let blobUrl = null;
   try {
     const blob = await item.promise;
     if (ttsPlaying) {
-      narrationAudio.src = URL.createObjectURL(blob);
+      blobUrl = URL.createObjectURL(blob);
+      narrationAudio.src = blobUrl;
       narrationAudio.playbackRate = shouldApplyClientSideSpeed() ? narrationSpeed : 1;
       narrationAudio.volume = narrationVolume;
       await new Promise((resolve) => {
@@ -547,6 +595,9 @@ async function processTtsQueue() {
   } catch (err) {
     // synthesis/playback failed for this sentence; move on to the next
   } finally {
+    // Each sentence gets its own blob URL - never revoked, they accumulate for the whole
+    // session (one leaked audio buffer per narrated sentence).
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
     item.resolveItem();
     pendingNarrationResolve = null;
     ttsPlaying = false;
@@ -629,6 +680,7 @@ function renderMessageMarkup(text) {
 }
 
 function appendMessage(role, content, audioId, isNew = false, audioBlob = null) {
+  chatLog.querySelector(".chat-empty-state")?.remove();
   const el = document.createElement("div");
   el.className = `message ${role}`;
   if (isNew) el.classList.add("message-enter");
@@ -1034,6 +1086,11 @@ async function sendDirectVoice(wavBlob) {
   stopNarration();
   awaitingReply = true;
   try {
+    // Snapshot the history BEFORE the new voice turn is added to it - the audio itself is what
+    // carries this turn to the backend, so including a placeholder text message too would
+    // duplicate the turn in the LLM's view.
+    const historyJson = JSON.stringify(chat.messages);
+
     const userContentDiv = appendMessage(
       "user",
       transcriptionMode ? "🎤 Transcribing…" : "🎤 (voice message)",
@@ -1041,11 +1098,15 @@ async function sendDirectVoice(wavBlob) {
       true,
       audioId ? wavBlob : null
     );
+    // Persist the voice turn immediately - the error paths below used to return before it was
+    // ever added to chat.messages, making the bubble vanish on the next chat switch or reload.
+    addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
+    const userMessage = chat.messages[chat.messages.length - 1];
     setVoiceStatus("Sending voice message...");
 
     const formData = new FormData();
     formData.append("audio", wavBlob, "voice.wav");
-    formData.append("history", JSON.stringify(chat.messages));
+    formData.append("history", historyJson);
     formData.append("include_screenshot", String(includeScreenshot));
 
     const response = await fetch("/api/chat/voice/stream", { method: "POST", body: formData });
@@ -1061,6 +1122,10 @@ async function sendDirectVoice(wavBlob) {
     let fullReply = "";
     let stopListening = false;
     let transcript = null;
+    // Sentence-pipelined narration, same as the text path - narrating only after the full
+    // reply arrived added several seconds of silence to every voice exchange.
+    const narrateEnabled = document.getElementById("cfg-narrate").checked;
+    let sentenceBuffer = "";
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -1087,6 +1152,12 @@ async function sendDirectVoice(wavBlob) {
           fullReply += payload.delta;
           assistantEl.innerHTML = renderMessageMarkup(fullReply);
           chatLog.scrollTop = chatLog.scrollHeight;
+          if (narrateEnabled) {
+            sentenceBuffer += payload.delta;
+            const { complete, remainder } = extractCompleteSentences(stripMarkdownForNarration(sentenceBuffer));
+            sentenceBuffer = remainder;
+            for (const sentence of complete) enqueueNarration(sentence);
+          }
         }
         if (payload.volume !== undefined) applyNarrationVolume(payload.volume);
         if (payload.stop_listening) { stopListening = true; agentStopListening(); }
@@ -1100,8 +1171,8 @@ async function sendDirectVoice(wavBlob) {
     if (transcript) {
       userContentDiv.hidden = false;
       userContentDiv.innerHTML = renderMessageMarkup(transcript);
+      userMessage.content = transcript;
     }
-    addMessageToChat(chat, "user", transcript || "🎤 (voice message)", audioId);
     addMessageToChat(chat, "assistant", fullReply);
     maybeGenerateTitle(chat, transcript || "(voice message)", fullReply);
 
@@ -1111,8 +1182,8 @@ async function sendDirectVoice(wavBlob) {
     } else {
       setVoiceStatus(liveMicEnabled ? "Listening..." : "");
     }
-    if (document.getElementById("cfg-narrate").checked) {
-      await narrate(fullReply);
+    if (narrateEnabled && sentenceBuffer.trim()) {
+      await enqueueNarration(sentenceBuffer.trim());
     }
   } catch (err) {
     setVoiceStatus("Voice chat failed", "error");
@@ -2133,11 +2204,18 @@ function applyConfigToForm(cfg) {
     : "Not set";
   document.getElementById("cfg-steam-api-key").placeholder = cfg.steam_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-steam-id").value = cfg.steam_id || "";
+
+  updateSetupBanner(cfg);
 }
 
 async function loadConfig() {
-  const response = await fetch("/api/config");
-  const cfg = await response.json();
+  let cfg;
+  try {
+    const response = await fetch("/api/config");
+    cfg = await response.json();
+  } catch (err) {
+    return null;
+  }
   applyConfigToForm(cfg);
   await loadModels(
     cfg.openrouter_model,
@@ -2150,6 +2228,7 @@ async function loadConfig() {
     cfg.game_state_training_model,
     cfg.transcription_model
   );
+  return cfg;
 }
 
 document.getElementById("cfg-refresh-models").addEventListener("click", () => {
@@ -2538,7 +2617,12 @@ async function loadAlarms() {
 // moment one shows up, inject it into whichever chat is currently open as if the companion just
 // spoke up unprompted, then ack it so it isn't shown twice.
 async function checkPendingReminders() {
-  const pending = await fetch("/api/reminders/pending").then((r) => r.json());
+  let pending;
+  try {
+    pending = await fetch("/api/reminders/pending").then((r) => r.json());
+  } catch (err) {
+    return; // transient server hiccup - the next poll tick will catch up
+  }
   if (pending.length === 0) return;
 
   const chat = getActiveChat();
@@ -2868,9 +2952,9 @@ gameStatePanelCloseBtn.addEventListener("click", () => {
 // the "state changed, but the panel doesn't show it yet" lag even though the backend is instant.
 const GAME_STATE_PANEL_POLL_MS = 2000;
 
-fetchGameState().then(updateGameStatePanel);
+fetchGameState().then(updateGameStatePanel).catch(() => {});
 setInterval(() => {
-  fetchGameState().then(updateGameStatePanel);
+  fetchGameState().then(updateGameStatePanel).catch(() => {});
 }, GAME_STATE_PANEL_POLL_MS);
 
 // --- Game-state process blacklist / whitelist (Settings > General) ---
@@ -3222,8 +3306,13 @@ loadGameStateProcessLists();
 const _shownProcessToasts = new Set();
 
 async function checkPendingApprovals() {
-  const response = await fetch("/api/game-state/pending");
-  const data = await response.json();
+  let data;
+  try {
+    const response = await fetch("/api/game-state/pending");
+    data = await response.json();
+  } catch (err) {
+    return; // transient server hiccup - the next poll tick will catch up
+  }
   const processes = data.processes || [];
 
   for (const proc of processes) {
@@ -3574,6 +3663,238 @@ window.addEventListener("beforeunload", () => {
 // kills the <audio> player's 3-dot menu — contextmenu events are only right-click, not button clicks.
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
+// --- Setup banner + Quick Setup wizard ---
+// The wizard walks through the minimum viable configuration (name → provider/key → model →
+// voice), page by page. It auto-opens on first run on a machine (no "done" flag in this
+// webview profile AND no API key configured for the active provider), and can always be
+// re-launched from Settings → "Quick Setup…" or the chat banner.
+
+const QS_DONE_KEY = "lyko-setup-done";
+
+const quickSetupModal = document.getElementById("quick-setup-modal");
+const qsProgressEl = document.getElementById("qs-progress");
+const qsSteps = [...quickSetupModal.querySelectorAll(".qs-step")];
+const qsBackBtn = document.getElementById("qs-back");
+const qsNextBtn = document.getElementById("qs-next");
+const qsSkipBtn = document.getElementById("qs-skip");
+const qsNameInput = document.getElementById("qs-name");
+const qsApiKeyInput = document.getElementById("qs-api-key");
+const qsCustomUrlField = document.getElementById("qs-custom-url-field");
+const qsCustomUrlInput = document.getElementById("qs-custom-url");
+const qsKeyHintEl = document.getElementById("qs-key-hint");
+const qsModelSearch = document.getElementById("qs-model-search");
+const qsModelSelect = document.getElementById("qs-model");
+const qsNarrateInput = document.getElementById("qs-narrate");
+const qsTtsField = document.getElementById("qs-tts-field");
+const qsTtsProviderSelect = document.getElementById("qs-tts-provider");
+
+const QS_KEY_HINTS = {
+  openrouter: '<a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">Get an OpenRouter API key ↗</a>',
+  google_ai_studio: '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a Google AI Studio API key ↗</a>',
+  custom: "Enter the base URL and key of your OpenAI-compatible endpoint.",
+};
+
+let qsStep = 0;
+let qsProvider = "openrouter";
+let qsKeyAlreadySet = false;
+let qsModelOptions = [];
+
+function providerKeyMissing(cfg) {
+  const provider = cfg.llm_provider || "openrouter";
+  if (provider === "google_ai_studio") return !cfg.google_ai_studio_api_key_set;
+  if (provider === "custom") return !cfg.custom_openai_api_key_set;
+  return !cfg.openrouter_api_key_set;
+}
+
+// GET the full current config, overlay a partial change, PUT it back. Key fields sent as null
+// are kept server-side, so echoing the GET response back is patch-safe.
+async function saveConfigPatch(patch) {
+  const current = await fetch("/api/config").then((r) => r.json());
+  const response = await fetch("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...current, ...patch }),
+  });
+  if (!response.ok) throw new Error("Saving settings failed.");
+  return response.json();
+}
+
+function qsRender() {
+  qsSteps.forEach((step) => { step.hidden = Number(step.dataset.step) !== qsStep; });
+  qsProgressEl.innerHTML = "";
+  for (let i = 0; i < qsSteps.length; i++) {
+    const dot = document.createElement("span");
+    dot.className = "qs-dot" + (i === qsStep ? " active" : "") + (i < qsStep ? " done" : "");
+    qsProgressEl.appendChild(dot);
+  }
+  qsBackBtn.hidden = qsStep === 0;
+  qsSkipBtn.hidden = qsStep === qsSteps.length - 1;
+  qsNextBtn.textContent = qsStep === qsSteps.length - 1 ? "Start chatting" : "Next";
+}
+
+function qsSelectProvider(provider) {
+  qsProvider = provider;
+  quickSetupModal.querySelectorAll(".qs-provider-card").forEach((card) => {
+    card.classList.toggle("active", card.dataset.provider === provider);
+  });
+  qsCustomUrlField.hidden = provider !== "custom";
+  qsKeyHintEl.innerHTML = QS_KEY_HINTS[provider] || "";
+}
+
+quickSetupModal.querySelectorAll(".qs-provider-card").forEach((card) => {
+  card.addEventListener("click", () => qsSelectProvider(card.dataset.provider));
+});
+
+function qsPopulateModels() {
+  const query = qsModelSearch.value.toLowerCase();
+  const filtered = qsModelOptions.filter((o) => o.label.toLowerCase().includes(query));
+  const currentValue = qsModelSelect.value;
+  populateSelect(qsModelSelect, filtered, filtered.some((o) => o.value === currentValue) ? currentValue : undefined);
+  if (filtered.length === 0) {
+    qsModelSelect.appendChild(new Option(query ? "No models match your search" : "No models found — check your API key", ""));
+  }
+}
+
+qsModelSearch.addEventListener("input", qsPopulateModels);
+
+async function qsLoadModels(selectedValue) {
+  qsModelOptions = [];
+  try {
+    const response = await fetch(`/api/models/llm?provider=${encodeURIComponent(qsProvider)}`);
+    if (response.ok) {
+      const models = await response.json();
+      qsModelOptions = sortByLabel(models.map((m) => ({ value: m.id, label: m.name })));
+    }
+  } catch (err) {
+    // handled by the empty-list hint in qsPopulateModels
+  }
+  qsModelSearch.value = "";
+  qsPopulateModels();
+  if (selectedValue && qsModelOptions.some((o) => o.value === selectedValue)) {
+    qsModelSelect.value = selectedValue;
+  }
+}
+
+async function qsAdvance() {
+  if (qsStep === 1) {
+    // Persist provider + key now - the model list on the next page needs them server-side.
+    const key = qsApiKeyInput.value.trim();
+    if (!key && !qsKeyAlreadySet) {
+      qsKeyHintEl.innerHTML = `<span class="qs-error">Add an API key to continue (or skip setup for now).</span><br>${QS_KEY_HINTS[qsProvider] || ""}`;
+      return;
+    }
+    const patch = {
+      user_display_name: qsNameInput.value.trim() || "You",
+      llm_provider: qsProvider,
+    };
+    if (key) {
+      if (qsProvider === "google_ai_studio") patch.google_ai_studio_api_key = key;
+      else if (qsProvider === "custom") patch.custom_openai_api_key = key;
+      else patch.openrouter_api_key = key;
+    }
+    if (qsProvider === "custom" && qsCustomUrlInput.value.trim()) {
+      patch.custom_openai_base_url = qsCustomUrlInput.value.trim();
+    }
+    qsNextBtn.disabled = true;
+    qsNextBtn.textContent = "Connecting…";
+    try {
+      await saveConfigPatch(patch);
+      qsApiKeyInput.value = "";
+      qsKeyAlreadySet = true;
+      qsStep++;
+      qsRender();
+      await qsLoadModels();
+    } catch (err) {
+      qsKeyHintEl.innerHTML = `<span class="qs-error">Couldn't save — is the server running?</span>`;
+    } finally {
+      qsNextBtn.disabled = false;
+      qsRender();
+    }
+    return;
+  }
+
+  if (qsStep === 2 && qsModelSelect.value) {
+    qsNextBtn.disabled = true;
+    try {
+      await saveConfigPatch({ openrouter_model: qsModelSelect.value });
+    } catch (err) { /* keep going - the model can be set later in Settings */ }
+    qsNextBtn.disabled = false;
+  }
+
+  if (qsStep === 3) {
+    document.getElementById("cfg-narrate").checked = qsNarrateInput.checked;
+    qsNextBtn.disabled = true;
+    try {
+      await saveConfigPatch({ tts_provider: qsTtsProviderSelect.value });
+    } catch (err) { /* recoverable later in Settings */ }
+    qsNextBtn.disabled = false;
+  }
+
+  if (qsStep === qsSteps.length - 1) {
+    qsFinish();
+    return;
+  }
+
+  qsStep++;
+  qsRender();
+}
+
+function qsFinish() {
+  localStorage.setItem(QS_DONE_KEY, "true");
+  closeModal(quickSetupModal);
+  loadConfig(); // re-sync the Settings form, model lists, and the setup banner
+}
+
+qsNextBtn.addEventListener("click", qsAdvance);
+qsBackBtn.addEventListener("click", () => { if (qsStep > 0) { qsStep--; qsRender(); } });
+qsSkipBtn.addEventListener("click", qsFinish);
+quickSetupModal.addEventListener("click", (event) => {
+  if (event.target === quickSetupModal) qsFinish();
+});
+
+qsNarrateInput.addEventListener("change", () => { qsTtsField.hidden = !qsNarrateInput.checked; });
+
+async function openQuickSetup() {
+  qsStep = 0;
+  qsNameInput.value = userDisplayName === "You" ? "" : userDisplayName;
+  qsApiKeyInput.value = "";
+  const cfg = await fetch("/api/config").then((r) => r.json()).catch(() => null);
+  if (cfg) {
+    qsSelectProvider(cfg.llm_provider || "openrouter");
+    qsCustomUrlInput.value = cfg.custom_openai_base_url || "";
+    qsTtsProviderSelect.value = cfg.tts_provider || "kokoro";
+    qsKeyAlreadySet = !providerKeyMissing(cfg);
+    qsApiKeyInput.placeholder = qsKeyAlreadySet ? "•••••••• (already set — leave blank to keep)" : "Paste your API key";
+  } else {
+    qsSelectProvider("openrouter");
+    qsKeyAlreadySet = false;
+  }
+  qsRender();
+  openModal(quickSetupModal);
+}
+
+document.getElementById("cfg-quick-setup").addEventListener("click", () => {
+  closeModal(settingsModal);
+  openQuickSetup();
+});
+
+// Setup banner — visible while the active provider has no API key; opens the wizard.
+const setupBanner = document.getElementById("setup-banner");
+document.getElementById("setup-banner-btn").addEventListener("click", openQuickSetup);
+
+function updateSetupBanner(cfg) {
+  setupBanner.hidden = !providerKeyMissing(cfg);
+}
+
+// Escape closes whichever modal is open (wizard counts as "skip" - it can be re-run any time).
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!quickSetupModal.hidden) { qsFinish(); return; }
+  for (const modal of [settingsModal, personalDataModal, diagnosticsModal]) {
+    if (!modal.hidden) { closeModal(modal); return; }
+  }
+});
+
 // --- Init ---
 
 async function init() {
@@ -3584,7 +3905,11 @@ async function init() {
   } else {
     switchChat(chats[0].id);
   }
-  loadConfig();
+  const cfg = await loadConfig();
+  // First run on this machine with nothing configured - walk through setup automatically.
+  if (cfg && !localStorage.getItem(QS_DONE_KEY) && providerKeyMissing(cfg)) {
+    openQuickSetup();
+  }
 }
 
 init();

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.core import reminders
 from app.services.system.processes import get_foreground_process_name
 
@@ -136,6 +138,13 @@ def execute_reminder_tool(name: str, arguments: dict) -> str:
         fire_at = (arguments.get("fire_at") or "").strip()
         if not message or not process or not fire_at:
             return "Couldn't set that alarm: missing message, game, or time."
+        try:
+            datetime.fromisoformat(fire_at)
+        except ValueError:
+            return (
+                f"Couldn't set that alarm: '{fire_at}' isn't a valid ISO 8601 datetime. "
+                "Use e.g. '2026-07-01T21:00:00' and try again."
+            )
         entry = reminders.add_alarm(message, process, fire_at)
         return f"Alarm [{entry['id']}] set for {fire_at} while {process} is active."
 
