@@ -1,9 +1,5 @@
 # TODO
 
-## Reduce Token Consumption:
-- [ ] **Remove Tool -> Fetch active process** - We should always feed this to the LLM automatically as it's just a few tokens, instead of having the LLM call it, doubling our costs.
-
-
 ## Frontend / UX
 
 - [ ] **`app.js` is ~4,000 lines in one file.** Split into ES modules: chat, voice/VAD, settings,

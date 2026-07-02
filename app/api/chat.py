@@ -25,7 +25,6 @@ from app.services.llm.app_volume_tool import APP_VOLUME_TOOLS, execute_set_appli
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
 from app.services.llm.memory_extraction import extract_and_apply_memory
-from app.services.llm.process_tool import PROCESS_TOOLS, execute_fetch_active_process
 from app.services.llm.reminder_tool import REMINDER_TOOLS, execute_reminder_tool
 from app.services.llm.screenshot_tool import SCREENSHOT_TOOLS, execute_take_screenshot, format_monitors_for_prompt
 from app.services.llm.steam_tool import STEAM_TOOLS, execute_fetch_steam_library, execute_lookup_steam_game
@@ -44,7 +43,6 @@ ALL_TOOLS = (
     + SCREENSHOT_TOOLS
     + VOLUME_TOOLS
     + LISTENING_TOOLS
-    + PROCESS_TOOLS
     + WEB_SEARCH_TOOLS
     + IGDB_TOOLS
     + STEAM_TOOLS
@@ -198,6 +196,15 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     # Variable content last — maximises cache hits on stable prefix above.
     system_content += "\n\n" + current_datetime_context()
 
+    # Injected instead of a fetch_active_process tool call — it's a few tokens, and having the
+    # model fetch it doubled the LLM cost of every conversation that needed it.
+    foreground = get_foreground_process_name()
+    if foreground:
+        system_content += (
+            f"\n\n[Active application] The currently focused application is: {foreground} "
+            "(if this is a browser or the companion app itself, the player likely alt-tabbed away from their game)."
+        )
+
     # Use the tracked game's process + session for memory filtering. The foreground process
     # would be the companion window when the user alt-tabs to chat — game_state gives us the
     # game that's actually being tracked regardless of what's in focus right now.
@@ -286,8 +293,6 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return message, None, {"type": "stop_listening"}
     if name == "set_application_volume":
         return execute_set_application_volume(arguments), None, None
-    if name == "fetch_active_process":
-        return execute_fetch_active_process(arguments), None, None
     if name == "web_search":
         return await execute_web_search(arguments), None, None
     if name == "lookup_game_info":

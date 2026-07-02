@@ -13,8 +13,8 @@ REMINDER_TOOLS = [
                 "give it, spoken every N minutes while that game is the one being actively played (paused "
                 "automatically while they're not playing it). Use this for repeated in-game nudges, e.g. "
                 "'remind me to save every 5 minutes' or 'tell me to drink water every 20 minutes while I "
-                "play this'. If the user doesn't name the game explicitly, call fetch_active_process first "
-                "and use that as the process."
+                "play this'. If the user doesn't name the game explicitly, use the currently focused "
+                "application from your context as the process."
             ),
             "parameters": {
                 "type": "object",
@@ -65,8 +65,8 @@ REMINDER_TOOLS = [
                 "once, at a specific date/time while that game is the one being played (it waits, rather "
                 "than firing late, if the game isn't in the foreground yet at that time). Use this for "
                 "one-off reminders, e.g. 'remind me in 20 minutes to check the auction house' or 'at 9pm "
-                "remind me to log off'. If the user doesn't name the game explicitly, call "
-                "fetch_active_process first and use that as the process."
+                "remind me to log off'. If the user doesn't name the game explicitly, use the currently "
+                "focused application from your context as the process."
             ),
             "parameters": {
                 "type": "object",
