@@ -1,7 +1,7 @@
 # TODO
 
 ## Gaming Journal & Memory improvements:
-- [ ] **Missing Game Knowledge** - Have the LLM fetch IGDB and search the web for a specific game whenever we start tracking it and generate correct trackers for it. Have it create it's own starting training data based on findings. Currently, training data never actually gets written at all. Probably because the LLm sees is blank and thinks it shouldn't build anything there.
+- [ ] **Missing Game Knowledge** - Have the LLM fetch IGDB and search the web for a specific game whenever we start tracking it and generate correct trackers for it. Have it create it's own starting training data by also searching for UI images or other stuff like that. Currently, training data never actually gets written at all. Probably because the LLm sees is blank and thinks it shouldn't build anything there.
 - [ ] **Uncomfirmed Observations** - While observations seem to be tracked correctly and are really relevant, They never seem to get stored as actual memories anymore. We need to run a confirmation pass whenever there are enough observations to analyze. The observations should be correctly sorted between the General memory, Game memories and playthrough memory. on each pass
 - [ ] **RAG Retrieval** - Since memories will probably start overcrowding, especially playthrough memories, we should switch to a RAG retrieval system instead. The General memories should always be fed to the LLM. But for all game/game session memories, we should use rag retrieval instead. 
 - [ ] **Proactive LLM** - Give the LLM the possibility to talk to the user, making comments, giving tips, etc. This should not happen too often, but only when relevant. The user should also be able to control it by adding limitations (like setting a fixed interval for when this can happen or even disabling it alltogether). The best model to do this is probably the Game State model, since it's also seeing the game screen. Give it a tool to talk to the user. When that happens, we add it as a new message in the active chat as a normal interaction.
@@ -14,29 +14,6 @@
 ## Random bugs:
 - [ ] **Remove markdown syntaxes from Narration.** - I'm tired of the TTS saying "asterisk" over and over again. All markdown characters need to be completely stripped from the prompt before sending over to TTS.
 - [ ] **Hold my beer, I have a speech** - Sometimes the main LLM replies with a huge chunk of text, which takes over 30 seconds to narrate. This is bad. And annoying. 
-<details>
-<summary>Example bad response</summary>
-Ooh, good question! Let me check your Steam library so I can recommend something you actually own and that fits your taste.
-
-I know you're into story-driven RPGs with strong companion writing, so let me see what we're working with here.
-
-Okay Edward, you've got a solid library! Here's my take based on your taste for story-driven RPGs with great companions:
-
-**If you haven't touched these yet, you should:**
-
-- **Baldur's Gate 3** - Peak companion writing, branching story, insane reactivity. If this is in your library, drop everything and play it.
-- **Disco Elysium** - More of a solo journey but the writing is on another level.
-- **Dragon Age: Origins / Inquisition** - Classic companion-focused RPGs.
-
-**Based on what you've played a lot of:**
-
-- You've got **3,000+ hours in Rocket League** and **900 in Deus Ex** - you clearly love both competitive AND deep story stuff.
-- Skyrim at 436 hours tells me you love open-world exploration, but Skyrim's companions are kinda mid honestly.
-
-Want me to dig deeper into your library for specific titles you haven't gotten around to? Sometimes the best game to play is the one you bought on sale and forgot about. I'll bet there's some hidden gems in those 171 games.
-
-Or if you want something fresh - **Baldur's Gate 3** is literally the answer if you want the best companion writing in gaming right now. No cap.
-</details>
 
 ## Frontend / UX
 
