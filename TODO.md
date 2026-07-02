@@ -1,5 +1,31 @@
 # TODO
 
+## Game-state / memory redesign (analyzed 2026-07-02, not yet approved for implementation)
+
+Root causes found: (1) scope silently degrades session→game in `memory_extraction.py:82-88`
+when no session is resolvable (the "Ironclad run saved as game memory" bug); (2) the OCR pass
+hard-codes every saved fact to session scope (`game_state_extraction.py:215-217`); (3) scope is
+invisible downstream — both game- and session-scope facts render as `(game: X)` in prompts;
+(4) the choice-certainty gate in `game_state_extraction.md` covers tracker fields only, while
+`save_memories` examples prime dialogue-outcome saving from OCR that can't show selection state;
+(5) `data.get(tid) or previous_values.get(tid)` makes wrong tracker values unclearable and
+self-reinforcing; (6) `confidence` gates only training — low-confidence windows still write memory.
+
+- [ ] **Layer 1 (fixes, no redesign):** never silently degrade scope; store explicit
+  `scope` field on memory entries (+ migration) and render it in prompts/UI; let the OCR pass
+  choose scope per fact; extend the choice-certainty gate to `save_memories` (replace the
+  Shadowheart example with a post-confirmation version); make tracker fields clearable
+  (omitted key = keep previous, explicit null = clear).
+- [ ] **Layer 2 (memory service + journal):** single `remember(content, scope, source,
+  confidence)` entry point owning scope resolution/dedup; demote the OCR pass from
+  memory-writer to observer — it appends to a per-session observation journal, and promotion
+  to real memory happens only via the chat extraction pass (corroborated by conversation) or a
+  consolidation pass (seen in ≥2 windows / high confidence).
+- [ ] **Layer 3 (vision-grounded extraction):** `game_state_extraction_mode: ocr|hybrid|vision`
+  — keep OCR for free change-detection/dedup, attach downscaled screenshots to the structuring
+  pass (hybrid: only for choice/milestone-shaped windows or after low confidence). Fixes the
+  BG3/minimal-UI class of errors; largely obsoletes the training-pass workaround.
+
 ## Medium priority
 
 - [ ] **More test coverage** — the core stores are covered (31 tests); still untested:
