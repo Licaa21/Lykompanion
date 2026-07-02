@@ -1753,6 +1753,11 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   white-space: pre-wrap; word-break: break-word;
   color: var(--t1); font-size: 12px; line-height: 1.5;
 }
+.debug-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 /* ════════════════════════════════════════════════════
    SETUP BANNER — shown while no API key is configured

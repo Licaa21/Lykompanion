@@ -697,6 +697,20 @@
     </div>
   </div>
 
+  <!-- ── DEBUG DETAIL MODAL ─────────────────────────────────────────── -->
+  <div id="debug-detail-modal" class="modal-overlay" hidden>
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h2 id="debug-detail-title">Debug Entry</h2>
+        <button type="button" class="modal-close" data-close="debug-detail-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Full debug request details. Scroll to inspect the request messages, tool calls, and result payload.</p>
+        <div id="debug-detail-body" class="debug-detail-body"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── QUICK SETUP WIZARD ─────────────────────────────────────────── -->
   <!-- Auto-opens on first run (no API key configured yet); re-launchable from Settings. -->
   <div id="quick-setup-modal" class="modal-overlay" hidden>
