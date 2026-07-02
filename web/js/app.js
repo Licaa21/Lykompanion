@@ -651,25 +651,34 @@ async function synthesizeSentence(text) {
 
 // The companion may embed markdown images/links (see renderMessageMarkup). Images are shown
 // visually, so narration skips them entirely rather than reading the alt text aloud; links
-// still speak their label text, just never the URL. Also strips emojis as a safety net in case
-// the model doesn't follow the "no emojis" system prompt rule. Must run BEFORE sentence-splitting
-// (see extractCompleteSentences) - a URL like "example.com/page.html" contains periods that the
-// splitter would otherwise cut through, tearing markdown link/image syntax apart mid-pattern.
+// still speak their label text, just never the URL. Everything else markdown (emphasis,
+// headers, bullets, code, fences) is stripped down to plain speakable text so the TTS never
+// reads "asterisk" aloud. Also strips emojis as a safety net in case the model doesn't follow
+// the "no emojis" system prompt rule. Runs once per complete sentence (in enqueueNarration) -
+// never on the still-streaming buffer, where half-arrived URLs/links would be torn mid-pattern
+// and their tails leaked to TTS on the next delta.
 const EMOJI_REGEX = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}]/gu;
 
 function stripMarkdownForNarration(text) {
   return text
-    .replace(/!\[([^\]]*)\]\((?:https?:\/\/|\/api\/)[^\s)]+\)/g, "")
-    .replace(/\[([^\]]+)\]\((?:https?:\/\/|\/api\/)[^\s)]+\)/g, (_m, label) => label)
+    .replace(/^```[^\n]*$/gm, "")
+    .replace(/!\[([^\]]*)\]\([^\s)]+\)/g, "")
+    .replace(/\[([^\]]+)\]\([^\s)]+\)/g, (_m, label) => label)
     .replace(/https?:\/\/[^\s<>"']+/g, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/^[ \t]*(?:[-*_][ \t]*){3,}$/gm, "")
+    .replace(/[*_#`~]+/g, "")
     .replace(EMOJI_REGEX, "")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
 
 function enqueueNarration(text) {
-  if (!text || !text.trim()) return Promise.resolve();
-  const promise = synthesizeSentence(stripMarkdownForNarration(text));
+  const cleaned = text ? stripMarkdownForNarration(text) : "";
+  if (!cleaned) return Promise.resolve();
+  const promise = synthesizeSentence(cleaned);
   return new Promise((resolveItem) => {
     ttsQueue.push({ promise, resolveItem });
     processTtsQueue();
@@ -1026,13 +1035,23 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
 }
 
 // Splits a growing text buffer into complete sentences plus a leftover
-// remainder (incomplete sentence still being streamed in).
+// remainder (incomplete sentence still being streamed in). Operates on RAW
+// (unstripped) text: a sentence boundary is terminal punctuation followed by
+// whitespace, or a newline - never punctuation followed by more text, so the
+// periods inside a still-streaming URL ("example.com/pa...") are not cut
+// through. A trailing markdown image/link that hasn't closed its ")" yet is
+// held back whole, so stripMarkdownForNarration only ever sees complete
+// patterns. Punctuation at the very end of the buffer stays in the remainder
+// (more of the same token may still arrive); callers flush the remainder when
+// the stream ends.
 function extractCompleteSentences(buffer) {
+  const holdAt = buffer.search(/!?\[[^\]]*(?:\]\([^)\s]*)?$/);
+  const splittable = holdAt === -1 ? buffer : buffer.slice(0, holdAt);
   const complete = [];
-  const regex = /[^.!?\n]*[.!?\n]+/g;
+  const regex = /(?:[^.!?\n]+|[.!?](?!\s))*(?:[.!?]+\s+|\n+)/g;
   let match;
   let lastIndex = 0;
-  while ((match = regex.exec(buffer)) !== null) {
+  while ((match = regex.exec(splittable)) !== null) {
     const sentence = match[0].trim();
     if (sentence) complete.push(sentence);
     lastIndex = regex.lastIndex;
@@ -1127,10 +1146,9 @@ async function sendMessage(text) {
 
         if (narrateEnabled) {
           sentenceBuffer += payload.delta;
-          // Strip before splitting into sentences, not after - otherwise the sentence
-          // splitter cuts through periods inside URLs before the markdown stripper ever
-          // sees a complete pattern to match.
-          const { complete, remainder } = extractCompleteSentences(stripMarkdownForNarration(sentenceBuffer));
+          // Split the RAW buffer; markdown stripping happens per complete sentence
+          // inside enqueueNarration, so patterns spanning multiple deltas stay intact.
+          const { complete, remainder } = extractCompleteSentences(sentenceBuffer);
           sentenceBuffer = remainder;
           for (const sentence of complete) {
             enqueueNarration(sentence);
@@ -1311,7 +1329,7 @@ async function sendDirectVoice(wavBlob) {
           chatLog.scrollTop = chatLog.scrollHeight;
           if (narrateEnabled) {
             sentenceBuffer += payload.delta;
-            const { complete, remainder } = extractCompleteSentences(stripMarkdownForNarration(sentenceBuffer));
+            const { complete, remainder } = extractCompleteSentences(sentenceBuffer);
             sentenceBuffer = remainder;
             for (const sentence of complete) enqueueNarration(sentence);
           }

@@ -1,18 +1,9 @@
 # TODO
 
-## Random bugs:
-
-- [ ] **Remove markdown syntaxes from Narration.** - I'm tired of the TTS saying "asterisk" over and over again. All markdown characters need to be completely stripped from the prompt before sending over to TTS.
-- [ ] **LLM narrates image/picture links** - When the reply contains a markdown image or a bare image URL, the TTS reads out the full URL or alt text. Strip `![...](...)`  and bare image URLs from the narration text before sending to TTS, same pass as markdown cleanup.
-- [ ] **TTS chirp / click on silence-to-speech transition** - There is a brief pop or click artifact at the very start of each TTS audio clip, audible when the audio goes from silence to the first spoken word. Likely a missing fade-in or a DC offset in the raw PCM. Needs investigation: try a short linear fade-in on the audio buffer before playback, or check if the TTS provider has a leading-silence / warmup option.
-- [ ] **Hold my beer, I have a speech** - Sometimes the main LLM replies with a huge chunk of text, which takes over 30 seconds to narrate. This is bad. And annoying.
-
 ## Frontend / UX
 
 - [ ] **`app.js` is ~4,000 lines in one file.** Split into ES modules: chat, voice/VAD, settings,
-  game-state panel, quick-setup, toasts.
-- [ ] **Accessibility pass, part 2** — aria-labels are done; still open: `--t3` contrast check,
-  screen-reader usability of the model `<select>`s, focus trapping in modals.
+  game-state panel, quick-setup, toasts. 
 
 ## Ideas / nice-to-have
 
