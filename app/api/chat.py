@@ -9,7 +9,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openai import APIError
 
-from app.core import debug_log, game_state, memory
+from app.core import debug_log, game_state, memory, reminders as reminders_store
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -56,7 +56,37 @@ MAX_TOOL_ITERATIONS = 8
 
 
 
-def _build_base_messages(include_screenshot: bool) -> list[dict]:
+def _format_reminders_for_prompt() -> str:
+    """Active reminders/alarms with their ids - without this the model can't answer "what
+    reminders do I have?" and can't remove/cancel one it didn't create earlier this session
+    (remove_reminder/cancel_alarm take an id it would otherwise never have seen)."""
+    entries = reminders_store.load_entries()
+    if not entries:
+        return ""
+    lines = []
+    for e in entries:
+        if e["kind"] == "reminder":
+            lines.append(f"- [{e['id']}] recurring reminder, every {e['interval_minutes']} min while {e['process']} is played: \"{e['message']}\"")
+        else:
+            lines.append(f"- [{e['id']}] one-time alarm at {e['fire_at']} while {e['process']} is played: \"{e['message']}\"")
+    return "Active reminders/alarms the user has set (reference the id to remove/cancel one):\n" + "\n".join(lines)
+
+
+def _screenshot_message() -> dict:
+    """A user-role message carrying a fresh screenshot. Appended adjacent to the newest message
+    (not before the whole history) so the model reads it as current context, not as something
+    that was on screen dozens of messages ago."""
+    screenshot_b64 = capture_primary_monitor_b64()
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": load_prompt("screenshot_context")},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}},
+        ],
+    }
+
+
+def _build_base_messages() -> list[dict]:
     system_content = load_prompt("system_companion")
 
     custom_instructions = load_custom_instructions().strip()
@@ -80,6 +110,10 @@ def _build_base_messages(include_screenshot: bool) -> list[dict]:
     if memories:
         system_content += "\n\n" + memories
 
+    reminders_text = _format_reminders_for_prompt()
+    if reminders_text:
+        system_content += "\n\n" + reminders_text
+
     game_state_text = game_state.format_game_state_for_prompt()
     divergence_warning = game_state.pop_pending_divergence(tracked_process) if tracked_process else None
     if game_state_text:
@@ -87,21 +121,7 @@ def _build_base_messages(include_screenshot: bool) -> list[dict]:
     if divergence_warning:
         system_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
 
-    messages = [{"role": "system", "content": system_content}]
-
-    if include_screenshot:
-        screenshot_b64 = capture_primary_monitor_b64()
-        messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": load_prompt("screenshot_context")},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}},
-                ],
-            }
-        )
-
-    return messages
+    return [{"role": "system", "content": system_content}]
 
 
 def _limit_history(messages: list[dict]) -> list[dict]:
@@ -282,8 +302,11 @@ async def _stream_chat_with_tools(
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    messages = _build_base_messages(request.include_screenshot)
+    messages = _build_base_messages()
     messages.extend(_limit_history([m.model_dump() for m in request.messages]))
+    if request.include_screenshot:
+        # Right before the newest user message: screenshot as context, then the question.
+        messages.insert(max(1, len(messages) - 1), _screenshot_message())
     last_user_message = request.messages[-1].content if request.messages else ""
 
     try:
@@ -302,8 +325,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @router.post("/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
-    messages = _build_base_messages(request.include_screenshot)
+    messages = _build_base_messages()
     messages.extend(_limit_history([m.model_dump() for m in request.messages]))
+    if request.include_screenshot:
+        messages.insert(max(1, len(messages) - 1), _screenshot_message())
     last_user_message = request.messages[-1].content if request.messages else ""
 
     async def event_generator():
@@ -335,8 +360,11 @@ async def chat_voice(
     """Sends voice audio to the LLM. In transcription mode, a dedicated audio-input model
     transcribes it first and the main model only ever sees text; otherwise the raw audio goes
     straight to the (audio-capable) main model, skipping local STT."""
-    messages = _build_base_messages(include_screenshot)
+    messages = _build_base_messages()
     messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
+    if include_screenshot:
+        # Right before the voice message it accompanies: screenshot as context, then the question.
+        messages.append(_screenshot_message())
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None
@@ -384,8 +412,10 @@ async def chat_voice_stream(
 ) -> StreamingResponse:
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
     but emits SSE deltas so the reply types in live rather than appearing all at once."""
-    messages = _build_base_messages(include_screenshot)
+    messages = _build_base_messages()
     messages.extend(_limit_history([ChatMessage.model_validate(m).model_dump() for m in json.loads(history)]))
+    if include_screenshot:
+        messages.append(_screenshot_message())
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None

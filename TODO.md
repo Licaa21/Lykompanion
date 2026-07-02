@@ -1,7 +1,28 @@
 # TODO — Improvement Opportunities
 
-Found during the full code review on 2026-07-02. Bugs found in that review were fixed
-immediately (see git diff); these are the remaining improvements, roughly by priority.
+**Everything below is still OPEN.** Bugs found during the 2026-07-02 review were fixed and
+committed immediately — they are NOT listed here. For the record, already fixed:
+
+<details>
+<summary>✅ Already fixed (2026-07-02, not TODOs)</summary>
+
+- Alarms never fired (naive vs aware datetime crash); malformed timestamps stalled all reminders.
+- LLM client cache cleared itself when two providers were configured.
+- Streaming tool-loop exhaustion ended the stream silently (empty bubble).
+- Server bound to 0.0.0.0 (LAN-exposed, no auth) → now 127.0.0.1 only.
+- Voice messages lost from chat history when the request errored.
+- Narration TTS queue leaked one blob URL per spoken sentence.
+- Background pollers threw unhandled rejections on any server hiccup.
+- Voice replies waited for the full response before narrating → now sentence-pipelined.
+- Prompt audit: stale `game_specific` schema in memory_extraction.md (broke scope tagging);
+  memory extraction now told which game is tracked; active reminders/alarms now injected into
+  the system prompt (model can list/remove them); screenshots now placed next to the newest
+  message instead of before all history; reserved-key collision guard for custom tracker ids;
+  training-data document now has a compactness rule; dead narration.md prompt removed.
+
+</details>
+
+These are the remaining improvements, roughly by priority.
 
 ## High priority
 

@@ -112,7 +112,10 @@ def set_trackers(process: str, trackers: list[dict]) -> list[dict]:
     first, regardless of what the caller sent - it can't be removed or edited."""
     activity = dict(DEFAULT_TRACKERS[0])
     cleaned: list[dict] = []
-    seen_ids = {activity["id"]}
+    # The extraction response uses tracker ids as top-level JSON keys alongside these reserved
+    # keys - a user tracker labeled e.g. "Confidence" must not collide with them (the dedupe
+    # suffixing below renames it to confidence_2 instead).
+    seen_ids = {activity["id"], "confidence", "save_memories", "remove_memory_ids", "divergence_warning"}
     for t in trackers:
         label = (t.get("label") or "").strip()
         if not label:

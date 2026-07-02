@@ -1,1 +1,0 @@
-Narrate the current screen for the user in a brief, natural spoken style. Describe what's notable or changed, not everything visible. Avoid lists or formatting — this text will be sent directly to text-to-speech.

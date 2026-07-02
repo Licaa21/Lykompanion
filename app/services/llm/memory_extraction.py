@@ -28,12 +28,20 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     tracked_session = gs["session_id"] if gs else None
     known_facts = memory.format_memories_for_prompt(tracked_process, tracked_session) or "Known facts about the user: none yet."
     game_state_text = game_state.format_game_state_for_prompt()
+    # The scope decision ("user" vs "game"/"session") is anchored to what's actually running -
+    # without stating it explicitly, the model can only infer it from the session snapshot,
+    # which is absent whenever no tracker values have been extracted yet.
+    tracked_line = (
+        f"Currently tracked game (actively being played right now): {tracked_process}"
+        if tracked_process
+        else "No game is currently being tracked (nothing is actively played right now)."
+    )
     messages = [
         {"role": "system", "content": load_prompt("memory_extraction")},
         {
             "role": "user",
             "content": (
-                f"{current_datetime_context()}\n\n{known_facts}\n\n"
+                f"{current_datetime_context()}\n\n{tracked_line}\n\n{known_facts}\n\n"
                 + (f"{game_state_text}\n\n" if game_state_text else "")
                 + f"Latest exchange:\nUser: {user_message}\nCompanion: {assistant_message}"
             ),
