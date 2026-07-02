@@ -1,15 +1,17 @@
 # TODO
 
 ## Gaming Journal & Memory improvements:
+
 - [ ] **Missing Game Knowledge** - Have the LLM fetch IGDB and search the web for a specific game whenever we start tracking it and generate correct trackers for it. Have it create it's own starting training data by also searching for UI images or other stuff like that. Currently, training data never actually gets written at all. Probably because the LLm sees is blank and thinks it shouldn't build anything there.
 - [ ] **Uncomfirmed Observations** - While observations seem to be tracked correctly and are really relevant, They never seem to get stored as actual memories anymore. We need to run a confirmation pass whenever there are enough observations to analyze. The observations should be correctly sorted between the General memory, Game memories and playthrough memory. on each pass
-- [ ] **RAG Retrieval** - Since memories will probably start overcrowding, especially playthrough memories, we should switch to a RAG retrieval system instead. The General memories should always be fed to the LLM. But for all game/game session memories, we should use rag retrieval instead. 
+- [ ] **RAG Retrieval** - Since memories will probably start overcrowding, especially playthrough memories, we should switch to a RAG retrieval system instead. The General memories should always be fed to the LLM. But for all game/game session memories, we should use rag retrieval instead.
 - [ ] **Proactive LLM** - Give the LLM the possibility to talk to the user, making comments, giving tips, etc. This should not happen too often, but only when relevant. The user should also be able to control it by adding limitations (like setting a fixed interval for when this can happen or even disabling it alltogether). The best model to do this is probably the Game State model, since it's also seeing the game screen. Give it a tool to talk to the user. When that happens, we add it as a new message in the active chat as a normal interaction.
 - [ ] **Smarter Game State Model** - We need to allow the Game State Model to think when saving observations or facts. Give it web search access so it can search game-specific stuff if something from the screenshots or the OCR is unknown to the model. E.g: Model sees "Lumina" in Claire Obscur, but has no idea what that word actually means in the game context.
 
 ## Random bugs:
+
 - [ ] **Remove markdown syntaxes from Narration.** - I'm tired of the TTS saying "asterisk" over and over again. All markdown characters need to be completely stripped from the prompt before sending over to TTS.
-- [ ] **Hold my beer, I have a speech** - Sometimes the main LLM replies with a huge chunk of text, which takes over 30 seconds to narrate. This is bad. And annoying. 
+- [ ] **Hold my beer, I have a speech** - Sometimes the main LLM replies with a huge chunk of text, which takes over 30 seconds to narrate. This is bad. And annoying.
 
 ## Frontend / UX
 
