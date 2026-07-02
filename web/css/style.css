@@ -36,6 +36,9 @@
   --t1:  #ebebf2;
   --t2:  #b3b4c5;
   --t3:  #85859b;
+  /* Alias for --t3 - newer components reference this name; without a definition,
+     var(--text-muted) is invalid and the text silently inherits full-brightness color. */
+  --text-muted: var(--t3);
 
   --r1: 5px;  --r2: 8px;  --r3: 12px;  --r4: 16px;  --r5: 22px;
   --pill: 9999px;
@@ -228,45 +231,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   opacity: 0.55;
   text-align: center;
   line-height: 1.5;
-}
-
-/* ── Welcome screen (shown in chat area when no messages) ── */
-.chat-welcome {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex: 1;
-  padding: 24px 24px 28px;
-  text-align: center;
-  pointer-events: none;
-  user-select: none;
-}
-/* In the centered/empty state, the welcome stacks above the composer */
-.chat-panel.empty .chat-welcome {
-  flex: none;
-  justify-content: center;
-  padding: 0 24px 16px;
-}
-.chat-welcome-logo {
-  width: 90px;
-  height: 90px;
-  object-fit: contain;
-  opacity: 0.85;
-  filter: drop-shadow(0 0 24px var(--accent-glow));
-}
-.chat-welcome-heading {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--t1);
-  margin: 0;
-}
-.chat-welcome-sub {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin: 0;
-  opacity: 0.7;
 }
 
 /* ── Empty/centered-composer state ── */

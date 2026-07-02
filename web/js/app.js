@@ -50,6 +50,10 @@ function userAvatarMarkup() {
 
 // Already-rendered messages don't re-run appendMessage when the user changes their picture or
 // name, so update the DOM in place instead of requiring a chat switch to pick up the change.
+function emptyStateGreeting() {
+  return userDisplayName === "You" ? "What's up?" : `What's up, ${userDisplayName}?`;
+}
+
 function refreshVisibleUserIdentity() {
   document.querySelectorAll(".message.user").forEach((el) => {
     const avatarEl = el.querySelector(".msg-avatar");
@@ -57,6 +61,10 @@ function refreshVisibleUserIdentity() {
     const nameEl = el.querySelector(".msg-role-name");
     if (nameEl) nameEl.textContent = userDisplayName;
   });
+  // The empty-state greeting renders during init, before the display name arrives from
+  // /api/config - refresh it in place too, or the first screen greets "You" forever.
+  const emptyHeading = document.querySelector(".chat-empty-heading");
+  if (emptyHeading) emptyHeading.textContent = emptyStateGreeting();
 }
 
 async function refreshAvatarStatus() {
@@ -492,7 +500,8 @@ function renderEmptyState() {
   wrap.appendChild(logo);
 
   const heading = document.createElement("h1");
-  heading.textContent = `What's up, ${userDisplayName}?`;
+  heading.className = "chat-empty-heading";
+  heading.textContent = emptyStateGreeting();
   wrap.appendChild(heading);
 
   const sub = document.createElement("p");
@@ -2705,15 +2714,20 @@ async function checkPendingReminders() {
   }
   if (pending.length === 0) return;
 
+  // With lazy chat creation there's often no active chat (app idling on the empty state) -
+  // a fired reminder must still be spoken and kept, not acked into the void, so open a chat
+  // for it the same way sending a message would.
+  if (!getActiveChat()) {
+    exitEmptyState();
+    createNewChat();
+  }
   const chat = getActiveChat();
   const narrateEnabled = document.getElementById("cfg-narrate").checked;
 
   for (const item of pending) {
-    if (chat) {
-      appendMessage("assistant", item.text, null, true);
-      addMessageToChat(chat, "assistant", item.text);
-      if (narrateEnabled) enqueueNarration(item.text);
-    }
+    appendMessage("assistant", item.text, null, true);
+    addMessageToChat(chat, "assistant", item.text);
+    if (narrateEnabled) enqueueNarration(item.text);
     await fetch(`/api/reminders/pending/${item.id}`, { method: "DELETE" }).catch(() => {});
   }
 }

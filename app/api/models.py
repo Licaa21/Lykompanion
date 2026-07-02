@@ -72,7 +72,12 @@ async def get_tts_models() -> dict:
     have "audio" output but are music generators, not TTS, and 400 on the
     audio.speech endpoint ("Model does not exist").
     """
-    openrouter_models = await list_models("openrouter")
+    # A transient OpenRouter failure must not 500 the whole endpoint - that would empty every
+    # voice dropdown (Kokoro and Chirp included) until the user hits "Refresh Model Lists".
+    try:
+        openrouter_models = await list_models("openrouter")
+    except Exception:
+        openrouter_models = []
     speech_models = [m for m in openrouter_models if "speech" in m["output_modalities"]]
     kokoro_voices, chirp3_voices = await asyncio.gather(list_kokoro_voices(), list_chirp3_voices())
     return {"kokoro_voices": kokoro_voices, "openrouter_speech_models": speech_models, "chirp3_voices": chirp3_voices}
