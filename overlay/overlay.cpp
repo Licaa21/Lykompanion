@@ -729,7 +729,7 @@ void RelayoutToasts() {
             cardH[i] = PAD + top + 4.0f + p.textH + PAD;
         } else {
             const wchar_t* status = nullptr;
-            if (t.isImage && t.imgState == ImgLoading) status = L"Loading image…";
+            if (t.isImage && t.imgState == ImgLoading) status = L"Loading image\x2026";
             else if (t.isImage && t.imgState == ImgFailed) status = L"[image unavailable]";
             std::wstring body = status ? status : t.text;
             // Reply toasts get the logo avatar; text wraps in the reduced width.
@@ -1177,7 +1177,7 @@ void RenderHandsFree() {
     DrawEmoji(rt, L"\U0001F3A4",
               D2D1::RectF(PAD, (h - 24) / 2.0f, PAD + 24, (h + 24) / 2.0f), white);
     float th = 0;
-    IDWriteTextLayout* tl = MakeLayout(L"Listening…", g_fmtHead, (float)(w - PAD - 34), &th);
+    IDWriteTextLayout* tl = MakeLayout(L"Listening\x2026", g_fmtHead, (float)(w - PAD - 34), &th);
     if (tl) {
         rt->DrawTextLayout(D2D1::Point2F(PAD + 30, (h - th) / 2.0f), tl, white);
         SafeRelease(&tl);
