@@ -371,7 +371,6 @@ async def _stream_chat_with_tools(
     events like {"type": "volume", ...} or {"type": "stop_listening", ...} the moment a tool
     changes something the frontend needs to react to immediately, rather than only after the
     full reply finishes."""
-    prior_round_had_text = False
     for _ in range(MAX_TOOL_ITERATIONS):
         tool_calls: dict[int, dict] = {}
         round_text = ""
@@ -380,10 +379,6 @@ async def _stream_chat_with_tools(
             messages, model=model, tools=ALL_TOOLS, source=source, provider=settings.llm_provider
         ):
             if delta.content:
-                # Separate this round's text from the previous round's, so segments emitted
-                # around a tool call don't fuse into one run-on sentence in the UI.
-                if prior_round_had_text and not round_text:
-                    yield {"type": "delta", "text": "\n\n"}
                 round_text += delta.content
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
@@ -400,7 +395,12 @@ async def _stream_chat_with_tools(
             return
 
         if round_text:
-            prior_round_had_text = True
+            # Flush the boundary the moment this round ends, rather than waiting for the next
+            # round's first delta - a slow tool call (e.g. a Steam API fetch) could otherwise
+            # leave this round's trailing sentence stuck in the frontend's sentence buffer,
+            # un-narrated, for as long as the tool takes (or forever, if the next round is
+            # tool-only and never emits text at all).
+            yield {"type": "delta", "text": "\n\n"}
         # Keep the text the model emitted alongside its tool calls - dropping it means the next
         # iteration can't see what it already said and restarts the reply from scratch, so the
         # user gets the same greeting stacked 3-4 times in one bubble.
