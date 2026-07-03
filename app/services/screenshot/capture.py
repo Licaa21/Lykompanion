@@ -45,6 +45,51 @@ def get_active_monitor_index() -> int:
     return 1
 
 
+def get_foreground_monitor_index() -> int:
+    """Monitor index (1-based) that the focused/foreground window sits on.
+
+    Used by the OCR poller so it captures the monitor the game is actually on, rather than
+    wherever the mouse happens to be — e.g. a controller player whose cursor is parked on a
+    second monitor. Falls back to the cursor-based guess, then monitor 1.
+    """
+    monitors = list_monitors()
+    if not monitors:
+        return 1
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if hwnd:
+                MONITOR_DEFAULTTONEAREST = 2
+                hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [
+                        ("cbSize", wintypes.DWORD),
+                        ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT),
+                        ("dwFlags", wintypes.DWORD),
+                    ]
+
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                    # Match the Win32 monitor to an mss monitor by its top-left origin.
+                    for m in monitors:
+                        if m["left"] == mi.rcMonitor.left and m["top"] == mi.rcMonitor.top:
+                            return m["index"]
+        except Exception:
+            pass
+
+    # Foreground lookup failed (or coordinate spaces didn't line up) — fall back to the
+    # cursor-based heuristic, then monitor 1.
+    return get_active_monitor_index()
+
+
 def capture_monitor_image(monitor_index: int | None = None) -> Image.Image:
     """Capture one monitor (1-based index) and return the raw, full-resolution PIL image."""
     if monitor_index is None or monitor_index < 1:
