@@ -1,6 +1,7 @@
 """Desktop launcher — starts the FastAPI server in a background thread, then opens a
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
+import ctypes
 import faulthandler
 import json
 import os
@@ -31,6 +32,17 @@ os.environ.setdefault(
     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
     "--disable-features=CalculateNativeWinOcclusion",
 )
+
+# pywebview only marks the process DPI-aware itself inside webview.start() (and only once it
+# gets around to creating the "master" window) - too late for the overlay window below, which
+# needs GetSystemMetrics to return real physical screen dimensions *before* start() is called
+# in order to size itself to cover the whole screen. Without this, GetSystemMetrics returns
+# OS-virtualized (scaled-down) values on any display with DPI scaling enabled, and the overlay
+# ends up smaller than the actual screen.
+try:
+    ctypes.windll.user32.SetProcessDPIAware()
+except Exception:
+    pass
 
 PORT = 6692
 URL = f"http://localhost:{PORT}"
@@ -179,20 +191,30 @@ def _make_overlay_click_through_setter(overlay_window):
     """Returns set_click_through(enabled): True turns the overlay window into a pure display
     surface - mouse input falls through to the game underneath, never focusable, hidden from
     Alt-Tab and the taskbar. False lifts just the click-through bit so the layout editor's
-    drag handles become interactive (the window stays on top and non-activating)."""
+    drag handles become interactive (the window stays on top and non-activating).
+
+    Deliberately does NOT touch WS_EX_LAYERED / SetLayeredWindowAttributes: pywebview's
+    `transparent=True` already gets real per-pixel transparency from WebView2's own
+    DirectComposition-based compositing (via `SupportsTransparentBackColor` +
+    `DefaultBackgroundColor = Transparent`, see winforms.py). Forcing the window into legacy
+    GDI "layered" mode on top of that breaks it - the whole window then renders as an opaque
+    dark rectangle instead of showing the desktop/game through it, because WebView2 composites
+    its transparent regions against black when the top-level window isn't DWM-composited
+    normally. WS_EX_TRANSPARENT (click-through) and WS_EX_TOOLWINDOW/WS_EX_NOACTIVATE don't
+    require WS_EX_LAYERED at all - they're independent, purely input/taskbar behavior."""
     import ctypes
 
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_TRANSPARENT = 0x20
     WS_EX_TOOLWINDOW = 0x80
-    WS_EX_LAYERED = 0x80000
     WS_EX_NOACTIVATE = 0x8000000
-    LWA_ALPHA = 0x2
+    SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     def _update_styles(hwnd: int, add: int, remove: int) -> None:
         current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (current | add) & ~remove)
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
 
     def set_click_through(enabled: bool) -> None:
         try:
@@ -201,10 +223,7 @@ def _make_overlay_click_through_setter(overlay_window):
             return  # window already destroyed
 
         if enabled:
-            _update_styles(hwnd, WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, 0)
-            # A layered window without an explicit alpha stops rendering - pin it fully opaque
-            # (visual transparency comes from WebView2's transparent background, not alpha).
-            user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
+            _update_styles(hwnd, WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, 0)
         else:
             _update_styles(hwnd, 0, WS_EX_TRANSPARENT)
 
@@ -292,7 +311,6 @@ def main() -> None:
     # only at launch: enabling the setting takes effect on the next start.
     from app.core.config import settings as app_settings
     if app_settings.overlay_enabled:
-        import ctypes
         overlay_win = webview.create_window(
             "Lykompanion Overlay",
             f"{URL}/overlay.html?token={API_TOKEN}",

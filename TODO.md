@@ -1,5 +1,8 @@
 # TODO
 
+## Needs user verification
+
+- [ ] **Overlay transparency/sizing fix (untested)** — fixed the overlay rendering as an opaque dark rectangle (was setting `WS_EX_LAYERED` for click-through, which breaks WebView2's own per-pixel transparency) and not covering the full screen on scaled displays (`SetProcessDPIAware()` now called at `run_app.py` import time, before window sizing). Needs a real run to confirm both are actually fixed.
 
 ## Ideas / nice-to-have
 
