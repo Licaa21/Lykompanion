@@ -96,7 +96,8 @@ micDeviceSelect.addEventListener("change", () => {
 });
 outputDeviceSelect.addEventListener("change", async () => {
   setSelectedOutputId(outputDeviceSelect.value);
-  await applyOutputDevice(narrationAudio);  // apply straight away to the persistent narration player
+  await applyOutputDevice(narrationAudio);   // persistent narration player
+  await applyOutputToAudioContext();          // beeps / wake chime / SFX
 });
 document.getElementById("cfg-refresh-devices").addEventListener("click", populateAudioDevices);
 // A device being plugged/unplugged while Settings is open re-syncs the lists.

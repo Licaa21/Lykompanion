@@ -1,7 +1,30 @@
 let audioCtx;
 
+// Single shared Web Audio context for every synthesized cue (mic beeps, wake chime, decorative
+// SFX) and the live-mic capture graph in voice.js. Created lazily and routed to the user's chosen
+// audio-output device (AudioContext.setSinkId, Chromium 110+) so beeps/SFX follow the same output
+// as narration; falls back to the system default where setSinkId isn't supported.
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    applyOutputToAudioContext();
+  }
+  return audioCtx;
+}
+
+// Re-route the shared context to the currently selected output device. Called on creation and when
+// the user changes the output in Settings. No-op before the context exists or without setSinkId.
+async function applyOutputToAudioContext() {
+  if (!audioCtx || typeof audioCtx.setSinkId !== "function") return;
+  try {
+    await audioCtx.setSinkId(getSelectedOutputId() || "");
+  } catch (err) {
+    /* device gone / unsupported — stays on default */
+  }
+}
+
 function beep(frequency, duration) {
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   const oscillator = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   oscillator.frequency.value = frequency;
@@ -18,7 +41,7 @@ function beep(frequency, duration) {
 // is back on without an LLM/TTS round-trip, since the main use case is couch/controller, eyes off
 // the screen.
 function playWakeChime() {
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   const notes = [
     { frequency: 660, start: 0 },
     { frequency: 990, start: 0.12 },
@@ -78,7 +101,7 @@ function playSfxSweep(startFreq, endFreq, startTime, duration, peakGain) {
 // A message was sent to the LLM - three quiet "dots".
 function playSentSfx() {
   if (!sfxOn()) return;
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   for (let i = 0; i < 3; i++) {
     playSfxNote(1100, audioCtx.currentTime + i * 0.11, 0.05, 0.06, "sine");
   }
@@ -121,7 +144,7 @@ const TOOL_SFX = {
 
 function playToolSfx(toolName) {
   if (!sfxOn()) return;
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   (TOOL_SFX[toolName] || playGenericToolSfx)();
 }
 

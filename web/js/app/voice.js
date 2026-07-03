@@ -32,7 +32,7 @@ function encodeWav(samples, sampleRate) {
 
 async function blobToWavBlob(blob) {
   const arrayBuffer = await blob.arrayBuffer();
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
   return encodeWav(audioBuffer.getChannelData(0), audioBuffer.sampleRate);
 }
@@ -325,7 +325,7 @@ async function startLiveMic() {
     return;
   }
 
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  ensureAudioCtx();
   if (audioCtx.state === "suspended") {
     await audioCtx.resume();
   }
