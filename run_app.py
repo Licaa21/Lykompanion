@@ -175,6 +175,32 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+def _run_tray(win, tray: dict, quit_fn) -> None:
+    """Run the system-tray icon loop (blocking — call in a daemon thread).
+
+    Menu: "Open Lykompanion" (also the default action, so a double-click on the tray icon
+    restores the window on Windows) and "Quit". Stores the icon in `tray["icon"]` so the
+    quit path can stop it.
+    """
+    import pystray
+    from PIL import Image
+
+    image = Image.open(ROOT / "logo.png")
+
+    def _open(icon, item) -> None:
+        win.show()
+
+    def _quit(icon, item) -> None:
+        quit_fn()
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open Lykompanion", _open, default=True),
+        pystray.MenuItem("Quit", _quit),
+    )
+    tray["icon"] = pystray.Icon("Lykompanion", image, "Lykompanion", menu)
+    tray["icon"].run()
+
+
 def main() -> None:
     import webview
 
@@ -189,15 +215,47 @@ def main() -> None:
     profile_dir.mkdir(parents=True, exist_ok=True)
     _configure_profile(profile_dir)  # apply before start (2nd+ launch, or pre-seeds fresh install)
 
+    # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
+    # minimize/close buttons. easy_drag=False so only the explicit .pywebview-drag-region element
+    # (the titlebar) moves the window, not clicks anywhere in the body.
     win = webview.create_window(
         "Lykompanion",
         f"{URL}/?token={API_TOKEN}",
         width=1280,
         height=820,
         min_size=(800, 600),
+        frameless=True,
+        easy_drag=False,
     )
-    win.expose(_make_download_api(win))
+
+    # Tray icon + clean-quit wiring. The custom titlebar's minimize hides the window to the tray
+    # (window stays alive); close and the tray "Quit" item both go through _quit, which stops the
+    # tray loop and destroys the window so webview.start() returns and the process exits cleanly
+    # (a half-torn-down tray leaves a zombie icon that only disappears on hover).
+    tray = {"icon": None}
+
+    def _quit() -> None:
+        icon = tray["icon"]
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                pass
+        try:
+            win.destroy()
+        except Exception:
+            pass
+
+    def window_minimize() -> None:
+        win.hide()
+
+    def window_close() -> None:
+        _quit()
+
+    win.expose(_make_download_api(win), window_minimize, window_close)
     win.events.loaded += lambda: _lock_down_webview(win)
+
+    threading.Thread(target=_run_tray, args=(win, tray, _quit), daemon=True).start()
 
     # private_mode=False required — without it pywebview ignores storage_path and uses
     # an in-memory session, so permissions and download prefs are never written to disk.
