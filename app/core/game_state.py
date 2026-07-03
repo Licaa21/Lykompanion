@@ -206,6 +206,57 @@ def switch_session(process: str, session_id: str) -> bool:
     return True
 
 
+def delete_session(process: str, session_id: str) -> bool:
+    """Delete one session (profile) of a process. Returns False if it didn't exist. If it was the
+    active session, the active pointer moves to the most-recently-updated remaining session (or is
+    dropped if none remain). Only touches this store — callers also clear the profile's session
+    memories/observations."""
+    data = _load_all()
+    key = _session_key(process, session_id)
+    if key not in data:
+        return False
+    del data[key]
+    _save_all(data)
+
+    active = _load_active_sessions()
+    proc = process.lower()
+    if active.get(proc) == session_id:
+        remaining = get_sessions(process)  # sorted newest-first, already excludes the deleted one
+        if remaining:
+            active[proc] = remaining[0]["session_id"]
+        else:
+            active.pop(proc, None)
+        _save_active_sessions(active)
+
+    # If this process is the one being tracked, refresh runtime state to a valid session.
+    global _active_session, _cached_values
+    if _active_process and proc == _active_process.lower() and _active_session == session_id:
+        _active_session = active.get(proc)
+        _cached_values = None
+    return True
+
+
+def delete_process(process: str) -> None:
+    """Delete every session of a process plus its active-session pointer (used when a tracked game
+    is removed from the Gaming Journal). Only touches this store — callers also clear the game's
+    trackers, training data, memories, observations, and whitelist entry."""
+    proc = process.lower()
+    data = _load_all()
+    prefix = proc + "::"
+    kept = {k: v for k, v in data.items() if not k.startswith(prefix)}
+    if len(kept) != len(data):
+        _save_all(kept)
+    active = _load_active_sessions()
+    if active.pop(proc, None) is not None:
+        _save_active_sessions(active)
+
+    global _active_process, _active_session, _cached_values
+    if _active_process and proc == _active_process.lower():
+        _active_process = None
+        _active_session = None
+        _cached_values = None
+
+
 def get_values(process: str, session_id: str | None = None) -> dict[str, str | None]:
     if session_id is None:
         session_id = get_active_session_id(process)

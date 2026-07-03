@@ -152,3 +152,11 @@ def reset_trackers(process: str) -> list[dict]:
     data[process.lower()] = [dict(t) for t in DEFAULT_TRACKERS]
     _save_all(data)
     return data[process.lower()]
+
+
+def delete_process(process: str) -> None:
+    """Drop a process's tracker list entirely (used when a tracked game is deleted). Next lookup
+    re-seeds the defaults, so this is a full reset that also forgets any customizations."""
+    data = _load_all()
+    if data.pop(process.lower(), None) is not None:
+        _save_all(data)

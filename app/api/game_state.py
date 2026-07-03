@@ -4,6 +4,8 @@ from app.core import game_state as game_state_store
 from app.core import game_state_processes
 from app.core import game_state_trackers
 from app.core import game_state_training_data
+from app.core import memory as memory_store
+from app.core import observations
 from app.core.config import settings
 from app.models.schemas import (
     AccountBalance,
@@ -78,6 +80,32 @@ async def rename_session(process: str, session_id: str, payload: GameSessionRena
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session
+
+
+@router.delete("/sessions/{process}/{session_id}")
+async def delete_session(process: str, session_id: str) -> dict:
+    """Delete one profile (session): its playthrough-scope memories and screen observations go
+    with it. Game-scope memories and other profiles are untouched."""
+    if not game_state_store.delete_session(process, session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    memory_store.clear_memories_for_session(process, session_id)
+    observations.clear_session(process, session_id)
+    return {"ok": True}
+
+
+@router.delete("/games/{process}")
+async def delete_game(process: str) -> dict:
+    """Remove a tracked game entirely: every profile/session, its trackers, training-data document,
+    all game- and session-scope memories, all screen observations, and its OCR whitelist approval
+    (so it's no longer tracked). User-scope memories are never touched."""
+    game_state_store.delete_process(process)
+    game_state_trackers.delete_process(process)
+    game_state_training_data.delete_process(process)
+    memory_store.clear_memories_for_process(process)
+    observations.clear_process(process)
+    game_state_processes.remove_from_whitelist(process)
+    game_state_processes.clear_pending_process(process)
+    return {"ok": True}
 
 
 @router.get("/trackers/{process}", response_model=list[GameStateTracker])

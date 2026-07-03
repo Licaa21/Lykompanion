@@ -55,6 +55,13 @@ def set_training_data(process: str, content: str) -> str:
     return content
 
 
+def delete_process(process: str) -> None:
+    """Drop a process's training-data document entirely (used when a tracked game is deleted)."""
+    data = _load_all()
+    if data.pop(process.lower(), None) is not None:
+        _save_all(data)
+
+
 def format_training_data_for_prompt(process: str) -> str:
     content = get_training_data(process)
     if not content:

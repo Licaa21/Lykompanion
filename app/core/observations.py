@@ -111,6 +111,17 @@ def clear_session(process: str, session_id: str | None) -> int:
         return removed
 
 
+def clear_process(process: str) -> int:
+    """Drops every observation for a process across all its sessions (e.g. tracked game deleted)."""
+    with _lock:
+        entries = _load()
+        remaining = [e for e in entries if e["process"].lower() != process.lower()]
+        removed = len(entries) - len(remaining)
+        if removed:
+            _save(remaining)
+        return removed
+
+
 def format_observations_for_prompt(process: str, session_id: str | None) -> str:
     """Recent tail for the active session, for the chat system prompt and the memory-extraction
     pass. Explicitly framed as unconfirmed so neither treats them as established facts."""

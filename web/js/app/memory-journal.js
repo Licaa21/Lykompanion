@@ -179,6 +179,46 @@ function buildJournalAddForm(placeholder, buildBody) {
   return form;
 }
 
+// Small text-button used for per-game / per-profile actions (switch, delete). `danger` tints it red.
+function buildJournalActionBtn(text, title, onClick, danger = false) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "journal-action-btn" + (danger ? " journal-action-btn--danger" : "");
+  btn.textContent = text;
+  btn.title = title;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+// "Add a new profile (playthrough)" form for one game.
+function buildProfileAddForm(process) {
+  const form = document.createElement("form");
+  form.className = "memory-add-form";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "New profile (e.g. \"NG+\", \"Dark Urge run\")…";
+  input.autocomplete = "off";
+  const btn = document.createElement("button");
+  btn.type = "submit";
+  btn.className = "secondary-btn";
+  btn.textContent = "Add profile";
+  form.appendChild(input);
+  form.appendChild(btn);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    input.value = "";
+    const response = await fetch(`/api/game-state/sessions/${encodeURIComponent(process)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (response.ok) await loadGamingJournal();
+  });
+  return form;
+}
+
 function buildSectionLabel(text) {
   const label = document.createElement("div");
   label.className = "journal-section-label";
@@ -214,6 +254,16 @@ function renderGamingJournal(games) {
       badge.title = "Approved for background OCR awareness";
       header.appendChild(badge);
     }
+    header.appendChild(buildJournalActionBtn(
+      "Delete game",
+      "Remove this game and everything tracked for it (profiles, memories, trackers, training, observations)",
+      async () => {
+        if (!confirm(`Delete "${game.process}" and ALL its profiles, game/playthrough memories, trackers, training data, and observations? It will also be un-approved for OCR. This can't be undone.`)) return;
+        const response = await fetch(`/api/game-state/games/${encodeURIComponent(game.process)}`, { method: "DELETE" });
+        if (response.ok) loadGamingJournal();
+      },
+      true,
+    ));
     card.appendChild(header);
 
     // Game-scope memories: hold across every playthrough of this game.
@@ -252,7 +302,32 @@ function renderGamingJournal(games) {
         badge.textContent = "active";
         badge.title = "The profile new playthrough facts currently go to";
         pHeader.appendChild(badge);
+      } else {
+        pHeader.appendChild(buildJournalActionBtn(
+          "Make active",
+          "Switch to this profile — new playthrough facts will go here",
+          async () => {
+            const response = await fetch(
+              `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}/active`,
+              { method: "PUT" },
+            );
+            if (response.ok) loadGamingJournal();
+          },
+        ));
       }
+      pHeader.appendChild(buildJournalActionBtn(
+        "Delete",
+        "Delete this profile and its playthrough memories",
+        async () => {
+          if (!confirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`)) return;
+          const response = await fetch(
+            `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
+            { method: "DELETE" },
+          );
+          if (response.ok) loadGamingJournal();
+        },
+        true,
+      ));
       profile.appendChild(pHeader);
 
       const sessMemList = document.createElement("div");
@@ -299,6 +374,10 @@ function renderGamingJournal(games) {
 
       card.appendChild(profile);
     }
+
+    // Add a new profile (playthrough) for this game.
+    card.appendChild(buildSectionLabel("New profile"));
+    card.appendChild(buildProfileAddForm(game.process));
 
     gamingJournalList.appendChild(card);
   }

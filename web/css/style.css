@@ -2009,6 +2009,22 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   background: rgba(74,222,128,0.12);
   border-color: rgba(74,222,128,0.3);
 }
+.journal-action-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: var(--pill);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--t2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.journal-action-btn:hover { background: rgba(255,255,255,0.09); color: var(--t1); }
+/* Subsequent action buttons sit next to the first (which took the auto margin), not pushed apart. */
+.journal-action-btn + .journal-action-btn { margin-left: 6px; }
+.journal-action-btn--danger { color: var(--red); border-color: rgba(224,92,92,0.35); }
+.journal-action-btn--danger:hover { background: rgba(224,92,92,0.14); border-color: rgba(224,92,92,0.55); color: var(--red); }
 .journal-section-label {
   font-size: 11px;
   text-transform: uppercase;

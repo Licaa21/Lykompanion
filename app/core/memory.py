@@ -184,6 +184,39 @@ def clear_memories(scopes: set[str]) -> int:
         return removed
 
 
+def clear_memories_for_process(process: str) -> int:
+    """Delete every game/session-scope memory tied to a process (used when a tracked game is
+    deleted from the Gaming Journal). User-scope facts are never touched."""
+    if not process:
+        return 0
+    target = process.lower()
+    with _lock:
+        memories = load_memories()
+        kept = [m for m in memories if (m.get("process") or "").lower() != target]
+        removed = len(memories) - len(kept)
+        if removed:
+            save_memories(kept)
+        return removed
+
+
+def clear_memories_for_session(process: str, session_id: str) -> int:
+    """Delete the session-scope memories of one playthrough (used when a profile is deleted).
+    Game-scope memories for the process are left intact — they hold across playthroughs."""
+    if not process or not session_id:
+        return 0
+    target = process.lower()
+    with _lock:
+        memories = load_memories()
+        kept = [
+            m for m in memories
+            if not ((m.get("process") or "").lower() == target and m.get("session_id") == session_id)
+        ]
+        removed = len(memories) - len(kept)
+        if removed:
+            save_memories(kept)
+        return removed
+
+
 def format_memories_for_prompt(
     active_process: str | None = None,
     active_session_id: str | None = None,
