@@ -1048,14 +1048,41 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
 function extractCompleteSentences(buffer) {
   const holdAt = buffer.search(/!?\[[^\]]*(?:\]\([^)\s]*)?$/);
   const splittable = holdAt === -1 ? buffer : buffer.slice(0, holdAt);
+  // Linear scan, NOT a regex: the old pattern /(?:[^.!?\n]+|[.!?](?!\s))*(?:[.!?]+\s+|\n+)/g
+  // backtracked catastrophically whenever the buffer ended in a long incomplete sentence -
+  // one exec() call could take minutes and froze the entire UI mid-stream (the "app hangs
+  // while the reply arrives" bug). A sentence ends at a run of [.!?] followed by whitespace,
+  // or at newline(s); anything after the last boundary stays in the remainder.
   const complete = [];
-  const regex = /(?:[^.!?\n]+|[.!?](?!\s))*(?:[.!?]+\s+|\n+)/g;
-  let match;
   let lastIndex = 0;
-  while ((match = regex.exec(splittable)) !== null) {
-    const sentence = match[0].trim();
-    if (sentence) complete.push(sentence);
-    lastIndex = regex.lastIndex;
+  let i = 0;
+  while (i < splittable.length) {
+    const ch = splittable[i];
+    if (ch === "\n") {
+      let end = i + 1;
+      while (end < splittable.length && splittable[end] === "\n") end++;
+      const sentence = splittable.slice(lastIndex, end).trim();
+      if (sentence) complete.push(sentence);
+      lastIndex = end;
+      i = end;
+    } else if (ch === "." || ch === "!" || ch === "?") {
+      let end = i + 1;
+      while (end < splittable.length && ".!?".includes(splittable[end])) end++;
+      let ws = end;
+      while (ws < splittable.length && splittable[ws] !== "\n" && /\s/.test(splittable[ws])) ws++;
+      if (ws > end) {
+        // Terminator run followed by whitespace = sentence boundary.
+        const sentence = splittable.slice(lastIndex, ws).trim();
+        if (sentence) complete.push(sentence);
+        lastIndex = ws;
+        i = ws;
+      } else {
+        // "1.5", "v2.0", or a terminator at the very end of the buffer (more may stream in).
+        i = end;
+      }
+    } else {
+      i++;
+    }
   }
   return { complete, remainder: buffer.slice(lastIndex) };
 }

@@ -1,12 +1,5 @@
 # TODO
 
-## Active bug hunt
-
-- [ ] **Silent process death at voice-reply end** — the Python process dies with no traceback
-  (cmd drops straight to `pause`) when a voice reply finishes while navigating Settings; the
-  WebView2 window survives as a frozen zombie ("app hangs"). Signature of a native access
-  violation (WGC / winrt OCR / pycaw / WebView2 COM). `faulthandler` now writes a C-level
-  traceback to `data/crash_log.txt` on crash — reproduce once, then read that file.
 
 ## Frontend / UX
 
