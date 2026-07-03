@@ -7,3 +7,4 @@
 - [ ] verify the code logic for the toasts in the overlay that show only when the narrator speaks and dissappear when the narrator finishes talking, because when a message is too long, it gets chunked on multiple toasts and sometimes some toasts appear too late.
 - [ ] check if OCR frame skips also skips extraction passes. E.g: User sits in the pause menu for 10 minutes, we don't want to keep extracting during that time.
 - [ ] Tier 1 packaging: build run_app.py into a single `Lykompanion.exe` (Nuitka preferred) so Task Manager shows the app name/icon, not python.exe.
+- [ ] Window-state restore doesn't validate the saved position is on a connected monitor — unplugging a second display can restore the window off-screen. Clamp to the virtual screen / recenter if off-screen.
