@@ -183,7 +183,13 @@
     if (openInstance && !e.target.closest(".custom-select") && !e.target.closest(".cs-panel")) closeOpen();
   });
   window.addEventListener("resize", closeOpen);
-  document.addEventListener("scroll", closeOpen, true);
+  // Close when an ancestor scrolls (the panel is position:fixed and would visually detach), but NOT
+  // when the scroll originates inside the panel itself — e.g. the scrollIntoView() on open, or the
+  // user wheeling through a long option list — which would otherwise slam it shut on the same click.
+  document.addEventListener("scroll", (e) => {
+    if (openInstance && openInstance.panel.contains(e.target)) return;
+    closeOpen();
+  }, true);
 
   // Static selects exist by the time these end-of-body scripts run.
   initCustomSelects();
