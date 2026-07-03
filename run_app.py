@@ -207,49 +207,55 @@ def _make_overlay_move_api(overlay_window):
 def _apply_overlay_base_styles(overlay_window) -> None:
     """One-time styles applied at window init, independent of click-through toggling:
     WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus, even
-    while click-through is lifted for editing), WS_EX_LAYERED, and DwmExtendFrameIntoClientArea
-    with full negative margins ("sheet of glass" over the whole client area) - the two
-    independent DWM mechanisms that can make a window's alpha channel actually show the desktop
-    through it, applied together since neither alone has reliably worked here across earlier
-    attempts (see the CLAUDE.md writeup on this feature for the history).
+    while click-through is lifted for editing), and - the actual transparency mechanism -
+    WinForms color-key transparency (form BackColor == TransparencyKey).
 
-    WS_EX_LAYERED must NEVER be paired with SetLayeredWindowAttributes or UpdateLayeredWindow -
-    that pairing forces legacy flat, non-per-pixel alpha blending and made the whole window
-    render as an opaque dark rectangle in an earlier attempt. Set bare, it instead lets DWM (on
-    Windows 8+) pull per-pixel alpha directly from the window's own GPU swap chain, which is how
-    WebView2 renders - but by itself this still wasn't sufficient. DwmExtendFrameIntoClientArea
-    is the older, more established "Aero glass" mechanism (Vista+) for telling DWM to composite
-    a region using the app's own rendered alpha instead of painting it opaque; pywebview itself
-    already uses this call (see ExtendFrameIntoClientArea in winforms.py) but only for the
-    window-shadow effect, with a 1px margin - never for full-window transparency."""
+    Why color-key (round 5): reading pywebview 6.2.1's own source settled the transparency
+    saga - `transparent=True` on Windows only sets the WebView2 control's
+    DefaultBackgroundColor to transparent; it NEVER makes the WinForms form itself
+    transparent (no TransparencyKey/AllowTransparency anywhere in winforms.py), so the page's
+    transparent pixels always showed the form's opaque default-gray background. No exstyle
+    combination on top of that could ever have worked. Additionally, round 3/4's bare
+    WS_EX_LAYERED actively broke rendering: a layered window is never displayed at all until
+    SetLayeredWindowAttributes/UpdateLayeredWindow commits it (documented Win32 behavior) -
+    that's why "nothing ever showed up" in the overlays.
+
+    The fix is the standard WebView2-overlay recipe: paint the form background in a sentinel
+    color and register that color as the form's TransparencyKey. WinForms then manages
+    WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_COLORKEY) itself, and every pixel where
+    the page background is transparent renders as the key color -> keyed out -> the game
+    shows through, and mouse input in keyed regions passes through natively. The key is
+    near-black (1,1,1) so anti-aliased edges of the dark overlay cards fringe toward black
+    (reads as a subtle edge shadow) instead of haloing in a visible color; overlay.html
+    avoids box-shadows, which under color-key would render as opaque dark halos."""
     import ctypes
-
-    class _Margins(ctypes.Structure):
-        _fields_ = [
-            ("cxLeftWidth", ctypes.c_int),
-            ("cxRightWidth", ctypes.c_int),
-            ("cyTopHeight", ctypes.c_int),
-            ("cyBottomHeight", ctypes.c_int),
-        ]
 
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x80
-    WS_EX_LAYERED = 0x80000
     WS_EX_NOACTIVATE = 0x8000000
     SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     try:
-        hwnd = overlay_window.native.Handle.ToInt32()
+        form = overlay_window.native
+        hwnd = form.Handle.ToInt32()
     except Exception:
         return  # window already destroyed
 
-    current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
-    user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
+    try:
+        # pythonnet is already initialized by pywebview at this point (`shown` fires from the
+        # WinForms UI thread, which is also the only thread that may touch Form properties).
+        from System.Drawing import Color
 
-    full_glass = _Margins(-1, -1, -1, -1)
-    ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(full_glass))
+        key = Color.FromArgb(255, 1, 1, 1)
+        form.BackColor = key
+        form.TransparencyKey = key
+    except Exception:
+        pass  # worst case: the widget stays opaque, everything else still works
+
+    current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+    user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
 
 
 def _make_overlay_click_through_setter(overlay_window):
@@ -409,10 +415,10 @@ def main() -> None:
             set_click_through = _make_overlay_click_through_setter(widget_win)
 
             def _init_widget_styles(w=widget_win, sct=set_click_through) -> None:
-                # WS_EX_LAYERED must be set as early as possible, ideally before WebView2's
-                # first paint, so DWM engages per-pixel compositing from the start instead of
-                # showing an opaque frame first - `shown` fires as soon as the native window
-                # appears, well before `loaded` (page content finished loading).
+                # Apply the color-key + exstyle setup as early as possible so the window is
+                # keyed out before its first real paint - `shown` fires as soon as the native
+                # window appears, well before `loaded` (page content finished loading), and
+                # on the WinForms UI thread, which Form property writes require.
                 _apply_overlay_base_styles(w)
                 sct(True)
                 # WebView2 spawns its Chromium child windows asynchronously - a single pass

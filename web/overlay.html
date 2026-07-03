@@ -69,7 +69,9 @@
       font-size: 15px;
       line-height: 1.45;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      /* No box-shadow: under the native color-key transparency (see run_app.py's
+         _apply_overlay_base_styles) a soft shadow's semi-transparent pixels stop matching
+         the key color and render as an opaque dark halo box around the card. */
       opacity: 0;
       transform: translateY(12px);
       transition: opacity 0.35s ease, transform 0.35s ease;
@@ -100,7 +102,6 @@
       padding: 10px 14px;
       color: #e8eaf2;
       font-size: 13px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
       display: none;
     }
     #gs-panel.visible { display: block; }
