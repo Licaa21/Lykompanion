@@ -17,16 +17,16 @@ if not exist "%VSWHERE%" (
     exit /b 1
 )
 
-for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * ^
-    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ^
-    -property installationPath`) do set "VSPATH=%%i"
+for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
 
 if not defined VSPATH (
     echo [build] No VS installation with the C++ toolset found.
     exit /b 1
 )
 
-call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul
+REM Redirect stderr too: vcvars64.bat internally calls a bareword `vswhere.exe`
+REM and prints a harmless "not recognized" line when the Installer dir is off PATH.
+call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>nul
 if %ERRORLEVEL% neq 0 (
     echo [build] Failed to initialize the MSVC environment.
     exit /b 1
