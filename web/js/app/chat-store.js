@@ -160,6 +160,7 @@ function renderChatList() {
     deleteBtn.title = "Delete chat";
     deleteBtn.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (!confirm(`Delete "${chat.title}"? This can't be undone.`)) return;
       deleteChat(chat.id);
     });
 
