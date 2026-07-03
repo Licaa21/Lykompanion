@@ -3,26 +3,70 @@
 
 ## Ideas / nice-to-have
 
-- [ ] **In-game overlay?** — surface the companion (game-state panel, incoming reminders,
-  maybe a mini chat) as an overlay on top of the running game instead of a separate window.
-  A full attempt was built and REVERTED on 2026-07-03 after 7 failed rounds — before retrying,
-  read the overlay gotcha in CLAUDE.md: WebView2/pywebview windows cannot be made transparent
-  or region-clipped, period;
-  Next approach to tackle:
-  Native C++ overlay is the right direction for low-latency, GPU-accelerated rendering and reliable per-frame control. Rendering approaches (ordered by recommended path for safety & compatibility):
-  Layered window + UpdateLayeredWindow (software-backed per-pixel alpha): simplest to prototype, avoids GPU-compositor issues noted in CLAUDE.md. Render to an HBITMAP (e.g., via Direct2D DCRenderTarget or GDI) and call UpdateLayeredWindow each frame. Works well for borderless/windowed games; exclusive fullscreen may not show but that's okay. Most games nowadays are meant to be played borderless.
-  
-  Input handling: create the overlay window with WS_EX_TOPMOST | WS_EX_LAYERED and use WS_EX_TRANSPARENT + SetWindowLong toggles to let clicks pass through. On CTRL+SHIFT+O (configurable by user), we disable clickthrough and allow the user to move overlay elements, saving the new positions.
+- [ ] **Native C++ overlay (layered window, Direct2D — NOT GDI, NOT injection)** — surface the
+  companion (game-state panel, incoming reminders, chat toasts) on top of the running game.
+  Prior WebView2/pywebview attempt REVERTED 2026-07-03 after 7 failed rounds — read the overlay
+  gotcha in CLAUDE.md before touching this.
 
-  Lykompanion should be able to start/kill the overlay accordingly (start when game state is active, kill when not active). The need to manually start/kill the overlay should never be a problem.
+  **Decision (2026-07-03):** standalone C++ **layered window**, drawn with **Direct2D**
+  (`ID2D1DCRenderTarget`) into a 32bpp premultiplied-ARGB DIB, committed each frame via
+  `UpdateLayeredWindow`. Explicitly **NOT GDI drawing** (gdi32 is used only for the unavoidable
+  `CreateDIBSection`/memory-DC plumbing that `UpdateLayeredWindow` requires — every pixel is
+  painted by Direct2D/DirectWrite, no `TextOut`/`FillRect`/GDI+). Explicitly **NOT DLL injection /
+  Present-hooking** — zero anti-cheat risk, no per-graphics-API hooking. Software-composited layered
+  windows are exempt from the Chromium GPU-compositor limitation that killed the WebView2 approach.
+  Works for borderless/windowed games (the common case); exclusive fullscreen won't show it — accepted.
 
-  ### C++ native overlay — sprint plan
-  Standalone C++ executable (`overlay/` dir at repo root), spawned/killed by the Python side as a child process. Toolchain: single `overlay.cpp` + `build.cmd` (MSVC `cl.exe` from VS Build Tools; no CMake/vcpkg — link user32/gdi32/d2d1/dwrite only). Data in: newline-delimited JSON on stdin (Python writes toast/game-state/edit-mode commands); data out: position saves as JSON lines on stdout. No sockets, no shared memory — a dead parent pipe = overlay exits itself.
-  - [ ] Sprint C1: `overlay/overlay.cpp` skeleton — window class + `WS_EX_TOPMOST|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW` popup, Direct2D `DCRenderTarget` drawing into a 32bpp PARGB HBITMAP, `UpdateLayeredWindow` per frame, DirectWrite text. Acceptance: `build.cmd` compiles, running `overlay.exe --demo` shows a rounded dark card with crisp text over the desktop for 10s — desktop visible around it, not a black box.
-  - [ ] Sprint C2: stdin command protocol — `{"type":"toast","text":...,"kind":"reply"|"reminder"}`, `{"type":"game_state","title":...,"rows":[[label,value],...]}`, `{"type":"edit_mode","enabled":bool}`, `{"type":"quit"}`; toast stacking, word wrap (DirectWrite layout), expiry timers, auto-sized windows anchored to configurable corners.
-  - [ ] Sprint C3: edit mode in the exe — lift `WS_EX_TRANSPARENT`, dashed outline + hint, drag both widgets, emit `{"type":"layout","widget":...,"x":...,"y":...}` on stdout on release; Ctrl+Shift+O `RegisterHotKey` INSIDE the exe (its own message loop already runs).
-  - [ ] Sprint C4: Python integration — `app/services/overlay_process.py`: spawn `overlay/overlay.exe` when game-state tracking starts, kill when it stops (and on app exit); feed it chat replies (re-add the small in-process publish hook in the chat endpoints) + reminders + game-state updates; persist layouts per game (re-add `app/core/overlay_layouts.py`); `overlay_enabled` setting back in Settings UI.
-  - [ ] Sprint C5: ship a prebuilt `overlay/overlay.exe` in the repo (plus `build.cmd` to rebuild), so users without VS Build Tools still get the feature; graceful no-op if the exe is missing.
+  **Hard boundary:** ALL overlay logic is native C++ — window management, Direct2D/DirectWrite
+  rendering, input/edit-mode, hotkeys, widget layout AND its persistence. **No overlay behavior is
+  ever written in Python.** Lykompanion (the Python app) is nothing but a *client* that pushes
+  content in over an API; it must be possible to run/test the overlay standalone with zero Python
+  involved.
+
+  **Shape:** standalone, self-contained C++ exe in `overlay/` at repo root (`overlay.cpp` +
+  `build.cmd`, MSVC `cl.exe`, no CMake/vcpkg — link `user32 gdi32 d2d1 dwrite`). Runs its own Win32
+  message loop. It **hosts its own local API** (a named-pipe or loopback-TCP JSON server, C++ side is
+  the server) that any process can connect to and push JSON commands into — Lykompanion is just one
+  such client. The overlay owns and persists its own widget layouts on disk; Python never touches
+  layout files. API (client → overlay): `toast`, `game_state`, `edit_mode`, `quit`. The only thing
+  Python does beyond posting content is process lifecycle: launch the exe when a game starts, ask it
+  to quit when tracking stops.
+
+  - [ ] **Sprint C1 — window + render skeleton.** `overlay/overlay.cpp`: register a
+    `WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` popup
+    (no taskbar entry, click-through, never steals focus). `ID2D1DCRenderTarget` bound to a memory
+    DC holding a top-down 32bpp PARGB `CreateDIBSection`; draw a rounded dark card + DirectWrite
+    text; commit with `UpdateLayeredWindow` (`AC_SRC_ALPHA` blend). `build.cmd` compiles a single TU.
+    **Acceptance:** `overlay.exe --demo` shows a rounded translucent card with crisp anti-aliased
+    text over the desktop for 10s — desktop visible around/through it, not a black box, no flicker.
+  - [ ] **Sprint C2 — local API server + widgets (all C++).** Overlay hosts a named-pipe (or
+    loopback-TCP) JSON server on its own thread and marshals commands onto the UI thread. Command
+    schema: `{"type":"toast","text":...,"kind":"reply"|"reminder"}`,
+    `{"type":"game_state","title":...,"rows":[[label,value],...]}`,
+    `{"type":"edit_mode","enabled":bool}`, `{"type":"quit"}`. Toast stacking with expiry timers,
+    DirectWrite word-wrap + auto-sized windows anchored to a configurable screen corner. One layered
+    window per widget (toast stack + game-state panel) is simplest; revisit if perf demands merging.
+    **Acceptance:** a trivial non-Python client (e.g. a `.cmd`/`echo` into the pipe) drives toasts
+    and the game-state panel — proving the overlay is fully standalone.
+  - [ ] **Sprint C3 — edit mode + layout persistence (all C++).** On `edit_mode:true`, drop
+    `WS_EX_TRANSPARENT` so widgets take the mouse; draw a dashed outline + hint; drag either widget;
+    the overlay **persists positions to its own config file** (e.g. `overlay/layouts.json` next to the
+    exe or in `%LOCALAPPDATA%`) — Python is not involved. `RegisterHotKey` for Ctrl+Shift+O
+    (configurable) INSIDE the exe to toggle edit mode; its message loop is already running.
+  - [ ] **Sprint C4 — Python as a thin client.** `app/services/overlay_process.py` does only two
+    things: (1) process lifecycle — launch `overlay/overlay.exe` when game-state tracking starts, ask
+    it to quit when tracking stops and on app exit; (2) push content — connect to the overlay's API
+    and post `toast`/`game_state` JSON (re-add the small in-process publish hook in the chat endpoints
+    for replies + reminders + game-state updates). No layout files, no rendering, no widget logic on
+    the Python side. Restore the `overlay_enabled` setting in the Settings UI. (Note: stale
+    `data/overlay_layouts.json` + `app/core/overlay_layouts.py` from the reverted attempt should be
+    deleted — layouts now live entirely in the C++ overlay.)
+  - [ ] **Sprint C5 — ship prebuilt exe.** Commit a prebuilt `overlay/overlay.exe` (plus `build.cmd`
+    to rebuild) so users without VS Build Tools get the feature; graceful no-op if the exe is missing.
+
+  **Anti-cheat note:** layered windows compose entirely outside the game process (no injection, no
+  memory/API hooking), so BattlEye/EAC have nothing to flag — the trade-off vs. Present-hooking is
+  no exclusive-fullscreen support and no perfect per-object z-order, both accepted here.
 
 - [ ] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
   with signals like fullscreen/borderless window style, GPU usage, or Steam/IGDB process lists.
