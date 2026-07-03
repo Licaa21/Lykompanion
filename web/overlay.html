@@ -6,12 +6,12 @@
   <!-- One instance of this page is loaded per overlay widget, each in its own small native
        window sized and positioned by run_app.py (?widget=toasts or ?widget=game-state picks
        which one to render) - NOT one shared full-screen window. There is NO pixel
-       transparency at all (every alpha-based approach fails for WebView2 - see CLAUDE.md's
-       in-game overlay section): instead the native window is clipped to exactly the rounded
-       rects of the visible cards via SetWindowRgn, pushed from syncWindowRegion in
-       overlay.js whenever content changes - so card styling must stay rectangular-ish
-       (border-radius 10px matches the region's rounded corners; no box-shadows, they'd be
-       cut off). Normally nothing is interactive (clicks pass through to the game); the
+       transparency and NO region clipping (both are dead ends for WebView2 - see CLAUDE.md's
+       in-game overlay section): instead the native window is moved+RESIZED to exactly match
+       its visible content (syncWindowFit in overlay.js -> fit_overlay bridge), so the card
+       containers must fill the window edge-to-edge and be solid - any page background that
+       peeks through (gaps, margins, translucency) renders as BLACK, not as the game behind.
+       Normally nothing is interactive (clicks pass through to the game); the
        layout editor (Settings → "Edit layout", or Ctrl+Shift+O) temporarily lifts the
        click-through so the whole widget window can be dragged to reposition it - dragging
        moves the actual native window (via a Python-exposed move_overlay bridge) and saves on
@@ -56,37 +56,38 @@
     }
     body.editing #edit-hint { display: block; }
 
-    /* --- Toasts widget (companion replies + fired reminders) --- */
+    /* --- Toasts widget (companion replies + fired reminders) ---
+       The native window is RESIZED to exactly this container (see syncWindowFit in
+       overlay.js), so it must fill the window edge-to-edge (inset 0, no outer margins)
+       and be ONE solid card: separate cards with transparent gaps between them would show
+       the page's background - which WebView2 renders as black - as black strips. */
     #toast-stack {
       position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .toast {
-      background: rgba(16, 18, 26, 0.82);
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: none;
+      background: #10121a;
       border: 1px solid rgba(255, 255, 255, 0.14);
-      border-left: 3px solid #7aa2f7;
       border-radius: 10px;
+      overflow: hidden;
+    }
+    #toast-stack:not(:empty) { display: block; }
+    .toast {
+      border-left: 3px solid #7aa2f7;
       padding: 10px 14px;
       color: #e8eaf2;
       font-size: 15px;
       line-height: 1.45;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-      /* No box-shadow: the native window is clipped to exactly this card's rect via
-         SetWindowRgn (see syncWindowRegion in overlay.js), so anything painted outside
-         the card - like a soft shadow - would just be cut off. */
       opacity: 0;
-      transform: translateY(12px);
-      transition: opacity 0.35s ease, transform 0.35s ease;
+      transition: opacity 0.35s ease;
       white-space: pre-wrap;
       word-wrap: break-word;
     }
-    .toast.visible { opacity: 1; transform: translateY(0); }
-    .toast.leaving { opacity: 0; transform: translateY(-8px); }
+    .toast + .toast { border-top: 1px solid rgba(255, 255, 255, 0.10); }
+    .toast.visible { opacity: 1; }
+    .toast.leaving { opacity: 0; }
     .toast.reminder { border-left-color: #e0af68; }
     .toast .toast-tag {
       display: block;
@@ -97,13 +98,13 @@
       margin-bottom: 4px;
     }
 
-    /* --- Game-state widget --- */
+    /* --- Game-state widget --- (fills the fitted window edge-to-edge, like #toast-stack) */
     #gs-panel {
       position: absolute;
-      top: 8px;
-      left: 8px;
-      right: 8px;
-      background: rgba(16, 18, 26, 0.75);
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #10121a;
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 10px;
       padding: 10px 14px;

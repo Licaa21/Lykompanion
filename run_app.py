@@ -229,23 +229,22 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     documented WebView2 limitation), so after the first software paint the window goes
     permanently black. No key color can match "no content".
 
-    Region clipping sidesteps the whole problem: the window is clipped to exactly the
-    rounded rects of its visible cards (pushed by overlay.js via the set_overlay_regions
-    bridge as content comes and goes; full-window while the layout editor is active) and
-    simply does not exist anywhere else - no layers, no alpha, fully compatible with GPU
-    rendering, and clicks outside the region fall through natively.
+    Round 7 - fit-to-content: the widget window is RESIZED to exactly its visible content
+    (via the fit_overlay bridge below), so there is never anything to hide: no content ->
+    1px-tall sliver, a toast -> the window IS the toast card, layout editor -> full bounds
+    as a deliberate opaque panel. Round 6 (SetWindowRgn clipping) was proven visually
+    inert by the diagnostics: every call returned success, yet the windows stayed fully
+    visible - WebView2's DirectComposition content is composited independently of the
+    hwnd's GDI region, so window regions simply don't clip it.
 
-    Regions are applied with raw SetWindowRgn ONLY. Two WinForms Form properties are now
-    confirmed to deadlock the whole app when set on a pywebview window hosting WebView2
-    (the single shared UI thread hangs, every window goes Not Responding at boot):
-    TransparencyKey (round 5 - its setter recreates the window handle) and Region (round 6b
-    - hung inside the property setter, last log line was the base-styles one right before
-    it). Never touch WinForms composition-related Form properties here - raw win32 via
-    ctypes only."""
+    Two WinForms Form properties are confirmed to deadlock the whole app when set on a
+    pywebview window hosting WebView2 (the single shared UI thread hangs, every window
+    goes Not Responding at boot): TransparencyKey (round 5 - its setter recreates the
+    window handle) and Region (round 6b - hung inside the property setter itself). Never
+    touch WinForms composition-related Form properties here - raw win32 via ctypes only."""
     import ctypes
 
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    gdi32 = ctypes.windll.gdi32
+    user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x80
     WS_EX_NOACTIVATE = 0x8000000
@@ -262,74 +261,38 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
     _overlay_log(f"base styles: hwnd={hwnd}, exstyle {current:#x} -> {user32.GetWindowLongW(hwnd, GWL_EXSTYLE):#x}")
 
-    empty = gdi32.CreateRectRgn(0, 0, 0, 0)
-    ctypes.set_last_error(0)
-    result = user32.SetWindowRgn(hwnd, empty, True)
-    if result:
-        _overlay_log(f"startup empty region applied to '{overlay_window.title}'")
-    else:
-        gdi32.DeleteObject(empty)
-        _overlay_log(
-            f"startup empty region FAILED for '{overlay_window.title}': "
-            f"SetWindowRgn returned 0, GetLastError={ctypes.get_last_error()}"
-        )
 
-
-def _make_overlay_region_api(overlay_window):
-    """Returns set_overlay_regions(rects), exposed to a widget window's JS: clips the native
-    window to the union of the given rounded rects ([{x, y, w, h, r}] in physical window
-    pixels; empty list -> empty region -> invisible window). overlay.js calls it whenever
-    its visible content changes (toast added/expired, game-state panel shown/hidden, edit
-    mode toggled). Raw SetWindowRgn only - NEVER the WinForms Form.Region property, whose
-    setter deadlocks the app (see _apply_overlay_base_styles docstring); the raw API, like
-    the SetWindowPos behind window.move(), is safe from the JS-bridge thread."""
+def _make_overlay_fit_api(overlay_window):
+    """Returns fit_overlay(x, y, w, h), exposed to a widget window's JS: moves AND resizes
+    the native window in one atomic SetWindowPos so it always matches its visible content
+    (physical screen px; w/h are clamped to at least 1 so an empty widget becomes an
+    invisible 1px sliver instead of a hidden window - hiding the window would let Chromium
+    throttle the page's timers and stall the game-state polling). Raw win32 only (see
+    _apply_overlay_base_styles docstring); safe from the JS-bridge thread like the
+    SetWindowPos behind window.move()."""
     import ctypes
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
-    gdi32 = ctypes.windll.gdi32
-    RGN_OR = 2
+    SWP_NOZORDER = 0x0004
+    SWP_NOACTIVATE = 0x0010
 
-    def set_overlay_regions(rects) -> None:
+    def fit_overlay(x, y, w, h) -> None:
         try:
             hwnd = overlay_window.native.Handle.ToInt32()
         except Exception as exc:
-            _overlay_log(f"set_overlay_regions: could not get native handle: {exc!r}")
+            _overlay_log(f"fit_overlay: could not get native handle: {exc!r}")
             return
 
-        region = None
-        count = 0
-        for rect in rects or []:
-            try:
-                x, y = int(rect["x"]), int(rect["y"])
-                w, h = int(rect["w"]), int(rect["h"])
-                radius = int(rect.get("r", 0))
-            except (KeyError, TypeError, ValueError):
-                continue
-            if w <= 0 or h <= 0:
-                continue
-            # Right/bottom are exclusive; +1 keeps the last pixel row/column visible.
-            part = gdi32.CreateRoundRectRgn(x, y, x + w + 1, y + h + 1, radius * 2, radius * 2)
-            if region is None:
-                region = part
-            else:
-                gdi32.CombineRgn(region, region, part, RGN_OR)
-                gdi32.DeleteObject(part)
-            count += 1
-
-        if region is None:
-            region = gdi32.CreateRectRgn(0, 0, 0, 0)
+        w = max(1, int(w))
+        h = max(1, int(h))
         ctypes.set_last_error(0)
-        result = user32.SetWindowRgn(hwnd, region, True)
-        if result:
-            _overlay_log(f"region: {count} rect(s) applied to '{overlay_window.title}'")
+        ok = user32.SetWindowPos(hwnd, None, int(x), int(y), w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+        if ok:
+            _overlay_log(f"fit: '{overlay_window.title}' -> ({int(x)}, {int(y)}) {w}x{h}")
         else:
-            gdi32.DeleteObject(region)
-            _overlay_log(
-                f"region: FAILED applying {count} rect(s) to '{overlay_window.title}': "
-                f"SetWindowRgn returned 0, GetLastError={ctypes.get_last_error()}"
-            )
+            _overlay_log(f"fit FAILED for '{overlay_window.title}': GetLastError={ctypes.get_last_error()}")
 
-    return set_overlay_regions
+    return fit_overlay
 
 
 def _make_overlay_click_through_setter(overlay_window):
@@ -484,15 +447,15 @@ def main() -> None:
                 focus=False,
             )
             overlay_windows[element_id] = widget_win
-            widget_win.expose(_make_overlay_move_api(widget_win), _make_overlay_region_api(widget_win))
+            widget_win.expose(_make_overlay_move_api(widget_win), _make_overlay_fit_api(widget_win))
 
             set_click_through = _make_overlay_click_through_setter(widget_win)
 
             def _init_widget_styles(w=widget_win, sct=set_click_through) -> None:
-                # Apply the exstyles + empty window region as early as possible so nothing
-                # flashes before the page pushes its first content rects - `shown` fires as
-                # soon as the native window appears, well before `loaded` (page content
-                # finished loading).
+                # `shown` fires as soon as the native window appears, well before `loaded`
+                # (page content finished loading). The window shows as a black box until
+                # overlay.js's first fit call shrinks it to its (initially empty) content -
+                # a brief flash at launch, gone within a second or two.
                 _apply_overlay_base_styles(w)
                 sct(True)
                 # WebView2 spawns its Chromium child windows asynchronously - a single pass

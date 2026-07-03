@@ -39,55 +39,55 @@ async function pollConfig() {
 let currentProcess = null; // lowercased tracked process, or null when not in a game
 let appliedLayoutKey = null; // process the window's current position was last moved for
 
-function moveWindow(x, y) {
-  window.pywebview?.api?.move_overlay(Math.round(x), Math.round(y));
+function dpr() {
+  return window.devicePixelRatio || 1;
 }
 
-// --- Window region sync ---
-// The native window is clipped to exactly the rounded rects of the visible cards via
-// SetWindowRgn (see _make_overlay_region_api in run_app.py) - outside those rects the window
-// does not exist at all. This replaces every transparency mechanism (WebView2 can't render
-// GPU content into layered windows - it goes black). Must be re-pushed whenever visible
-// content changes; rects are physical pixels (offsetTop/Left/Width/Height are CSS px and
-// ignore in-flight CSS transforms, which is what we want - the region sits at the element's
-// settled position, not mid-animation).
+function moveWindow(cssX, cssY) {
+  // JS coordinates (screenX, layout math) are CSS px; the native bridge wants physical px.
+  window.pywebview?.api?.move_overlay(Math.round(cssX * dpr()), Math.round(cssY * dpr()));
+}
 
-const CARD_RADIUS_CSS = 10; // matches border-radius in overlay.html
-let lastRegionsJson = null;
+// --- Fit-to-content window sizing ---
+// The native window is moved+resized (one atomic SetWindowPos via the fit_overlay bridge)
+// to exactly match its visible content, so nothing ever needs to be transparent or clipped:
+// no content -> invisible 1px sliver, a toast -> the window IS the toast card, edit mode ->
+// the full widget bounds as an opaque panel. Transparency (rounds 1-5) and SetWindowRgn
+// clipping (round 6) are both dead ends for WebView2 - see CLAUDE.md's in-game overlay
+// section. The widget's FULL bounds (what the user positions in the layout editor) exist
+// virtually as (virtualX, virtualY, FULL_W, FULL_H) in CSS px; content anchors to the
+// bottom of those bounds for toasts and the top for game-state. Width is always FULL_W so
+// text wrapping never depends on the current window size (no reflow feedback loop).
 
-function syncWindowRegion() {
+const FULL_W = window.innerWidth; // CSS px - captured at load, while the window is still full-size
+const FULL_H = window.innerHeight;
+let virtualX = window.screenX; // top-left of the widget's full bounds, CSS px screen coords
+let virtualY = window.screenY;
+let lastFit = null;
+
+function contentHeightCss() {
+  if (editing) return FULL_H;
+  if (WIDGET === "toasts") return toastStack.childElementCount ? toastStack.offsetHeight : 0;
+  if (WIDGET === "game-state") return gsPanel.classList.contains("visible") ? gsPanel.offsetHeight : 0;
+  return 0;
+}
+
+function syncWindowFit() {
   const api = window.pywebview && window.pywebview.api;
-  if (!api || !api.set_overlay_regions) return; // bridge not injected yet - retried by the safety interval
-  const dpr = window.devicePixelRatio || 1;
-
-  let rects = [];
-  if (editing) {
-    rects = [{ x: 0, y: 0, w: Math.ceil(window.innerWidth * dpr), h: Math.ceil(window.innerHeight * dpr), r: 0 }];
-  } else {
-    const cards = [];
-    if (WIDGET === "toasts") cards.push(...toastStack.children);
-    if (WIDGET === "game-state" && gsPanel.classList.contains("visible")) cards.push(gsPanel);
-    for (const el of cards) {
-      rects.push({
-        x: Math.floor(el.offsetLeft * dpr),
-        y: Math.floor(el.offsetTop * dpr),
-        w: Math.ceil(el.offsetWidth * dpr),
-        h: Math.ceil(el.offsetHeight * dpr),
-        r: Math.round(CARD_RADIUS_CSS * dpr),
-      });
-    }
-  }
-
-  const json = JSON.stringify(rects);
-  if (json === lastRegionsJson) return; // SetWindowRgn forces a redraw - skip no-op pushes
-  lastRegionsJson = json;
-  api.set_overlay_regions(rects);
+  if (!api || !api.fit_overlay) return; // bridge not injected yet - retried by the safety interval
+  const h = Math.max(1, contentHeightCss());
+  const y = WIDGET === "toasts" ? virtualY + (FULL_H - h) : virtualY; // bottom- vs top-anchored
+  const key = `${Math.round(virtualX)},${Math.round(y)},${h}`;
+  if (key === lastFit) return;
+  lastFit = key;
+  const s = dpr();
+  api.fit_overlay(Math.round(virtualX * s), Math.round(y * s), Math.round(FULL_W * s), Math.round(h * s));
 }
 
-// Safety net for anything that shifts layout without an explicit syncWindowRegion() call
+// Safety net for anything that shifts layout without an explicit syncWindowFit() call
 // (fonts settling, the bridge appearing after first content, toast heights reflowing).
-setInterval(syncWindowRegion, 1000);
-window.addEventListener("pywebviewready", syncWindowRegion);
+setInterval(syncWindowFit, 1000);
+window.addEventListener("pywebviewready", syncWindowFit);
 
 async function applyLayoutForProcess(force) {
   const key = currentProcess || "default";
@@ -100,7 +100,12 @@ async function applyLayoutForProcess(force) {
   }
   appliedLayoutKey = key;
   const pos = layout[WIDGET];
-  if (pos) moveWindow(pos.x * screen.width, pos.y * screen.height);
+  if (pos) {
+    virtualX = pos.x * screen.width;
+    virtualY = pos.y * screen.height;
+    lastFit = null;
+    syncWindowFit(); // repositions (and re-anchors) the fitted window inside the new bounds
+  }
 }
 
 async function saveCurrentPosition() {
@@ -155,7 +160,7 @@ function showToast(text, kind) {
   const toast = buildToast(clean, kind);
   toastStack.appendChild(toast);
   while (toastStack.children.length > MAX_TOASTS) toastStack.removeChild(toastStack.firstChild);
-  syncWindowRegion();
+  syncWindowFit();
   requestAnimationFrame(() => toast.classList.add("visible"));
 
   // Linger long enough to read: base time plus a per-character allowance, capped.
@@ -164,7 +169,7 @@ function showToast(text, kind) {
     toast.classList.add("leaving");
     setTimeout(() => {
       toast.remove();
-      syncWindowRegion();
+      syncWindowFit();
     }, 400);
   }, lingerMs);
 }
@@ -212,7 +217,7 @@ async function pollGameState() {
       renderGsRow(tracker.label, String(tracker.value));
     }
   }
-  syncWindowRegion();
+  syncWindowFit();
 }
 
 // --- Layout editor ---
@@ -239,7 +244,7 @@ function enterEditMode() {
     renderGsRow("Example tracker", "42");
     gsPanel.classList.add("visible");
   }
-  syncWindowRegion();
+  syncWindowFit();
 }
 
 function exitEditMode() {
@@ -254,7 +259,7 @@ function exitEditMode() {
     gsPanel.classList.remove("visible");
     pollGameState(); // restore real content/visibility (also re-syncs the window region)
   }
-  syncWindowRegion();
+  syncWindowFit();
 }
 
 document.body.addEventListener("pointerdown", (e) => {
@@ -264,7 +269,11 @@ document.body.addEventListener("pointerdown", (e) => {
 });
 document.body.addEventListener("pointermove", (e) => {
   if (!drag) return;
-  moveWindow(drag.winX + (e.screenX - drag.grabScreenX), drag.winY + (e.screenY - drag.grabScreenY));
+  // While editing, the window IS the full bounds - dragging moves the virtual origin too,
+  // so the fitted window re-anchors correctly when edit mode ends.
+  virtualX = drag.winX + (e.screenX - drag.grabScreenX);
+  virtualY = drag.winY + (e.screenY - drag.grabScreenY);
+  moveWindow(virtualX, virtualY);
 });
 document.body.addEventListener("pointerup", () => {
   if (!drag) return;
