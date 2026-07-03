@@ -421,8 +421,9 @@ function showDialog(opts) {
     actionsEl.appendChild(okBtn);
 
     const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); close(opts.showCancel === false ? true : false); }
-      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+      // Capture-phase + stopPropagation so a modal's own Escape handler underneath doesn't also fire.
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(opts.showCancel === false ? true : false); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); close(true); }
     };
     document.addEventListener("keydown", onKey, true);
     overlay.onclick = (e) => { if (e.target === overlay) close(opts.showCancel === false ? true : false); };

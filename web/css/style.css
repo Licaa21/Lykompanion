@@ -1161,6 +1161,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 
 .modal-body input[type="text"],
 .modal-body input[type="password"],
+.modal-body input[type="datetime-local"],
 .modal-body select,
 .modal-body textarea {
   width: 100%;
@@ -1175,8 +1176,14 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   transition: border-color var(--ease), box-shadow var(--ease);
   -webkit-appearance: none; appearance: none;
 }
+/* Tint the native calendar/clock picker glyph so it reads on the dark field. */
+.modal-body input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
 .modal-body input[type="text"]:focus,
 .modal-body input[type="password"]:focus,
+.modal-body input[type="datetime-local"]:focus,
 .modal-body select:focus,
 .modal-body textarea:focus {
   border-color: rgba(91,95,199,0.5);
@@ -2128,6 +2135,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   opacity: 0;
   transition: opacity 180ms ease;
 }
+.dialog-overlay[hidden] { display: none; }
 .dialog-overlay.visible { opacity: 1; }
 .dialog {
   width: 400px;
@@ -2230,6 +2238,10 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   outline: none;
   border-color: rgba(91,95,199,0.5);
   box-shadow: 0 0 0 3px rgba(91,95,199,0.1);
+}
+.cs-trigger:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 .cs-trigger-label {
   overflow: hidden;

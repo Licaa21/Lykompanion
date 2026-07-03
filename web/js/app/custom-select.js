@@ -53,6 +53,8 @@
       const text = opt ? opt.textContent : "";
       labelEl.textContent = text || sel.dataset.placeholder || "Select…";
       trigger.dataset.placeholder = String(!text);
+      trigger.disabled = sel.disabled;
+      if (sel.disabled && inst.isOpen) close();
     }
 
     function buildPanel() {
@@ -164,7 +166,7 @@
       set(v) { nativeIndexDesc.set.call(this, v); syncLabel(); },
     });
     sel.addEventListener("change", syncLabel);
-    new MutationObserver(() => syncLabel()).observe(sel, { childList: true });
+    new MutationObserver(() => syncLabel()).observe(sel, { childList: true, attributes: true, attributeFilter: ["disabled"] });
 
     syncLabel();
   }
