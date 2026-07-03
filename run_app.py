@@ -187,28 +187,51 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+def _apply_overlay_base_styles(overlay_window) -> None:
+    """One-time styles applied at window init, independent of click-through toggling:
+    WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus, even
+    while click-through is lifted for editing), and - the one that actually matters for the
+    "transparent" flag to work at all - WS_EX_LAYERED.
+
+    WS_EX_LAYERED here is NOT the classic "flat alpha bitmap" mechanism (that needs
+    SetLayeredWindowAttributes or UpdateLayeredWindow, and setting it up wrongly is worse than
+    not setting WS_EX_LAYERED at all - see the CLAUDE.md writeup on this feature): on Windows
+    8+, a DWM-composited top-level window that sets WS_EX_LAYERED but never calls either of
+    those legacy APIs gets its per-pixel alpha taken directly from its own GPU swap chain /
+    DirectComposition surface instead - which is exactly how WebView2 renders. Without
+    WS_EX_LAYERED at all, DWM never engages per-pixel compositing for this window regardless of
+    pywebview's `transparent=True`, and it just shows WebView2's default opaque white
+    background. This must never be paired with SetLayeredWindowAttributes/UpdateLayeredWindow."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    GWL_EXSTYLE = -20
+    WS_EX_TOOLWINDOW = 0x80
+    WS_EX_LAYERED = 0x80000
+    WS_EX_NOACTIVATE = 0x8000000
+    SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
+
+    try:
+        hwnd = overlay_window.native.Handle.ToInt32()
+    except Exception:
+        return  # window already destroyed
+
+    current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+    user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
+
+
 def _make_overlay_click_through_setter(overlay_window):
     """Returns set_click_through(enabled): True turns the overlay window into a pure display
-    surface - mouse input falls through to the game underneath, never focusable, hidden from
-    Alt-Tab and the taskbar. False lifts just the click-through bit so the layout editor's
-    drag handles become interactive (the window stays on top and non-activating).
-
-    Deliberately does NOT touch WS_EX_LAYERED / SetLayeredWindowAttributes: pywebview's
-    `transparent=True` already gets real per-pixel transparency from WebView2's own
-    DirectComposition-based compositing (via `SupportsTransparentBackColor` +
-    `DefaultBackgroundColor = Transparent`, see winforms.py). Forcing the window into legacy
-    GDI "layered" mode on top of that breaks it - the whole window then renders as an opaque
-    dark rectangle instead of showing the desktop/game through it, because WebView2 composites
-    its transparent regions against black when the top-level window isn't DWM-composited
-    normally. WS_EX_TRANSPARENT (click-through) and WS_EX_TOOLWINDOW/WS_EX_NOACTIVATE don't
-    require WS_EX_LAYERED at all - they're independent, purely input/taskbar behavior."""
+    surface where mouse input falls through to the game underneath; False lifts just the
+    click-through bit so the layout editor's drag handles become interactive. Only touches
+    WS_EX_TRANSPARENT - unrelated to the WS_EX_LAYERED transparency setup above, which is
+    applied once at init by _apply_overlay_base_styles and never toggled."""
     import ctypes
 
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_TRANSPARENT = 0x20
-    WS_EX_TOOLWINDOW = 0x80
-    WS_EX_NOACTIVATE = 0x8000000
     SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     def _update_styles(hwnd: int, add: int, remove: int) -> None:
@@ -223,7 +246,7 @@ def _make_overlay_click_through_setter(overlay_window):
             return  # window already destroyed
 
         if enabled:
-            _update_styles(hwnd, WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, 0)
+            _update_styles(hwnd, WS_EX_TRANSPARENT, 0)
         else:
             _update_styles(hwnd, 0, WS_EX_TRANSPARENT)
 
@@ -327,12 +350,17 @@ def main() -> None:
         _set_overlay_click_through = _make_overlay_click_through_setter(overlay_win)
 
         def _init_overlay_styles() -> None:
+            # WS_EX_LAYERED must be set as early as possible, ideally before WebView2's first
+            # paint, so DWM engages per-pixel compositing from the start instead of showing an
+            # opaque white frame first - `shown` fires as soon as the native window appears,
+            # well before `loaded` (page content finished loading).
+            _apply_overlay_base_styles(overlay_win)
             _set_overlay_click_through(True)
             # WebView2 spawns its Chromium child windows asynchronously - a single pass right
-            # at `loaded` can miss late arrivals, so sweep once more shortly after.
+            # at `shown` can miss late arrivals, so sweep once more shortly after.
             threading.Timer(2.0, lambda: _set_overlay_click_through(True)).start()
 
-        overlay_win.events.loaded += _init_overlay_styles
+        overlay_win.events.shown += _init_overlay_styles
 
         # Let the layout-editor endpoint (POST /api/overlay/edit-mode) lift/restore the
         # click-through styles - the server runs in this same process.

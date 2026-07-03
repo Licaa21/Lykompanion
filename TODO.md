@@ -2,7 +2,7 @@
 
 ## Needs user verification
 
-- [ ] **Overlay transparency/sizing fix (untested)** — fixed the overlay rendering as an opaque dark rectangle (was setting `WS_EX_LAYERED` for click-through, which breaks WebView2's own per-pixel transparency) and not covering the full screen on scaled displays (`SetProcessDPIAware()` now called at `run_app.py` import time, before window sizing). Needs a real run to confirm both are actually fixed.
+- [ ] **Overlay transparency fix, round 3 (untested)** — went dark-tinted (WS_EX_LAYERED + SetLayeredWindowAttributes, wrong) → opaque white (dropped WS_EX_LAYERED entirely, also wrong) → now WS_EX_LAYERED alone with no legacy attribute/bitmap APIs, applied once at window `shown` before first paint (`_apply_overlay_base_styles` in `run_app.py`). This is the standard Windows 8+ technique for GPU-swap-chain-backed transparent windows and should be correct, but needs a real run to confirm the overlay is actually see-through now. Sizing fix (`SetProcessDPIAware()` at import time) is separate and still also unverified.
 
 ## Ideas / nice-to-have
 
