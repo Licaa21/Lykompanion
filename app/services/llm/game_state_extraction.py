@@ -442,6 +442,22 @@ def _push_overlay_game_state(process: str, prime: bool = False) -> None:
         logger.debug("Overlay game-state push failed", exc_info=True)
 
 
+def apply_overlay_enabled(enabled: bool) -> None:
+    """React to the OVERLAY_ENABLED setting being toggled at runtime so it takes
+    effect live (no app restart): tear the overlay down when disabled; when enabled,
+    spawn it and push the panel we already have if a game is currently tracked.
+    Best-effort — never raises into the settings handler."""
+    try:
+        if not enabled:
+            overlay_process.stop()
+            return
+        if _last_process:
+            overlay_process.start()
+            _push_overlay_game_state(_last_process, prime=True)
+    except Exception:
+        logger.debug("apply_overlay_enabled failed", exc_info=True)
+
+
 async def run_game_state_poller() -> None:
     """Long-lived background loop, started at app startup. Captures+OCRs a frame locally every
     capture interval (cheap, no LLM call), then once a full poll interval's worth of frames has

@@ -127,8 +127,15 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         settings.memory_extraction_model = config.memory_extraction_model
         env_updates["MEMORY_EXTRACTION_MODEL"] = config.memory_extraction_model
 
+    overlay_toggled = settings.overlay_enabled != config.overlay_enabled
     settings.overlay_enabled = config.overlay_enabled
     env_updates["OVERLAY_ENABLED"] = str(config.overlay_enabled)
+    if overlay_toggled:
+        # Apply live: stop the running overlay when disabled, or spawn + prime it
+        # when enabled mid-session, instead of waiting for an app restart.
+        from app.services.llm import game_state_extraction
+
+        game_state_extraction.apply_overlay_enabled(config.overlay_enabled)
 
     settings.game_state_ocr_enabled = config.game_state_ocr_enabled
     env_updates["GAME_STATE_OCR_ENABLED"] = str(config.game_state_ocr_enabled)

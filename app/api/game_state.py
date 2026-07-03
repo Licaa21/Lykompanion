@@ -87,12 +87,29 @@ async def get_process_trackers(process: str) -> list[GameStateTracker]:
 
 @router.put("/trackers/{process}", response_model=list[GameStateTracker])
 async def update_process_trackers(process: str, trackers: list[TrackerInput]) -> list[GameStateTracker]:
-    return game_state_trackers.set_trackers(process, [t.model_dump() for t in trackers])
+    result = game_state_trackers.set_trackers(process, [t.model_dump() for t in trackers])
+    _refresh_overlay_panel(process)
+    return result
 
 
 @router.post("/trackers/{process}/reset", response_model=list[GameStateTracker])
 async def reset_process_trackers(process: str) -> list[GameStateTracker]:
-    return game_state_trackers.reset_trackers(process)
+    result = game_state_trackers.reset_trackers(process)
+    _refresh_overlay_panel(process)
+    return result
+
+
+def _refresh_overlay_panel(process: str) -> None:
+    """Re-push the overlay game-state panel right after a tracker edit so per-tracker
+    'show in overlay' toggles take effect immediately instead of on the next poll.
+    No-op unless this is the process currently being tracked. Best-effort."""
+    try:
+        from app.services.llm import game_state_extraction
+
+        if game_state_extraction._last_process == process:
+            game_state_extraction._push_overlay_game_state(process)
+    except Exception:
+        pass
 
 
 @router.get("/training-data/{process}", response_model=TrainingDataDocument)
