@@ -16,14 +16,13 @@
 
   Lykompanion should be able to start/kill the overlay accordingly (start when game state is active, kill when not active). The need to manually start/kill the overlay should never be a problem.
 
-  Sprint plan (small committed steps — Python ctypes, not C++: same UpdateLayeredWindow technique, no build step):
-  - [x] Sprint 1: `overlay_native.py` — layered window skeleton, message-loop thread, GDI+ PARGB rendering, rounded card + text helpers. **User test: `.venv\Scripts\python.exe overlay_native.py` → dark card top-right over the desktop for 10s, crisp text, NOT a black box.**
-  - [ ] Sprint 2: toast rendering — text wrap/measure (GdipMeasureString), tag line, stacked toasts, expiry timers, window auto-sized to content.
-  - [ ] Sprint 3: game-state panel rendering (title + tracker label/value rows).
-  - [ ] Sprint 4: re-add `app/core/events.py` bus + publishers (chat endpoints final reply, reminders) and consume from the overlay.
-  - [ ] Sprint 5: wire into `run_app.py` — `overlay_enabled` setting back; start overlay when game-state tracking starts, kill when it stops.
-  - [ ] Sprint 6: Ctrl+Shift+O edit mode — click-through lift, drag to move, per-game position persistence (re-add `overlay_layouts`).
-
+  ### C++ native overlay — sprint plan
+  Standalone C++ executable (`overlay/` dir at repo root), spawned/killed by the Python side as a child process. Toolchain: single `overlay.cpp` + `build.cmd` (MSVC `cl.exe` from VS Build Tools; no CMake/vcpkg — link user32/gdi32/d2d1/dwrite only). Data in: newline-delimited JSON on stdin (Python writes toast/game-state/edit-mode commands); data out: position saves as JSON lines on stdout. No sockets, no shared memory — a dead parent pipe = overlay exits itself.
+  - [ ] Sprint C1: `overlay/overlay.cpp` skeleton — window class + `WS_EX_TOPMOST|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW` popup, Direct2D `DCRenderTarget` drawing into a 32bpp PARGB HBITMAP, `UpdateLayeredWindow` per frame, DirectWrite text. Acceptance: `build.cmd` compiles, running `overlay.exe --demo` shows a rounded dark card with crisp text over the desktop for 10s — desktop visible around it, not a black box.
+  - [ ] Sprint C2: stdin command protocol — `{"type":"toast","text":...,"kind":"reply"|"reminder"}`, `{"type":"game_state","title":...,"rows":[[label,value],...]}`, `{"type":"edit_mode","enabled":bool}`, `{"type":"quit"}`; toast stacking, word wrap (DirectWrite layout), expiry timers, auto-sized windows anchored to configurable corners.
+  - [ ] Sprint C3: edit mode in the exe — lift `WS_EX_TRANSPARENT`, dashed outline + hint, drag both widgets, emit `{"type":"layout","widget":...,"x":...,"y":...}` on stdout on release; Ctrl+Shift+O `RegisterHotKey` INSIDE the exe (its own message loop already runs).
+  - [ ] Sprint C4: Python integration — `app/services/overlay_process.py`: spawn `overlay/overlay.exe` when game-state tracking starts, kill when it stops (and on app exit); feed it chat replies (re-add the small in-process publish hook in the chat endpoints) + reminders + game-state updates; persist layouts per game (re-add `app/core/overlay_layouts.py`); `overlay_enabled` setting back in Settings UI.
+  - [ ] Sprint C5: ship a prebuilt `overlay/overlay.exe` in the repo (plus `build.cmd` to rebuild), so users without VS Build Tools still get the feature; graceful no-op if the exe is missing.
 
 - [ ] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
   with signals like fullscreen/borderless window style, GPU usage, or Steam/IGDB process lists.
