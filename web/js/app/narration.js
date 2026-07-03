@@ -107,18 +107,20 @@ async function processTtsQueue() {
       narrationAudio.src = blobUrl;
       narrationAudio.playbackRate = shouldApplyClientSideSpeed() ? narrationSpeed : 1;
       narrationAudio.volume = narrationVolume;
+      // Push the overlay toast for this sentence as early as we can — once metadata (duration) is
+      // known, and BEFORE the setSinkId await + play() startup — so it lands at or just before the
+      // first spoken syllable (accounting for the fetch→pipe→render hop), never seconds early (text
+      // done) nor after the voice. Duration needs metadata; loadedmetadata may have already fired.
+      const pushToast = () => pushOverlayNarrationToast(item.text);
+      if (Number.isFinite(narrationAudio.duration) && narrationAudio.duration > 0) {
+        pushToast();
+      } else {
+        narrationAudio.addEventListener("loadedmetadata", pushToast, { once: true });
+      }
       await applyOutputDevice(narrationAudio);
       await new Promise((resolve) => {
         pendingNarrationResolve = resolve;
         narrationAudio.onended = resolve;
-        // Once metadata is loaded the duration is known — push the overlay toast for this sentence
-        // timed to its spoken length. loadedmetadata may already have fired, so also try on play.
-        const pushToast = () => pushOverlayNarrationToast(item.text);
-        if (Number.isFinite(narrationAudio.duration) && narrationAudio.duration > 0) {
-          pushToast();
-        } else {
-          narrationAudio.addEventListener("loadedmetadata", pushToast, { once: true });
-        }
         narrationAudio.play();
       });
     }
