@@ -220,20 +220,35 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     SetLayeredWindowAttributes/UpdateLayeredWindow commits it (documented Win32 behavior) -
     that's why "nothing ever showed up" in the overlays.
 
-    The fix is the standard WebView2-overlay recipe: paint the form background in a sentinel
-    color and register that color as the form's TransparencyKey. WinForms then manages
-    WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_COLORKEY) itself, and every pixel where
-    the page background is transparent renders as the key color -> keyed out -> the game
-    shows through, and mouse input in keyed regions passes through natively. The key is
-    near-black (1,1,1) so anti-aliased edges of the dark overlay cards fringe toward black
-    (reads as a subtle edge shadow) instead of haloing in a visible color; overlay.html
-    avoids box-shadows, which under color-key would render as opaque dark halos."""
+    The fix is the standard WebView2-overlay color-key recipe: paint the form background in
+    a sentinel color and register that color as the window's transparency key, so every
+    pixel where the page background is transparent renders as the key color -> keyed out ->
+    the game shows through, and mouse input in keyed regions passes through natively. The
+    key is near-black (1,1,1) so anti-aliased edges of the dark overlay cards fringe toward
+    black (reads as a subtle edge shadow) instead of haloing in a visible color;
+    overlay.html avoids box-shadows, which under color-key would render as opaque dark
+    halos.
+
+    CRITICAL: the key must be registered via SetLayeredWindowAttributes(LWA_COLORKEY)
+    directly, NEVER via the WinForms Form.TransparencyKey property - that property's setter
+    flips Form.AllowTransparency, which makes WinForms RECREATE the window handle, and
+    recreating the hwnd under a live WebView2 host wedges the single shared WinForms UI
+    thread: every window in the app (including the main one) went permanently Not Responding
+    at boot. LWA_COLORKEY is also exempt from the earlier "never pair WS_EX_LAYERED with
+    SetLayeredWindowAttributes" rule - that rule is about LWA_ALPHA (legacy flat-alpha
+    blending, the round-1 dark tint); color-key mode is a different, safe code path, and
+    committing the layered attributes this way is also exactly what makes a WS_EX_LAYERED
+    window start rendering at all (rounds 3-4 set the bit bare and never committed, which is
+    why nothing ever showed up)."""
     import ctypes
 
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x80
+    WS_EX_LAYERED = 0x80000
     WS_EX_NOACTIVATE = 0x8000000
+    LWA_COLORKEY = 0x1
+    KEY_COLORREF = 0x00010101  # COLORREF is 0x00BBGGRR - near-black (1,1,1)
     SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     try:
@@ -243,18 +258,20 @@ def _apply_overlay_base_styles(overlay_window) -> None:
         return  # window already destroyed
 
     try:
-        # pythonnet is already initialized by pywebview at this point (`shown` fires from the
-        # WinForms UI thread, which is also the only thread that may touch Form properties).
+        # Paint the form's background (what shows through the page's transparent pixels,
+        # since pywebview sets the WebView2 control's DefaultBackgroundColor transparent) in
+        # the key color. BackColor is a plain repaint - unlike TransparencyKey it does NOT
+        # recreate the handle. pythonnet is already initialized by pywebview at this point
+        # (`shown` fires on the WinForms UI thread, the only thread allowed to touch Forms).
         from System.Drawing import Color
 
-        key = Color.FromArgb(255, 1, 1, 1)
-        form.BackColor = key
-        form.TransparencyKey = key
+        form.BackColor = Color.FromArgb(255, 1, 1, 1)
     except Exception:
-        pass  # worst case: the widget stays opaque, everything else still works
+        pass  # worst case: the widget keys out on the default gray mismatch -> stays opaque
 
     current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+    user32.SetLayeredWindowAttributes(hwnd, KEY_COLORREF, 0, LWA_COLORKEY)
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
 
 
