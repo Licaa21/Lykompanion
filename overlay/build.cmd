@@ -39,7 +39,9 @@ if %ERRORLEVEL% neq 0 (
 
 :build
 REM /O2 optimized, /EHsc C++ exceptions, /std:c++17, GUI subsystem (no console).
-cl /nologo /O2 /EHsc /std:c++17 /W3 ^
+REM /utf-8 = treat source (and exec) as UTF-8 so non-ASCII string literals
+REM (e.g. the ellipsis in "Listening…") don't mojibake under the default codepage.
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /W3 ^
     overlay.cpp ^
     /link /SUBSYSTEM:WINDOWS ^
     user32.lib gdi32.lib d2d1.lib dwrite.lib shell32.lib ^
