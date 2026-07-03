@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.core import game_state, memory
 from app.models.schemas import MemoryCreate, MemoryEntry, MemoryUpdate
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+
+_VALID_SCOPES = {"user", "game", "session"}
 
 
 def _derive_session_id(process: str | None) -> str | None:
@@ -56,6 +58,18 @@ async def update_memory(memory_id: str, payload: MemoryUpdate) -> MemoryEntry:
     if not updated:
         raise HTTPException(status_code=404, detail="Memory not found.")
     return updated
+
+
+@router.delete("")
+async def clear_memories(scope: list[str] = Query(default=[])) -> dict:
+    """Bulk-delete memories by scope (repeatable ?scope=). Requires at least one
+    explicit scope so an empty call can't wipe everything by accident. Personal Data
+    passes scope=user; the Gaming Journal passes scope=game&scope=session."""
+    scopes = {s for s in scope if s in _VALID_SCOPES}
+    if not scopes:
+        raise HTTPException(status_code=400, detail="Provide at least one valid scope: user, game, session.")
+    removed = memory.clear_memories(scopes)
+    return {"ok": True, "removed": removed}
 
 
 @router.delete("/{memory_id}")

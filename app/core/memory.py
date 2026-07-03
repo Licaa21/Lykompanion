@@ -169,6 +169,21 @@ def remove_memory(memory_id: str) -> bool:
     return True
 
 
+def clear_memories(scopes: set[str]) -> int:
+    """Bulk-delete every memory whose scope is in `scopes`. Returns how many were
+    removed. Used by the "delete all" buttons — no per-entry overlay toast (a bulk
+    wipe shouldn't spam the overlay)."""
+    if not scopes:
+        return 0
+    with _lock:
+        memories = load_memories()
+        kept = [m for m in memories if _derive_scope(m) not in scopes]
+        removed = len(memories) - len(kept)
+        if removed:
+            save_memories(kept)
+        return removed
+
+
 def format_memories_for_prompt(
     active_process: str | None = None,
     active_session_id: str | None = None,

@@ -1235,6 +1235,8 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .secondary-btn:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
 .secondary-btn.confirming { background: linear-gradient(135deg, #e05c5c, #c94949); color: #fff; border-color: transparent; box-shadow: 0 2px 14px var(--red-glow); }
+.secondary-btn--danger { color: var(--red); border-color: rgba(224,92,92,0.35); }
+.secondary-btn--danger:hover { background: rgba(224,92,92,0.14); color: var(--red); border-color: rgba(224,92,92,0.55); }
 
 /* ════════════════════════════════════════════════════
    FLOATING PANEL — draggable, e.g. Game State

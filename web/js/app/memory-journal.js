@@ -110,6 +110,14 @@ memoryAddForm.addEventListener("submit", async (event) => {
   await loadMemories();
 });
 
+document.getElementById("memory-delete-all").addEventListener("click", async () => {
+  const count = allMemories.filter((m) => (m.scope || "user") === "user").length;
+  if (count === 0) return;
+  if (!confirm(`Delete all ${count} personal ${count === 1 ? "memory" : "memories"}? This can't be undone.`)) return;
+  await fetch("/api/memory?scope=user", { method: "DELETE" });
+  await loadMemories();
+});
+
 // --- Gaming Journal modal ---
 // Per-game view of everything the companion knows: game-scope memories (hold across all
 // playthroughs), profiles (named sessions) with their playthrough-scope memories, and each
@@ -124,6 +132,12 @@ gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
   loadGamingJournal();
   loadGameStateProcessLists();
+});
+
+document.getElementById("journal-delete-all").addEventListener("click", async () => {
+  if (!confirm("Delete ALL game and playthrough memories across every game? Unconfirmed observations are left alone. This can't be undone.")) return;
+  await fetch("/api/memory?scope=game&scope=session", { method: "DELETE" });
+  await loadGamingJournal();
 });
 
 async function loadGamingJournal() {

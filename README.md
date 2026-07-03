@@ -265,7 +265,7 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `GET /api/proxy/image` | Server-side image proxy (`?url=...`). Fetches external images with browser-like headers to bypass hotlink protection — all SearXNG image results are routed through this. |
 | `POST /api/chat/title` | Generate a short chat title from the first exchange. |
 | `GET/PUT /api/config` | Read/update all settings. |
-| `GET/POST /api/memory`, `PUT/DELETE /api/memory/{id}` | Memory CRUD (entries carry an explicit `scope`: user/game/session). |
+| `GET/POST /api/memory`, `PUT/DELETE /api/memory/{id}`, `DELETE /api/memory?scope=…` | Memory CRUD (entries carry an explicit `scope`: user/game/session). The scoped `DELETE` bulk-clears every memory of the given scope(s) (repeatable `?scope=`; at least one required) — powers the "Delete all" buttons in the Personal Data / Gaming Journal modals. |
 | `GET /api/gaming-journal` | Per-game rollup: game-scope memories, profiles (sessions) with their playthrough memories and unconfirmed observations. Powers the Gaming Journal modal. |
 | `DELETE /api/observations/{id}` | Discard a single screen observation from the staging journal. |
 | `GET/PUT /api/instructions` | Custom personal instructions, injected into every conversation. |
