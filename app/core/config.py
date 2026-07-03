@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Short synthesized sound effects (message sent, tool calls, memory saved/removed) - purely
     # cosmetic, client-side only, but persisted like every other toggle.
     sfx_enabled: bool = True
+    # In-game overlay: a transparent, click-through, always-on-top window (desktop app only)
+    # showing companion replies, fired reminders, and the game-state snapshot over the game.
+    # The window is created at launch, so enabling it takes effect on the next app start;
+    # disabling hides its content immediately.
+    overlay_enabled: bool = False
 
     # "openrouter" (web-grounded chat completion, text-only) or "searxng" (self-hosted
     # metasearch with a real image-search endpoint).

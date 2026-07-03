@@ -76,6 +76,7 @@ class CompanionConfig(BaseModel):
     narration_volume: float = 1.0
     narrate_enabled: bool = True
     sfx_enabled: bool = True
+    overlay_enabled: bool = False
     context_window_messages: int = 20
     screenshot_max_width: int = 960
     wake_word_enabled: bool = False

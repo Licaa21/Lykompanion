@@ -175,6 +175,55 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+def _make_overlay_click_through_setter(overlay_window):
+    """Returns set_click_through(enabled): True turns the overlay window into a pure display
+    surface - mouse input falls through to the game underneath, never focusable, hidden from
+    Alt-Tab and the taskbar. False lifts just the click-through bit so the layout editor's
+    drag handles become interactive (the window stays on top and non-activating)."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    GWL_EXSTYLE = -20
+    WS_EX_TRANSPARENT = 0x20
+    WS_EX_TOOLWINDOW = 0x80
+    WS_EX_LAYERED = 0x80000
+    WS_EX_NOACTIVATE = 0x8000000
+    LWA_ALPHA = 0x2
+
+    def _update_styles(hwnd: int, add: int, remove: int) -> None:
+        current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (current | add) & ~remove)
+
+    def set_click_through(enabled: bool) -> None:
+        try:
+            hwnd = overlay_window.native.Handle.ToInt32()
+        except Exception:
+            return  # window already destroyed
+
+        if enabled:
+            _update_styles(hwnd, WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, 0)
+            # A layered window without an explicit alpha stops rendering - pin it fully opaque
+            # (visual transparency comes from WebView2's transparent background, not alpha).
+            user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
+        else:
+            _update_styles(hwnd, 0, WS_EX_TRANSPARENT)
+
+        # WS_EX_TRANSPARENT on the top-level form alone is not enough: the WebView2 child
+        # windows (Chrome_WidgetWin_*) hit-test on their own and still swallow clicks -
+        # keep every descendant's bit in sync too.
+        @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+        def _enum_child(child_hwnd, _lparam):
+            if enabled:
+                _update_styles(child_hwnd, WS_EX_TRANSPARENT, 0)
+            else:
+                _update_styles(child_hwnd, 0, WS_EX_TRANSPARENT)
+            return 1
+
+        user32.EnumChildWindows(hwnd, _enum_child, 0)
+
+    return set_click_through
+
+
 def main() -> None:
     import webview
 
@@ -198,6 +247,51 @@ def main() -> None:
     )
     win.expose(_make_download_api(win))
     win.events.loaded += lambda: _lock_down_webview(win)
+
+    # In-game overlay: a second, transparent, click-through, always-on-top window covering the
+    # primary screen (web/overlay.html renders replies/reminders/game state over the game).
+    # The server runs in this same process, so this reads the live Settings singleton - but
+    # only at launch: enabling the setting takes effect on the next start.
+    from app.core.config import settings as app_settings
+    if app_settings.overlay_enabled:
+        import ctypes
+        overlay_win = webview.create_window(
+            "Lykompanion Overlay",
+            f"{URL}/overlay.html?token={API_TOKEN}",
+            x=0,
+            y=0,
+            width=ctypes.windll.user32.GetSystemMetrics(0),
+            height=ctypes.windll.user32.GetSystemMetrics(1),
+            frameless=True,
+            easy_drag=False,
+            on_top=True,
+            transparent=True,
+            focus=False,
+        )
+        _set_overlay_click_through = _make_overlay_click_through_setter(overlay_win)
+
+        def _init_overlay_styles() -> None:
+            _set_overlay_click_through(True)
+            # WebView2 spawns its Chromium child windows asynchronously - a single pass right
+            # at `loaded` can miss late arrivals, so sweep once more shortly after.
+            threading.Timer(2.0, lambda: _set_overlay_click_through(True)).start()
+
+        overlay_win.events.loaded += _init_overlay_styles
+
+        # Let the layout-editor endpoint (POST /api/overlay/edit-mode) lift/restore the
+        # click-through styles - the server runs in this same process.
+        from app.core import events as overlay_events
+        overlay_events.register_overlay_click_through_setter(_set_overlay_click_through)
+
+        def _close_overlay() -> None:
+            # Closing the main window must take the overlay with it - otherwise an invisible
+            # click-through window keeps the app alive with no way to close it.
+            try:
+                overlay_win.destroy()
+            except Exception:
+                pass
+
+        win.events.closed += _close_overlay
 
     # private_mode=False required — without it pywebview ignores storage_path and uses
     # an in-memory session, so permissions and download prefs are never written to disk.

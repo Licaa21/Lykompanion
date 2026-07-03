@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lykompanion Overlay</title>
+  <!-- Standalone page for the in-game overlay window (see run_app.py). Rendered inside a
+       transparent, click-through, always-on-top WebView2 window - everything here must keep
+       a fully transparent background. Normally nothing is interactive (clicks pass through
+       to the game); the layout editor (Settings → "Edit overlay layout") temporarily lifts
+       the click-through so the elements can be dragged into place. Deliberately NOT part of
+       the web/js/app/*.js chain: it shares no state with the main window and talks to the
+       server on its own (SSE + polling). -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: transparent;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      user-select: none;
+      cursor: default;
+    }
+
+    /* --- Toast stack (companion replies + fired reminders), bottom-right by default --- */
+    #toast-stack {
+      position: fixed;
+      right: 24px;
+      bottom: 48px;
+      width: min(420px, 40vw);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .toast {
+      width: 100%;
+      background: rgba(16, 18, 26, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-left: 3px solid #7aa2f7;
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #e8eaf2;
+      font-size: 15px;
+      line-height: 1.45;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast.leaving { opacity: 0; transform: translateY(-8px); }
+    .toast.reminder { border-left-color: #e0af68; }
+    .toast .toast-tag {
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.65;
+      margin-bottom: 4px;
+    }
+
+    /* --- Game-state mini panel, top-right by default --- */
+    #gs-panel {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      min-width: 200px;
+      max-width: 320px;
+      background: rgba(16, 18, 26, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #e8eaf2;
+      font-size: 13px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      display: none;
+    }
+    #gs-panel.visible { display: block; }
+    #gs-title {
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .gs-row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+    .gs-label { opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gs-value { font-weight: 600; text-align: right; }
+
+    /* --- Layout editor --- */
+    body.editing .draggable {
+      outline: 2px dashed #7aa2f7;
+      outline-offset: 4px;
+      cursor: move;
+    }
+    #edit-toolbar {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      align-items: center;
+      gap: 12px;
+      background: rgba(16, 18, 26, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: #e8eaf2;
+      font-size: 14px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+      z-index: 10;
+    }
+    body.editing #edit-toolbar { display: flex; }
+    #edit-toolbar button {
+      font: inherit;
+      color: #e8eaf2;
+      background: rgba(122, 162, 247, 0.25);
+      border: 1px solid rgba(122, 162, 247, 0.6);
+      border-radius: 6px;
+      padding: 5px 14px;
+      cursor: pointer;
+    }
+    #edit-toolbar button:hover { background: rgba(122, 162, 247, 0.4); }
+    #edit-toolbar #edit-cancel {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div id="gs-panel" class="draggable" data-element-id="game-state">
+    <div id="gs-title"></div>
+    <div id="gs-rows"></div>
+  </div>
+  <div id="toast-stack" class="draggable" data-element-id="toasts"></div>
+  <div id="edit-toolbar">
+    <span id="edit-label"></span>
+    <button id="edit-save" type="button">Save layout</button>
+    <button id="edit-cancel" type="button">Cancel</button>
+  </div>
+  <script src="js/overlay.js"></script>
+</body>
+</html>

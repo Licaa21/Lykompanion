@@ -3,7 +3,7 @@
 
 ## Ideas / nice-to-have
 
-- [ ] **In-game overlay?** — surface the companion (game-state panel, incoming reminders,
-  maybe a mini chat) as an overlay on top of the running game instead of a separate window.
+- [ ] **Overlay: images** — the overlay currently strips markdown images from replies; consider rendering images the companion sends (via `/api/proxy/image`) as overlay cards.
+- [ ] **Overlay: multi-monitor** — the overlay window covers the primary monitor only; follow the game's monitor instead.
 - [ ] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
   with signals like fullscreen/borderless window style, GPU usage, or Steam/IGDB process lists.

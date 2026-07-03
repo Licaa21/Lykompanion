@@ -25,6 +25,7 @@ from app.api import (
     instructions,
     memory,
     models,
+    overlay,
     profile,
     reminders,
     screenshot,
@@ -90,6 +91,7 @@ app.include_router(debug.router)
 app.include_router(profile.router)
 app.include_router(reminders.router)
 app.include_router(backup.router)
+app.include_router(overlay.router)
 
 _PROXY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

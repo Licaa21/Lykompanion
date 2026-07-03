@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from openai import APIError
 from pydantic import ValidationError
 
-from app.core import debug_log, game_state, memory, observations, reminders as reminders_store
+from app.core import debug_log, events as overlay_events, game_state, memory, observations, reminders as reminders_store
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -437,6 +437,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     _, reply = _split_transcript(reply)
 
     _schedule_memory_extraction(last_user_message, reply)
+    if reply:
+        overlay_events.publish({"type": "reply", "text": reply})
 
     return ChatResponse(
         reply=reply,
@@ -475,6 +477,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
         _schedule_memory_extraction(last_user_message, full_reply)
+        if full_reply.strip():
+            overlay_events.publish({"type": "reply", "text": full_reply})
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -522,6 +526,8 @@ async def chat_voice(
 
     if transcript:
         _schedule_memory_extraction(transcript, reply)
+    if reply:
+        overlay_events.publish({"type": "reply", "text": reply})
 
     return ChatResponse(
         reply=reply,
@@ -590,6 +596,8 @@ async def chat_voice_stream(
         # <transcript> reply prefix - either way the extraction pass now has real user text.
         if transcript:
             _schedule_memory_extraction(transcript, full_reply)
+        if full_reply.strip():
+            overlay_events.publish({"type": "reply", "text": full_reply})
 
         yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening, 'transcript': transcript})}\n\n"
 
