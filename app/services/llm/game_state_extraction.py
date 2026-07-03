@@ -338,9 +338,11 @@ async def _capture_tick() -> None:
         # right away if any exist, empty otherwise) instead of waiting a full poll window for the
         # first LLM call to populate anything.
         game_state.start_tracking(process)
-        # Spawn the native overlay for this session and show whatever we already have.
+        # Spawn the native overlay for this session and show whatever we already have
+        # from prior sessions immediately (retry across the exe's brief boot window
+        # instead of waiting for the first OCR extraction pass).
         overlay_process.start()
-        _push_overlay_game_state(process)
+        _push_overlay_game_state(process, prime=True)
         # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
         # seed game-specific trackers + starting training data (no-op if already done/customized).
         schedule_bootstrap(process)
@@ -415,8 +417,9 @@ async def _capture_tick() -> None:
     _push_overlay_game_state(process)
 
 
-def _push_overlay_game_state(process: str) -> None:
+def _push_overlay_game_state(process: str, prime: bool = False) -> None:
     """Build the overlay panel (label/value rows) from the tracked values and push it.
+    `prime=True` retries across the overlay's boot window (first push on start).
     Best-effort — never let an overlay hiccup disturb the poll loop."""
     try:
         trackers = game_state_trackers.get_trackers(process)
@@ -430,7 +433,11 @@ def _push_overlay_game_state(process: str) -> None:
             # included (the overlay renders "(not seen yet)" for a blank value).
             rows.append([tracker["label"], str(value) if value else ""])
         title = process.rsplit(".", 1)[0].replace("_", " ").title()
-        overlay_process.push_game_state(title, rows)
+        command = {"type": "game_state", "title": title, "rows": rows}
+        if prime:
+            overlay_process.push_retry(command)
+        else:
+            overlay_process.push(command)
     except Exception:
         logger.debug("Overlay game-state push failed", exc_info=True)
 

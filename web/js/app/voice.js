@@ -393,6 +393,17 @@ async function startLiveMic() {
   liveSilentGain.connect(audioCtx.destination);
 
   setVoiceStatus("Listening...");
+  setOverlayHandsFree(true);
+}
+
+// Tell the native overlay whether hands-free (live-mic) listening is active so it
+// can show/hide its persistent mic indicator. Best-effort; ignored if no overlay.
+function setOverlayHandsFree(active) {
+  fetch("/api/overlay/handsfree", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active }),
+  }).catch(() => {});
 }
 
 async function finalizeLiveUtterance() {
@@ -449,6 +460,7 @@ function stopLiveMic() {
   ringBuffer = null;
   micBtn.classList.remove("recording");
   setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
+  setOverlayHandsFree(false);
 }
 
 liveMicToggle.addEventListener("click", () => {

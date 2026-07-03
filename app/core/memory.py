@@ -109,7 +109,19 @@ def remember(content: str, scope: str, process: str | None = None, session_id: s
         }
         memories.append(entry)
         save_memories(memories)
-        return entry
+    _notify_overlay("save", entry["scope"], entry["content"])
+    return entry
+
+
+def _notify_overlay(action: str, scope: str, content: str) -> None:
+    """Fire a memory toast into the native overlay. Lazy import keeps core free of a
+    services dependency at module load; best-effort and never raises."""
+    try:
+        from app.services import overlay_process
+
+        overlay_process.push_memory(action, scope, content)
+    except Exception:
+        pass
 
 
 def add_memory(content: str, process: str | None = None, session_id: str | None = None) -> dict:
@@ -149,11 +161,12 @@ def update_memory(memory_id: str, content: str, process: str | None = None, sess
 def remove_memory(memory_id: str) -> bool:
     with _lock:
         memories = load_memories()
-        filtered = [m for m in memories if m["id"] != memory_id]
-        if len(filtered) == len(memories):
+        removed = next((m for m in memories if m["id"] == memory_id), None)
+        if removed is None:
             return False
-        save_memories(filtered)
-        return True
+        save_memories([m for m in memories if m["id"] != memory_id])
+    _notify_overlay("remove", removed.get("scope", "user"), removed.get("content", ""))
+    return True
 
 
 def format_memories_for_prompt(

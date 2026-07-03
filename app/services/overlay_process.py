@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from app.core.config import settings
@@ -60,22 +61,26 @@ def _ensure_pipe():
     return _pipe
 
 
-def _write_locked(line: bytes) -> None:
-    """Write one framed line to the pipe, reconnecting once on failure. Caller holds _lock."""
+def _write_locked(line: bytes) -> bool:
+    """Write one framed line to the pipe, reconnecting once on failure. Returns
+    True if the bytes were written. Caller holds _lock."""
     pipe = _ensure_pipe()
     if pipe is None:
-        return
+        return False
     try:
         pipe.write(line)
+        return True
     except OSError:
         _disconnect()
         pipe = _ensure_pipe()
         if pipe is None:
-            return
+            return False
         try:
             pipe.write(line)
+            return True
         except OSError:
             _disconnect()
+            return False
 
 
 def start() -> None:
@@ -107,18 +112,35 @@ def start() -> None:
             _proc = None
 
 
-def push(command: dict) -> None:
-    """Send one JSON command to the overlay. No-ops unless the overlay is running."""
+def push(command: dict) -> bool:
+    """Send one JSON command to the overlay. No-ops (returns False) unless the
+    overlay is running and the pipe accepted the write."""
     if not is_enabled():
-        return
+        return False
     with _lock:
         if _proc is None or _proc.poll() is not None:
-            return
+            return False
         try:
             line = (json.dumps(command, ensure_ascii=False) + "\n").encode("utf-8")
         except (TypeError, ValueError):
-            return
-        _write_locked(line)
+            return False
+        return _write_locked(line)
+
+
+def push_retry(command: dict, attempts: int = 30, delay: float = 0.2) -> None:
+    """Push on a background thread, retrying until it lands or attempts run out.
+    Used for the first game-state push right after spawn, when the overlay's pipe
+    server may not have come up yet (its data is already known from prior sessions,
+    so we want the panel visible immediately rather than waiting a poll interval)."""
+    def _run() -> None:
+        for _ in range(attempts):
+            if not is_enabled() or (_proc is not None and _proc.poll() is not None):
+                return
+            if push(command):
+                return
+            time.sleep(delay)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def push_toast(text: str, kind: str = "reply") -> None:
@@ -136,6 +158,21 @@ def push_image(url: str, alt: str = "") -> None:
     if not url:
         return
     push({"type": "image", "url": url, "alt": alt or ""})
+
+
+def push_memory(action: str, scope: str, content: str) -> None:
+    """action = 'save' | 'remove'. Shows a brain +/- toast in the overlay."""
+    content = (content or "").strip()
+    if not content:
+        return
+    if len(content) > 160:
+        content = content[:157].rstrip() + "…"
+    push({"type": "memory", "action": action, "scope": scope or "user", "text": content})
+
+
+def set_handsfree(active: bool) -> None:
+    """Toggle the overlay's persistent hands-free (live-mic) indicator."""
+    push({"type": "handsfree", "active": bool(active)})
 
 
 def push_game_state(title: str, rows: list[list[str]]) -> None:

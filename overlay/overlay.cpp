@@ -45,6 +45,7 @@
 #include <fstream>
 #include <iterator>
 #include <cwctype>
+#include <cmath>
 #include <memory>
 
 #pragma comment(lib, "user32.lib")
@@ -85,7 +86,10 @@ constexpr UINT_PTR TIMER_TICK   = 1;         // toast-expiry tick
 constexpr UINT_PTR TIMER_DEMO   = 2;         // --demo auto-quit
 constexpr UINT_PTR TIMER_BANNER = 3;         // startup banner fade animation
 constexpr UINT_PTR TIMER_PARENT = 4;         // watch the parent process for exit
+constexpr UINT_PTR TIMER_HANDSFREE = 5;      // hands-free indicator animation
 constexpr int      HOTKEY_EDIT = 100;        // Ctrl+Shift+O edit-mode toggle
+
+constexpr int   AVATAR = 22;        // logo avatar size in reply toasts
 
 constexpr wchar_t kEditHint[] = L"Drag to move  \x2022  Ctrl+Shift+O to lock";
 
@@ -266,6 +270,8 @@ IDWriteTextFormat* g_fmtTitle = nullptr;  // toast title / panel title
 IDWriteTextFormat* g_fmtBody  = nullptr;  // toast body / panel value
 IDWriteTextFormat* g_fmtLabel = nullptr;  // panel label (dim, leading)
 IDWriteTextFormat* g_fmtSmall = nullptr;  // panel row label (11px uppercase)
+IDWriteTextFormat* g_fmtHead  = nullptr;  // memory/handsfree header (semibold 14)
+IDWriteTextFormat* g_fmtIcon  = nullptr;  // emoji glyphs (color font)
 IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
 ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
 
@@ -285,7 +291,7 @@ struct LayeredWindow {
     bool     hasPos  = false;  // false => derive from anchor on first commit
 };
 
-enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorFixed };
+enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorBottomCenter, AnchorFixed };
 
 // ---- Appearance (user-adjustable in edit mode, persisted) ------------------
 struct Rgb { float r, g, b; };
@@ -325,13 +331,17 @@ enum ImageState { ImgNone, ImgLoading, ImgReady, ImgFailed };
 
 struct Toast {
     std::wstring text;
-    std::wstring kind;   // "reply" | "reminder" | "image"
+    std::wstring kind;   // "reply" | "reminder" | "image" | "memory"
     ULONGLONG    expire; // GetTickCount64() deadline
     // Image toasts only:
     bool         isImage = false;
     int          imageId = 0;        // correlates the async download to this toast
     ImageState   imgState = ImgNone;
     std::shared_ptr<ImageData> image;
+    // Memory toasts only:
+    bool         isMemory = false;
+    std::wstring memAction;          // "save" | "remove"
+    std::wstring memScope;           // "user" | "game" | "session"
 };
 
 struct Panel {
@@ -350,6 +360,11 @@ LayeredWindow g_bannerWin;         // startup fade-in/out hint
 ULONGLONG     g_bannerStart = 0;
 HANDLE        g_parentProcess = nullptr;  // Lykompanion's process; overlay self-exits if it dies
 int           g_nextImageId = 0;
+ImageData     g_logo;                     // decoded logo.png (reply-toast avatar)
+bool          g_logoOk = false;
+LayeredWindow g_handsfreeWin;             // persistent hands-free (live-mic) indicator
+bool          g_handsfreeActive = false;
+ULONGLONG     g_handsfreeStart = 0;       // animation clock
 std::vector<Toast> g_toasts;
 Panel         g_panel;
 bool          g_editMode = false;
@@ -393,6 +408,14 @@ bool CreateFactories() {
         return false;
     if (FAILED(g_dwriteFactory->CreateTextFormat(
             L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-us", &g_fmtHead)))
+        return false;
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"en-us", &g_fmtIcon)))
+        return false;
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 15.0f, L"en-us", &g_fmtCenter)))
         return false;
     g_fmtCenter->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -423,6 +446,8 @@ void SaveLayout() {
                      ",\"y\":" + std::to_string(g_toastWin.posY) +
                      "},\"panel\":{\"x\":" + std::to_string(g_panelWin.posX) +
                      ",\"y\":" + std::to_string(g_panelWin.posY) +
+                     "},\"handsfree\":{\"x\":" + std::to_string(g_handsfreeWin.posX) +
+                     ",\"y\":" + std::to_string(g_handsfreeWin.posY) +
                      "},\"opacity\":" + std::to_string(g_opacity) +
                      ",\"accent\":" + std::to_string(g_accentIdx) + "}";
     HANDLE h = CreateFileW(LayoutPath().c_str(), GENERIC_WRITE, 0, nullptr,
@@ -455,6 +480,7 @@ void LoadLayout() {
     };
     apply(L"toast", g_toastWin);
     apply(L"panel", g_panelWin);
+    apply(L"handsfree", g_handsfreeWin);
 
     const JsonValue* op = v.find(L"opacity");
     if (op && op->type == JsonValue::Num) {
@@ -530,8 +556,12 @@ void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
     } else if (anchor == AnchorFixed) {
         // Caller set posX/posY explicitly (banner).
     } else if (!lw.hasPos) {
-        lw.posX = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width : MARGIN;
-        lw.posY = MARGIN;
+        lw.posX = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width
+                : (anchor == AnchorBottomCenter) ? (screenW - lw.width) / 2
+                : MARGIN;
+        lw.posY = (anchor == AnchorBottomCenter)
+                      ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height
+                      : MARGIN;
         lw.hasPos = true;
     }
     int x = lw.posX, y = lw.posY;
@@ -595,6 +625,23 @@ IDWriteTextLayout* MakeLayout(const std::wstring& text, IDWriteTextFormat* fmt,
     return layout;
 }
 
+// Draw a color emoji glyph within rect (color-font enabled so it renders in color).
+void DrawEmoji(ID2D1RenderTarget* rt, const wchar_t* glyph, const D2D1_RECT_F& rect,
+               ID2D1SolidColorBrush* fallback) {
+    rt->DrawText(glyph, (UINT32)wcslen(glyph), g_fmtIcon, rect, fallback,
+                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+}
+
+// Create a device bitmap from decoded PBGRA pixels (caller releases).
+ID2D1Bitmap* MakeBitmap(ID2D1RenderTarget* rt, const ImageData& img) {
+    ID2D1Bitmap* bmp = nullptr;
+    D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    rt->CreateBitmap(D2D1::SizeU(img.width, img.height), img.pixels.data(),
+                     img.stride, &bp, &bmp);
+    return bmp;
+}
+
 // While editing, an empty widget still shows a draggable placeholder card.
 void RenderPlaceholder(LayeredWindow& lw, const wchar_t* label,
                        Anchor anchor, int width) {
@@ -637,12 +684,15 @@ void RelayoutToasts() {
 
     const float innerW = TOAST_W - 2 * PAD;
 
-    // Per-toast layout plan (text height OR image display size).
+    enum PlanKind { PkText, PkImage, PkMemory };
     struct Plan {
-        IDWriteTextLayout* layout = nullptr;  // text body, or image caption/status
+        PlanKind kind = PkText;
+        IDWriteTextLayout* layout = nullptr;  // text body / image caption / memory content
         float textH = 0;
-        bool  isImage = false;
+        bool  avatar = false;                 // reply toast: draw the logo avatar
         float dispW = 0, dispH = 0;           // image display size (ImgReady)
+        IDWriteTextLayout* header = nullptr;  // memory header line
+        float headerH = 0;
     };
     std::vector<Plan> plans(g_toasts.size());
     std::vector<float> cardH(g_toasts.size());
@@ -651,8 +701,9 @@ void RelayoutToasts() {
     for (size_t i = 0; i < g_toasts.size(); ++i) {
         Toast& t = g_toasts[i];
         Plan& p = plans[i];
+
         if (t.isImage && t.imgState == ImgReady && t.image && t.image->ok) {
-            p.isImage = true;
+            p.kind = PkImage;
             float iw = (float)t.image->width, ih = (float)t.image->height;
             float scale = innerW / iw;
             if (ih * scale > IMAGE_MAX_H) scale = IMAGE_MAX_H / ih;
@@ -662,19 +713,35 @@ void RelayoutToasts() {
             if (!t.text.empty())  // optional caption below the image
                 p.layout = MakeLayout(t.text, g_fmtLabel, innerW, &p.textH);
             cardH[i] = PAD + p.dispH + (p.layout ? 4.0f + p.textH : 0.0f) + PAD;
+        } else if (t.isMemory) {
+            p.kind = PkMemory;
+            std::wstring scope = t.memScope.empty() ? L"user" : t.memScope;
+            std::wstring head = (t.memAction == L"remove" ? L"Removed from " : L"Saved to ")
+                                + scope + L" memory";
+            float iconCol = 30.0f;  // brain glyph + gap
+            p.header = MakeLayout(head, g_fmtHead, innerW - iconCol, &p.headerH);
+            p.layout = MakeLayout(t.text, g_fmtLabel, innerW, &p.textH);
+            float top = (p.headerH > 22.0f ? p.headerH : 22.0f);
+            cardH[i] = PAD + top + 4.0f + p.textH + PAD;
         } else {
             const wchar_t* status = nullptr;
             if (t.isImage && t.imgState == ImgLoading) status = L"Loading image…";
             else if (t.isImage && t.imgState == ImgFailed) status = L"[image unavailable]";
             std::wstring body = status ? status : t.text;
-            p.layout = MakeLayout(body, g_fmtBody, innerW, &p.textH);
-            cardH[i] = (p.textH + 2 * PAD < 44.0f) ? 44.0f : (p.textH + 2 * PAD);
+            // Reply toasts get the logo avatar; text wraps in the reduced width.
+            p.avatar = (t.kind == L"reply" && g_logoOk);
+            float textW = p.avatar ? innerW - (AVATAR + 8.0f) : innerW;
+            p.layout = MakeLayout(body, g_fmtBody, textW, &p.textH);
+            float contentH = p.avatar ? (p.textH > AVATAR ? p.textH : (float)AVATAR) : p.textH;
+            cardH[i] = (contentH + 2 * PAD < 44.0f) ? 44.0f : (contentH + 2 * PAD);
         }
         total += (int)cardH[i];
         if (i + 1 < g_toasts.size()) total += TOAST_GAP;
     }
 
-    auto freePlans = [&]() { for (auto& p : plans) SafeRelease(&p.layout); };
+    auto freePlans = [&]() {
+        for (auto& p : plans) { SafeRelease(&p.layout); SafeRelease(&p.header); }
+    };
 
     if (!EnsureSurface(g_toastWin, TOAST_W, total)) {
         freePlans();
@@ -705,18 +772,12 @@ void RelayoutToasts() {
         rt->FillRoundedRectangle(card, bg);
         rt->DrawRoundedRectangle(card, border, 1.3f);
 
-        if (p.isImage) {
-            // Build a device bitmap from the decoded pixels and draw it centered.
-            ID2D1Bitmap* bmp = nullptr;
-            D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
-                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-            if (SUCCEEDED(rt->CreateBitmap(
-                    D2D1::SizeU(t.image->width, t.image->height),
-                    t.image->pixels.data(), t.image->stride, &bp, &bmp)) && bmp) {
+        if (p.kind == PkImage) {
+            ID2D1Bitmap* bmp = MakeBitmap(rt, *t.image);
+            if (bmp) {
                 float ix = PAD + (innerW - p.dispW) / 2.0f;
                 D2D1_RECT_F dst = D2D1::RectF(ix, y + PAD, ix + p.dispW, y + PAD + p.dispH);
-                rt->DrawBitmap(bmp, dst, 1.0f,
-                               D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                rt->DrawBitmap(bmp, dst, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 SafeRelease(&bmp);
             }
             if (p.layout) {
@@ -725,8 +786,45 @@ void RelayoutToasts() {
                 rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD + p.dispH + 4.0f), p.layout, dim);
                 SafeRelease(&dim);
             }
-        } else if (p.layout) {
-            rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD), p.layout, text);
+        } else if (p.kind == PkMemory) {
+            // Brain glyph + a colored +/- badge, header line, then the content.
+            bool remove = (t.memAction == L"remove");
+            DrawEmoji(rt, L"\U0001F9E0", D2D1::RectF(PAD, y + PAD, PAD + 24, y + PAD + 24), text);
+            ID2D1SolidColorBrush* badge = nullptr;
+            rt->CreateSolidColorBrush(
+                remove ? D2D1::ColorF(0.92f, 0.40f, 0.40f, g_opacity)
+                       : D2D1::ColorF(0.35f, 0.80f, 0.48f, g_opacity), &badge);
+            D2D1_ELLIPSE dot = D2D1::Ellipse(D2D1::Point2F(PAD + 19, y + PAD + 19), 6.5f, 6.5f);
+            rt->FillEllipse(dot, badge);
+            // "+" or "-" inside the badge.
+            rt->DrawLine(D2D1::Point2F(PAD + 15.5f, y + PAD + 19), D2D1::Point2F(PAD + 22.5f, y + PAD + 19),
+                         text, 1.6f);
+            if (!remove)
+                rt->DrawLine(D2D1::Point2F(PAD + 19, y + PAD + 15.5f), D2D1::Point2F(PAD + 19, y + PAD + 22.5f),
+                             text, 1.6f);
+            SafeRelease(&badge);
+            if (p.header)
+                rt->DrawTextLayout(D2D1::Point2F(PAD + 30, y + PAD), p.header, text);
+            if (p.layout) {
+                ID2D1SolidColorBrush* dim = nullptr;
+                rt->CreateSolidColorBrush(Dim(1.0f), &dim);
+                float top = (p.headerH > 22.0f ? p.headerH : 22.0f);
+                rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD + top + 4.0f), p.layout, dim);
+                SafeRelease(&dim);
+            }
+        } else {
+            float tx = PAD;
+            if (p.avatar) {
+                ID2D1Bitmap* bmp = MakeBitmap(rt, g_logo);
+                if (bmp) {
+                    D2D1_RECT_F av = D2D1::RectF(PAD, y + PAD, PAD + AVATAR, y + PAD + AVATAR);
+                    rt->DrawBitmap(bmp, av, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    SafeRelease(&bmp);
+                }
+                tx = PAD + AVATAR + 8.0f;
+            }
+            if (p.layout)
+                rt->DrawTextLayout(D2D1::Point2F(tx, y + PAD), p.layout, text);
         }
 
         SafeRelease(&border);
@@ -758,28 +856,24 @@ void AddToast(const std::wstring& textStr, const std::wstring& kind) {
 // Background: download an http(s) image, decode + downscale via WIC into raw
 // PBGRA pixels, and hand them to the UI thread. Runs on its own COM apartment
 // so nothing here touches the shared render state.
-void LoadImageWorker(std::wstring url, int id) {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    ImageData* data = new ImageData();
-
+// Decode an image file into 32bpp PBGRA pixels (downscaled so the long side fits
+// maxDim). Creates its own WIC factory; the caller must be in a COM apartment.
+bool DecodeImageToPixels(const wchar_t* path, UINT maxDim, ImageData& out) {
     IWICImagingFactory* wic = nullptr;
     IWICBitmapDecoder* dec = nullptr;
     IWICBitmapFrameDecode* frame = nullptr;
     IWICBitmapScaler* scaler = nullptr;
     IWICFormatConverter* conv = nullptr;
     IWICBitmapSource* src = nullptr;
-    wchar_t cache[MAX_PATH] = {};
 
     if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
                                    CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
-        SUCCEEDED(URLDownloadToCacheFileW(nullptr, url.c_str(), cache, MAX_PATH, 0, nullptr)) &&
-        SUCCEEDED(wic->CreateDecoderFromFilename(cache, nullptr, GENERIC_READ,
+        SUCCEEDED(wic->CreateDecoderFromFilename(path, nullptr, GENERIC_READ,
                                                  WICDecodeMetadataCacheOnLoad, &dec)) &&
         SUCCEEDED(dec->GetFrame(0, &frame))) {
         UINT w = 0, h = 0;
         frame->GetSize(&w, &h);
         src = frame;
-        const UINT maxDim = 460;  // downscale big images before we copy pixels
         if (w > maxDim || h > maxDim) {
             double s = (double)maxDim / w;
             if ((double)maxDim / h < s) s = (double)maxDim / h;
@@ -797,26 +891,46 @@ void LoadImageWorker(std::wstring url, int id) {
             UINT fw = 0, fh = 0;
             conv->GetSize(&fw, &fh);
             UINT stride = fw * 4;
-            data->pixels.resize((size_t)stride * fh);
-            if (SUCCEEDED(conv->CopyPixels(nullptr, stride, (UINT)data->pixels.size(),
-                                           data->pixels.data()))) {
-                data->width = fw;
-                data->height = fh;
-                data->stride = stride;
-                data->ok = true;
+            out.pixels.resize((size_t)stride * fh);
+            if (SUCCEEDED(conv->CopyPixels(nullptr, stride, (UINT)out.pixels.size(),
+                                           out.pixels.data()))) {
+                out.width = fw;
+                out.height = fh;
+                out.stride = stride;
+                out.ok = true;
             }
         }
     }
-
     if (conv) conv->Release();
     if (scaler) scaler->Release();
     if (frame) frame->Release();
     if (dec) dec->Release();
     if (wic) wic->Release();
+    return out.ok;
+}
+
+// Download an http(s) image and decode it on a background COM apartment, then
+// hand the pixels to the UI thread. Nothing here touches shared render state.
+void LoadImageWorker(std::wstring url, int id) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    ImageData* data = new ImageData();
+    wchar_t cache[MAX_PATH] = {};
+    if (SUCCEEDED(URLDownloadToCacheFileW(nullptr, url.c_str(), cache, MAX_PATH, 0, nullptr)))
+        DecodeImageToPixels(cache, 460, *data);
     CoUninitialize();
 
     if (!g_ctrl || !PostMessage(g_ctrl, WM_APP_IMAGE_READY, (WPARAM)id, (LPARAM)data))
         delete data;
+}
+
+// Load the reply-toast avatar (logo.png next to the exe). Called once at startup.
+void LoadLogo() {
+    wchar_t exePath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    std::wstring dir(exePath);
+    size_t slash = dir.find_last_of(L"\\/");
+    std::wstring logoPath = (slash == std::wstring::npos ? L"" : dir.substr(0, slash + 1)) + L"logo.png";
+    g_logoOk = DecodeImageToPixels(logoPath.c_str(), 64, g_logo);
 }
 
 void AddImageToast(const std::wstring& url, const std::wstring& alt) {
@@ -829,6 +943,19 @@ void AddImageToast(const std::wstring& url, const std::wstring& alt) {
     t.expire = GetTickCount64() + IMAGE_MS;
     g_toasts.push_back(std::move(t));
     std::thread(LoadImageWorker, url, g_nextImageId).detach();
+    RelayoutToasts();
+}
+
+void AddMemoryToast(const std::wstring& action, const std::wstring& scope,
+                    const std::wstring& content) {
+    Toast t;
+    t.kind = L"memory";
+    t.isMemory = true;
+    t.memAction = action;
+    t.memScope = scope;
+    t.text = content;
+    t.expire = GetTickCount64() + TOAST_MS;
+    g_toasts.push_back(std::move(t));
     RelayoutToasts();
 }
 
@@ -998,6 +1125,78 @@ bool InRect(const D2D1_RECT_F& r, int x, int y) {
 }
 
 // ---------------------------------------------------------------------------
+// Hands-free (live-mic) indicator: a persistent pill with a mic glyph and a
+// pulsing, scrolling accent gradient while listening.
+// ---------------------------------------------------------------------------
+
+constexpr int HANDSFREE_W = 190;
+
+void RenderHandsFree() {
+    if (!g_handsfreeActive && !g_editMode) { HideWindow(g_handsfreeWin); return; }
+    const int w = HANDSFREE_W, h = 46;
+    if (!EnsureSurface(g_handsfreeWin, w, h)) return;
+
+    ID2D1DCRenderTarget* rt = g_handsfreeWin.rt;
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+    D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(
+        D2D1::RectF(1.0f, 1.0f, w - 1.0f, h - 1.0f), h / 2.0f, h / 2.0f);
+
+    ID2D1SolidColorBrush* bg = nullptr;
+    rt->CreateSolidColorBrush(Bg(0.90f), &bg);
+    rt->FillRoundedRectangle(pill, bg);
+
+    // Scrolling accent gradient (wrapped) — animated only while active.
+    D2D1_GRADIENT_STOP stops[3] = {
+        {0.0f, Acc(0.05f)}, {0.5f, Acc(0.42f)}, {1.0f, Acc(0.05f)}};
+    ID2D1GradientStopCollection* gsc = nullptr;
+    if (SUCCEEDED(rt->CreateGradientStopCollection(
+            stops, 3, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gsc)) && gsc) {
+        float phase = (GetTickCount64() - g_handsfreeStart) / 1000.0f;
+        const float span = 95.0f;
+        float off = g_handsfreeActive ? fmodf(phase * 55.0f, span) : 0.0f;
+        ID2D1LinearGradientBrush* grad = nullptr;
+        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp = {{off, 0}, {off + span, 0}};
+        if (SUCCEEDED(rt->CreateLinearGradientBrush(gp, gsc, &grad)) && grad) {
+            rt->FillRoundedRectangle(pill, grad);
+            SafeRelease(&grad);
+        }
+        SafeRelease(&gsc);
+    }
+
+    ID2D1SolidColorBrush* border = nullptr, *white = nullptr;
+    rt->CreateSolidColorBrush(Acc(0.75f), &border);
+    rt->CreateSolidColorBrush(Txt(1.0f), &white);
+    rt->DrawRoundedRectangle(pill, border, 1.4f);
+
+    DrawEmoji(rt, L"\U0001F3A4",
+              D2D1::RectF(PAD, (h - 24) / 2.0f, PAD + 24, (h + 24) / 2.0f), white);
+    float th = 0;
+    IDWriteTextLayout* tl = MakeLayout(L"Listening…", g_fmtHead, (float)(w - PAD - 34), &th);
+    if (tl) {
+        rt->DrawTextLayout(D2D1::Point2F(PAD + 30, (h - th) / 2.0f), tl, white);
+        SafeRelease(&tl);
+    }
+
+    SafeRelease(&white); SafeRelease(&border); SafeRelease(&bg);
+    if (g_editMode) DrawEditDecoration(rt, w, h);
+    if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_handsfreeWin); return; }
+    CommitWindow(g_handsfreeWin, AnchorBottomCenter);
+}
+
+void SetHandsFree(bool active) {
+    g_handsfreeActive = active;
+    if (active) {
+        g_handsfreeStart = GetTickCount64();
+        SetTimer(g_ctrl, TIMER_HANDSFREE, 33, nullptr);  // ~30fps sweep
+    } else {
+        KillTimer(g_ctrl, TIMER_HANDSFREE);
+    }
+    RenderHandsFree();
+}
+
+// ---------------------------------------------------------------------------
 // Edit-mode appearance toolbar (opacity + accent color). Fixed opaque colors so
 // it stays usable regardless of the overlay opacity it is editing.
 // ---------------------------------------------------------------------------
@@ -1097,8 +1296,10 @@ void ApplyEditMode(bool on) {
     SetClickThrough(g_toastWin, !on);
     SetClickThrough(g_panelWin, !on);
     SetClickThrough(g_configWin, !on);
+    SetClickThrough(g_handsfreeWin, !on);
     RelayoutToasts();
     RenderPanel();
+    RenderHandsFree();  // shows a positionable placeholder in edit mode
     if (on) RenderConfig();
     else    HideWindow(g_configWin);
     if (!on) SaveLayout();
@@ -1186,6 +1387,16 @@ void HandleCommand(const std::wstring& line) {
         const JsonValue* alt = v.find(L"alt");
         if (url && url->type == JsonValue::Str && !url->str.empty())
             AddImageToast(url->str, alt ? alt->asStr() : L"");
+    } else if (type == L"memory") {
+        const JsonValue* action = v.find(L"action");
+        const JsonValue* scope = v.find(L"scope");
+        const JsonValue* text = v.find(L"text");
+        if (text && text->type == JsonValue::Str && !text->str.empty())
+            AddMemoryToast(action ? action->asStr() : L"save",
+                           scope ? scope->asStr() : L"user", text->str);
+    } else if (type == L"handsfree") {
+        const JsonValue* active = v.find(L"active");
+        SetHandsFree(active ? active->asBool() : false);
     } else if (type == L"game_state") {
         g_panel = Panel{};
         g_panel.valid = true;
@@ -1300,6 +1511,8 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (!g_editMode && ExpireToasts()) RelayoutToasts();
             } else if (wParam == TIMER_BANNER) {
                 if (!TickBanner()) KillTimer(g_ctrl, TIMER_BANNER);
+            } else if (wParam == TIMER_HANDSFREE) {
+                RenderHandsFree();  // animate the gradient sweep
             } else if (wParam == TIMER_PARENT) {
                 // Parent (Lykompanion) exited — including a hard kill that skips
                 // its graceful stop() — so tear ourselves down too.
@@ -1321,6 +1534,7 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 LayeredWindow* FromHwnd(HWND h) {
     if (h == g_toastWin.hwnd) return &g_toastWin;
     if (h == g_panelWin.hwnd) return &g_panelWin;
+    if (h == g_handsfreeWin.hwnd) return &g_handsfreeWin;
     return nullptr;
 }
 
@@ -1378,6 +1592,9 @@ void InjectDemo() {
                   L"\"Hey! The boss room is just north of you \\u2014 watch the cliff edge.\"}");
     HandleCommand(L"{\"type\":\"toast\",\"kind\":\"reminder\",\"text\":"
                   L"\"Reminder: take a short break in 5 minutes.\"}");
+    HandleCommand(L"{\"type\":\"memory\",\"action\":\"save\",\"scope\":\"user\","
+                  L"\"text\":\"Prefers concise answers and plays on hard difficulty.\"}");
+    HandleCommand(L"{\"type\":\"handsfree\",\"active\":true}");
     // Image toast (needs network; shows "[image unavailable]" if offline).
     HandleCommand(L"{\"type\":\"image\",\"alt\":\"Sample map image\","
                   L"\"url\":\"https://picsum.photos/400/240\"}");
@@ -1424,13 +1641,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
                             0, 0, 0, 0, HWND_MESSAGE, nullptr, hInstance, nullptr);
     if (!g_ctrl) return 2;
 
-    g_toastWin.hwnd  = CreateLayeredHwnd(hInstance);
-    g_panelWin.hwnd  = CreateLayeredHwnd(hInstance);
-    g_configWin.hwnd = CreateLayeredHwnd(hInstance);
-    g_bannerWin.hwnd = CreateLayeredHwnd(hInstance);
-    if (!g_toastWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd || !g_bannerWin.hwnd)
+    g_toastWin.hwnd     = CreateLayeredHwnd(hInstance);
+    g_panelWin.hwnd     = CreateLayeredHwnd(hInstance);
+    g_configWin.hwnd    = CreateLayeredHwnd(hInstance);
+    g_bannerWin.hwnd    = CreateLayeredHwnd(hInstance);
+    g_handsfreeWin.hwnd = CreateLayeredHwnd(hInstance);
+    if (!g_toastWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
+        !g_bannerWin.hwnd || !g_handsfreeWin.hwnd)
         return 3;
 
+    LoadLogo();    // reply-toast avatar (logo.png next to the exe)
     LoadLayout();  // restore saved positions + appearance before first commit
 
     // Ctrl+Shift+O toggles edit mode. Registered on the controller window so its
@@ -1469,10 +1689,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     DiscardSurface(g_panelWin);
     DiscardSurface(g_configWin);
     DiscardSurface(g_bannerWin);
+    DiscardSurface(g_handsfreeWin);
     if (g_parentProcess) CloseHandle(g_parentProcess);
     CoUninitialize();
     SafeRelease(&g_dashStroke);
     SafeRelease(&g_fmtCenter);
+    SafeRelease(&g_fmtIcon);
+    SafeRelease(&g_fmtHead);
     SafeRelease(&g_fmtSmall);
     SafeRelease(&g_fmtLabel);
     SafeRelease(&g_fmtBody);

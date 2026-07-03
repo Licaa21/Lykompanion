@@ -25,6 +25,7 @@ from app.api import (
     instructions,
     memory,
     models,
+    overlay,
     profile,
     reminders,
     screenshot,
@@ -79,6 +80,7 @@ async def _require_api_token(request: Request, call_next):
 
 app.include_router(chat.router)
 app.include_router(chats.router)
+app.include_router(overlay.router)
 app.include_router(voice.router)
 app.include_router(tts.router)
 app.include_router(screenshot.router)
