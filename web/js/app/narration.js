@@ -91,6 +91,7 @@ async function processTtsQueue() {
       narrationAudio.src = blobUrl;
       narrationAudio.playbackRate = shouldApplyClientSideSpeed() ? narrationSpeed : 1;
       narrationAudio.volume = narrationVolume;
+      await applyOutputDevice(narrationAudio);
       await new Promise((resolve) => {
         pendingNarrationResolve = resolve;
         narrationAudio.onended = resolve;

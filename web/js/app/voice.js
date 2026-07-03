@@ -186,9 +186,7 @@ micBtn.addEventListener("click", async () => {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
   } catch (err) {
     setVoiceStatus("Microphone access denied", "error");
     return;
@@ -319,9 +317,7 @@ function extractFromRing(startAbs, endAbs) {
 
 async function startLiveMic() {
   try {
-    liveMicStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
   } catch (err) {
     setVoiceStatus("Microphone access denied", "error");
     liveMicEnabled = false;
@@ -473,6 +469,15 @@ liveMicToggle.addEventListener("click", () => {
   }
   updateWakeWordListenerState();
 });
+
+// Re-acquire the hands-free stream on a newly-picked microphone (from Settings) so the change
+// takes effect immediately. Push-to-talk isn't a persistent stream, so it just uses the new
+// device on its next recording. No-op if hands-free isn't currently on.
+function restartLiveMicForDeviceChange() {
+  if (!liveMicEnabled) return;
+  stopLiveMic();
+  startLiveMic();
+}
 
 // --- Agent-driven stop_listening tool: lets the companion disable hands-free listening itself
 // (e.g. user says "goodbye" or it's picking up unwanted audio). Always indefinite - resuming is

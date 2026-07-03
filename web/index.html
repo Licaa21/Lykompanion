@@ -309,6 +309,17 @@
 
         <!-- VOICE tab -->
         <section class="tab-panel" data-tab="voice" hidden>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Microphone <button type="button" class="cfg-help" data-tip="Input device used for push-to-talk and hands-free listening. Saved on this device.">?</button></span>
+                <select id="cfg-mic-device"></select>
+              </label>
+              <label>
+                <span class="cfg-label">Audio Output <button type="button" class="cfg-help" data-tip="Speaker/headset that narration and voice replies play through. Saved on this device. (Unsupported on some engines — falls back to system default.)">?</button></span>
+                <select id="cfg-output-device"></select>
+              </label>
+            </div>
+            <button type="button" id="cfg-refresh-devices" class="secondary-btn cfg-refresh-devices">Refresh device list</button>
             <label class="checkbox">
               <input id="cfg-transcription-enabled" type="checkbox" />
               Transcribe voice messages before sending to the main model

@@ -39,6 +39,35 @@ const liveMicToggle = document.getElementById("live-mic-toggle");
 const narrationAudio = document.getElementById("narration-audio");
 const voiceStatus = document.getElementById("voice-status");
 
+// --- Audio device selection (machine-specific, so client-side in localStorage, not server settings) ---
+const MIC_DEVICE_KEY = "lyko-mic-device";
+const OUTPUT_DEVICE_KEY = "lyko-output-device";
+
+function getSelectedMicId() { return localStorage.getItem(MIC_DEVICE_KEY) || ""; }
+function getSelectedOutputId() { return localStorage.getItem(OUTPUT_DEVICE_KEY) || ""; }
+function setSelectedMicId(id) { localStorage.setItem(MIC_DEVICE_KEY, id || ""); }
+function setSelectedOutputId(id) { localStorage.setItem(OUTPUT_DEVICE_KEY, id || ""); }
+
+// Base capture constraints plus the chosen input device (if the user picked one; empty = system default).
+function micAudioConstraints() {
+  const constraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const id = getSelectedMicId();
+  if (id) constraints.deviceId = { exact: id };
+  return constraints;
+}
+
+// Route an HTMLAudioElement to the chosen output device. No-op if none picked or setSinkId is
+// unsupported (older engines) or the device vanished. Best-effort — never throws into callers.
+async function applyOutputDevice(audioEl) {
+  const id = getSelectedOutputId();
+  if (!id || !audioEl || typeof audioEl.setSinkId !== "function") return;
+  try {
+    await audioEl.setSinkId(id);
+  } catch (err) {
+    /* device unplugged / not permitted — fall back to default silently */
+  }
+}
+
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
 const personalDataBtn = document.getElementById("personal-data-btn");

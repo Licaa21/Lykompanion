@@ -91,6 +91,7 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
       audioSrc = apiUrl(`/api/voice/${audioId}`);
     }
     const audio = new Audio(audioSrc);
+    applyOutputDevice(audio);
 
     const player = document.createElement("div");
     // voice-bubble class makes it look like the role's message bubble

@@ -49,7 +49,58 @@ document.querySelectorAll(".subtab-bar").forEach((bar) => {
   });
 });
 
-settingsBtn.addEventListener("click", () => openModal(settingsModal));
+settingsBtn.addEventListener("click", () => {
+  openModal(settingsModal);
+  populateAudioDevices();
+});
+
+// --- Audio device pickers (Voice tab). Devices are machine-specific, so the choice lives in
+// localStorage (see core.js helpers), not server config. ---
+const micDeviceSelect = document.getElementById("cfg-mic-device");
+const outputDeviceSelect = document.getElementById("cfg-output-device");
+
+async function populateAudioDevices() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  let devices = [];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch (err) {
+    return;  // permission/enumeration failed — leave the selects as-is
+  }
+  const fill = (selectEl, kind, savedId, defaultLabel, genericName) => {
+    const matching = devices.filter((d) => d.kind === kind);
+    selectEl.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = defaultLabel;
+    selectEl.appendChild(def);
+    matching.forEach((d, i) => {
+      const opt = document.createElement("option");
+      opt.value = d.deviceId;
+      // Labels are blank until mic permission is granted this session — fall back to a number.
+      opt.textContent = d.label || `${genericName} ${i + 1}`;
+      selectEl.appendChild(opt);
+    });
+    // Restore the saved choice if that device is still present; otherwise fall back to default.
+    selectEl.value = savedId;
+    if (selectEl.value !== savedId) selectEl.value = "";
+  };
+  fill(micDeviceSelect, "audioinput", getSelectedMicId(), "System default microphone", "Microphone");
+  fill(outputDeviceSelect, "audiooutput", getSelectedOutputId(), "System default output", "Output");
+}
+
+micDeviceSelect.addEventListener("change", () => {
+  setSelectedMicId(micDeviceSelect.value);
+  // Restart hands-free capture on the new device if it's currently live.
+  if (typeof restartLiveMicForDeviceChange === "function") restartLiveMicForDeviceChange();
+});
+outputDeviceSelect.addEventListener("change", async () => {
+  setSelectedOutputId(outputDeviceSelect.value);
+  await applyOutputDevice(narrationAudio);  // apply straight away to the persistent narration player
+});
+document.getElementById("cfg-refresh-devices").addEventListener("click", populateAudioDevices);
+// A device being plugged/unplugged while Settings is open re-syncs the lists.
+if (navigator.mediaDevices) navigator.mediaDevices.addEventListener?.("devicechange", populateAudioDevices);
 
 function populateSelect(selectEl, options, selectedValue) {
   selectEl.innerHTML = "";
