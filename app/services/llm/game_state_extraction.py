@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
 from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
+from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
 from app.services.llm.web_search_tool import execute_web_search
 from app.services.ocr import windows_ocr
@@ -338,6 +339,11 @@ async def _capture_tick() -> None:
         # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
         # seed game-specific trackers + starting training data (no-op if already done/customized).
         schedule_bootstrap(process)
+        # Also review standing "user"-scope facts for anything that's actually about this game -
+        # facts stated before it was ever tracked (e.g. playtime mentioned in passing) had
+        # nowhere more specific to land at save time and default to general scope.
+        gs = game_state.get_game_state()
+        schedule_retagging(process, gs["session_id"] if gs else None)
 
     if _window_started_at is None:
         _window_started_at = time.time()
