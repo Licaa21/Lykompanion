@@ -16,6 +16,14 @@
 
   Lykompanion should be able to start/kill the overlay accordingly (start when game state is active, kill when not active). The need to manually start/kill the overlay should never be a problem.
 
+  Sprint plan (small committed steps — Python ctypes, not C++: same UpdateLayeredWindow technique, no build step):
+  - [x] Sprint 1: `overlay_native.py` — layered window skeleton, message-loop thread, GDI+ PARGB rendering, rounded card + text helpers. **User test: `.venv\Scripts\python.exe overlay_native.py` → dark card top-right over the desktop for 10s, crisp text, NOT a black box.**
+  - [ ] Sprint 2: toast rendering — text wrap/measure (GdipMeasureString), tag line, stacked toasts, expiry timers, window auto-sized to content.
+  - [ ] Sprint 3: game-state panel rendering (title + tracker label/value rows).
+  - [ ] Sprint 4: re-add `app/core/events.py` bus + publishers (chat endpoints final reply, reminders) and consume from the overlay.
+  - [ ] Sprint 5: wire into `run_app.py` — `overlay_enabled` setting back; start overlay when game-state tracking starts, kill when it stops.
+  - [ ] Sprint 6: Ctrl+Shift+O edit mode — click-through lift, drag to move, per-game position persistence (re-add `overlay_layouts`).
+
 
 - [ ] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
   with signals like fullscreen/borderless window style, GPU usage, or Steam/IGDB process lists.
