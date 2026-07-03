@@ -26,6 +26,9 @@ function setupDesktopTitlebar() {
     const close = document.getElementById('win-close');
     if (min) min.addEventListener('click', () => window.pywebview?.api?.window_minimize?.());
     if (close) close.addEventListener('click', () => window.pywebview?.api?.window_close?.());
+    // Double-click the titlebar to maximize/restore (like a native window).
+    const drag = document.querySelector('.titlebar-drag');
+    if (drag) drag.addEventListener('dblclick', () => window.pywebview?.api?.window_toggle_maximize?.());
   };
   if (window.pywebview?.api) apply();
   else window.addEventListener('pywebviewready', apply);
