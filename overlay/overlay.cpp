@@ -25,8 +25,12 @@
 #ifndef _UNICODE
 #define _UNICODE
 #endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS   // _wgetenv is fine for our use
+#endif
 
 #include <windows.h>
+#include <windowsx.h>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <cstdint>
@@ -36,6 +40,8 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include <fstream>
+#include <iterator>
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -66,8 +72,12 @@ constexpr wchar_t kCtrlClass[]  = L"LykoOverlayCtrl";
 constexpr wchar_t kWinClass[]   = L"LykoOverlayWin";
 
 constexpr UINT WM_APP_COMMAND = WM_APP + 1;  // a JSON line is queued
-constexpr UINT_PTR TIMER_TICK = 1;           // toast-expiry tick
-constexpr UINT_PTR TIMER_DEMO = 2;           // --demo auto-quit
+constexpr UINT_PTR TIMER_TICK   = 1;         // toast-expiry tick
+constexpr UINT_PTR TIMER_DEMO   = 2;         // --demo auto-quit
+constexpr UINT_PTR TIMER_BANNER = 3;         // startup banner fade animation
+constexpr int      HOTKEY_EDIT = 100;        // Ctrl+Shift+O edit-mode toggle
+
+constexpr wchar_t kEditHint[] = L"Drag to move  \x2022  Ctrl+Shift+O to lock";
 
 // Widget geometry (device pixels @ 96 DPI; DPI scaling is a later concern).
 constexpr int   TOAST_W   = 340;
@@ -243,6 +253,8 @@ IDWriteFactory*   g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_fmtTitle = nullptr;  // toast title / panel title
 IDWriteTextFormat* g_fmtBody  = nullptr;  // toast body / panel value
 IDWriteTextFormat* g_fmtLabel = nullptr;  // panel label (dim, leading)
+IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
+ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
 
 // A layered window plus its DIB-backed Direct2D render surface.
 struct LayeredWindow {
@@ -255,9 +267,37 @@ struct LayeredWindow {
     int      height  = 0;
     ID2D1DCRenderTarget* rt = nullptr;
     bool     visible = false;
+    int      posX    = 0;      // committed screen position (top-left)
+    int      posY    = 0;
+    bool     hasPos  = false;  // false => derive from anchor on first commit
 };
 
-enum Anchor { AnchorTopRight, AnchorTopLeft };
+enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorFixed };
+
+// ---- Appearance (user-adjustable in edit mode, persisted) ------------------
+struct Rgb { float r, g, b; };
+const Rgb kAccents[] = {
+    {0.40f, 0.55f, 0.95f},  // blue
+    {0.42f, 0.82f, 0.55f},  // green
+    {0.95f, 0.70f, 0.30f},  // amber
+    {0.67f, 0.51f, 0.92f},  // purple
+    {0.92f, 0.47f, 0.47f},  // red
+    {0.28f, 0.80f, 0.85f},  // teal
+};
+constexpr int kAccentCount = (int)(sizeof(kAccents) / sizeof(kAccents[0]));
+int   g_accentIdx = 0;
+float g_opacity   = 0.92f;  // whole-overlay alpha multiplier, 0.40..1.00
+
+// Color helpers: every widget color routes through these so opacity/accent
+// apply uniformly. `a` is the color's own alpha before the opacity multiply.
+D2D1_COLOR_F Acc(float a) {
+    const Rgb& c = kAccents[g_accentIdx];
+    return D2D1::ColorF(c.r, c.g, c.b, a * g_opacity);
+}
+D2D1_COLOR_F Bg(float a)   { return D2D1::ColorF(0.08f, 0.09f, 0.12f, a * g_opacity); }
+D2D1_COLOR_F Warm(float a) { return D2D1::ColorF(0.95f, 0.70f, 0.30f, a * g_opacity); }
+D2D1_COLOR_F Txt(float a)  { return D2D1::ColorF(0.96f, 0.97f, 0.99f, a * g_opacity); }
+D2D1_COLOR_F Dim(float a)  { return D2D1::ColorF(0.62f, 0.66f, 0.74f, a * g_opacity); }
 
 // ---- Widget content --------------------------------------------------------
 
@@ -278,9 +318,18 @@ struct Panel {
 HWND          g_ctrl = nullptr;    // message-only controller window
 LayeredWindow g_toastWin;
 LayeredWindow g_panelWin;
+LayeredWindow g_configWin;         // edit-mode appearance toolbar
+LayeredWindow g_bannerWin;         // startup fade-in/out hint
+ULONGLONG     g_bannerStart = 0;
 std::vector<Toast> g_toasts;
 Panel         g_panel;
-bool          g_editMode = false;  // Sprint C3 will act on this
+bool          g_editMode = false;
+
+// Config-toolbar hit rects (window coords), filled in by RenderConfig().
+constexpr int CONFIG_W = 300;
+D2D1_RECT_F   g_rcOpacMinus = {};
+D2D1_RECT_F   g_rcOpacPlus  = {};
+D2D1_RECT_F   g_rcSwatch[kAccentCount] = {};
 
 std::mutex               g_queueMx;
 std::deque<std::wstring> g_queue;   // raw JSON lines from the pipe thread
@@ -308,7 +357,84 @@ bool CreateFactories() {
             L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtLabel)))
         return false;
+
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 15.0f, L"en-us", &g_fmtCenter)))
+        return false;
+    g_fmtCenter->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_fmtCenter->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties();
+    sp.dashStyle = D2D1_DASH_STYLE_DASH;
+    sp.dashCap   = D2D1_CAP_STYLE_ROUND;
+    g_d2dFactory->CreateStrokeStyle(sp, nullptr, 0, &g_dashStroke);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Layout persistence — the overlay owns its own config file; Python never
+// touches it. %LOCALAPPDATA%\Lykompanion\overlay_layout.json
+// ---------------------------------------------------------------------------
+
+std::wstring LayoutPath() {
+    const wchar_t* base = _wgetenv(L"LOCALAPPDATA");
+    std::wstring dir = base ? base : L".";
+    dir += L"\\Lykompanion";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\overlay_layout.json";
+}
+
+void SaveLayout() {
+    std::string js = "{\"toast\":{\"x\":" + std::to_string(g_toastWin.posX) +
+                     ",\"y\":" + std::to_string(g_toastWin.posY) +
+                     "},\"panel\":{\"x\":" + std::to_string(g_panelWin.posX) +
+                     ",\"y\":" + std::to_string(g_panelWin.posY) +
+                     "},\"opacity\":" + std::to_string(g_opacity) +
+                     ",\"accent\":" + std::to_string(g_accentIdx) + "}";
+    HANDLE h = CreateFileW(LayoutPath().c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        DWORD n = 0;
+        WriteFile(h, js.data(), (DWORD)js.size(), &n, nullptr);
+        CloseHandle(h);
+    }
+}
+
+void LoadLayout() {
+    std::ifstream f(LayoutPath(), std::ios::binary);
+    if (!f) return;
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    JsonValue v;
+    if (!ParseJson(Utf8ToWide(content), v) || v.type != JsonValue::Obj) return;
+
+    auto apply = [&](const wchar_t* key, LayeredWindow& lw) {
+        const JsonValue* o = v.find(key);
+        if (!o || o->type != JsonValue::Obj) return;
+        const JsonValue* x = o->find(L"x");
+        const JsonValue* y = o->find(L"y");
+        if (x && x->type == JsonValue::Num && y && y->type == JsonValue::Num) {
+            lw.posX = (int)x->num;
+            lw.posY = (int)y->num;
+            lw.hasPos = true;
+        }
+    };
+    apply(L"toast", g_toastWin);
+    apply(L"panel", g_panelWin);
+
+    const JsonValue* op = v.find(L"opacity");
+    if (op && op->type == JsonValue::Num) {
+        g_opacity = (float)op->num;
+        if (g_opacity < 0.40f) g_opacity = 0.40f;
+        if (g_opacity > 1.00f) g_opacity = 1.00f;
+    }
+    const JsonValue* ac = v.find(L"accent");
+    if (ac && ac->type == JsonValue::Num) {
+        g_accentIdx = (int)ac->num;
+        if (g_accentIdx < 0) g_accentIdx = 0;
+        if (g_accentIdx >= kAccentCount) g_accentIdx = kAccentCount - 1;
+    }
 }
 
 void DiscardSurface(LayeredWindow& lw) {
@@ -360,11 +486,22 @@ bool EnsureSurface(LayeredWindow& lw, int width, int height) {
     return true;
 }
 
-// Push the rendered DIB to screen at an anchored position.
-void CommitWindow(LayeredWindow& lw, Anchor anchor) {
+// Push the rendered DIB to screen at an anchored position. `constAlpha` scales
+// the whole window uniformly (used for banner fades) on top of per-pixel alpha.
+void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
     int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int x = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width : MARGIN;
-    int y = MARGIN;
+    if (anchor == AnchorTopCenter) {
+        // The config toolbar is always top-center; it isn't dragged or saved.
+        lw.posX = (screenW - lw.width) / 2;
+        lw.posY = MARGIN;
+    } else if (anchor == AnchorFixed) {
+        // Caller set posX/posY explicitly (banner).
+    } else if (!lw.hasPos) {
+        lw.posX = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width : MARGIN;
+        lw.posY = MARGIN;
+        lw.hasPos = true;
+    }
+    int x = lw.posX, y = lw.posY;
 
     if (!lw.visible) {
         ShowWindow(lw.hwnd, SW_SHOWNOACTIVATE);
@@ -376,7 +513,7 @@ void CommitWindow(LayeredWindow& lw, Anchor anchor) {
     POINT ptSrc = {0, 0};
     BLENDFUNCTION blend = {};
     blend.BlendOp             = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
+    blend.SourceConstantAlpha = constAlpha;
     blend.AlphaFormat         = AC_SRC_ALPHA;
 
     HDC screenDC = GetDC(nullptr);
@@ -387,6 +524,25 @@ void CommitWindow(LayeredWindow& lw, Anchor anchor) {
 
 void HideWindow(LayeredWindow& lw) {
     if (lw.visible) { ShowWindow(lw.hwnd, SW_HIDE); lw.visible = false; }
+}
+
+// Toggle WS_EX_TRANSPARENT so a widget receives (or ignores) the mouse.
+void SetClickThrough(LayeredWindow& lw, bool through) {
+    LONG ex = GetWindowLong(lw.hwnd, GWL_EXSTYLE);
+    if (through) ex |= WS_EX_TRANSPARENT;
+    else         ex &= ~WS_EX_TRANSPARENT;
+    SetWindowLong(lw.hwnd, GWL_EXSTYLE, ex);
+}
+
+// Dashed outline drawn over a widget while in edit mode.
+void DrawEditDecoration(ID2D1RenderTarget* rt, int w, int h) {
+    if (!g_dashStroke) return;
+    ID2D1SolidColorBrush* b = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.45f, 0.85f, 0.55f, 0.95f), &b);
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+        D2D1::RectF(1.5f, 1.5f, w - 1.5f, h - 1.5f), 12.0f, 12.0f);
+    rt->DrawRoundedRectangle(rr, b, 1.6f, g_dashStroke);
+    SafeRelease(&b);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,12 +562,45 @@ IDWriteTextLayout* MakeLayout(const std::wstring& text, IDWriteTextFormat* fmt,
     return layout;
 }
 
+// While editing, an empty widget still shows a draggable placeholder card.
+void RenderPlaceholder(LayeredWindow& lw, const wchar_t* label,
+                       Anchor anchor, int width) {
+    const int h = 64;
+    if (!EnsureSurface(lw, width, h)) return;
+    ID2D1RenderTarget* rt = lw.rt;
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr, *dim = nullptr;
+    rt->CreateSolidColorBrush(Bg(0.80f), &bg);            // previews live opacity
+    rt->CreateSolidColorBrush(Txt(1.0f), &white);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.55f, 0.85f, 0.60f, 0.95f), &dim);  // edit green
+
+    D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
+        D2D1::RectF(1.5f, 1.5f, width - 1.5f, h - 1.5f), 12.0f, 12.0f);
+    rt->FillRoundedRectangle(card, bg);
+    rt->DrawText(label, (UINT32)wcslen(label), g_fmtBody,
+                 D2D1::RectF(PAD, 12, width - PAD, 34), white);
+    rt->DrawText(kEditHint, (UINT32)wcslen(kEditHint), g_fmtLabel,
+                 D2D1::RectF(PAD, 36, width - PAD, 58), dim);
+    DrawEditDecoration(rt, width, h);
+
+    SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+    if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(lw); return; }
+    CommitWindow(lw, anchor);
+}
+
 // ---------------------------------------------------------------------------
 // Toast widget
 // ---------------------------------------------------------------------------
 
 void RelayoutToasts() {
-    if (g_toasts.empty()) { HideWindow(g_toastWin); return; }
+    if (g_toasts.empty()) {
+        if (g_editMode) RenderPlaceholder(g_toastWin, L"Toasts appear here",
+                                          AnchorTopRight, TOAST_W);
+        else HideWindow(g_toastWin);
+        return;
+    }
 
     const float innerW = TOAST_W - 2 * PAD;
 
@@ -437,20 +626,17 @@ void RelayoutToasts() {
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
     ID2D1SolidColorBrush* text = nullptr;
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.97f, 0.99f, 1.0f), &text);
+    rt->CreateSolidColorBrush(Txt(1.0f), &text);
 
     float y = 0;
     for (size_t i = 0; i < g_toasts.size(); ++i) {
         bool reminder = (g_toasts[i].kind == L"reminder");
         ID2D1SolidColorBrush* bg = nullptr;
         ID2D1SolidColorBrush* border = nullptr;
-        if (reminder) {
-            rt->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.15f, 0.05f, 0.92f), &bg);
-            rt->CreateSolidColorBrush(D2D1::ColorF(0.95f, 0.70f, 0.30f, 0.75f), &border);
-        } else {
-            rt->CreateSolidColorBrush(D2D1::ColorF(0.10f, 0.13f, 0.20f, 0.92f), &bg);
-            rt->CreateSolidColorBrush(D2D1::ColorF(0.40f, 0.55f, 0.95f, 0.70f), &border);
-        }
+        rt->CreateSolidColorBrush(Bg(0.92f), &bg);
+        // Reminders keep a fixed warm border so they read as distinct; replies
+        // use the user-chosen accent.
+        rt->CreateSolidColorBrush(reminder ? Warm(0.80f) : Acc(0.75f), &border);
 
         D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
             D2D1::RectF(1.0f, y + 1.0f, TOAST_W - 1.0f, y + cardH[i] - 1.0f), 12.0f, 12.0f);
@@ -467,6 +653,8 @@ void RelayoutToasts() {
 
     SafeRelease(&text);
     for (auto* l : layouts) SafeRelease(&l);
+
+    if (g_editMode) DrawEditDecoration(rt, TOAST_W, total);
 
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
         DiscardSurface(g_toastWin);
@@ -502,7 +690,9 @@ bool ExpireToasts() {
 void RenderPanel() {
     if (!g_panel.valid ||
         (g_panel.title.empty() && g_panel.rows.empty())) {
-        HideWindow(g_panelWin);
+        if (g_editMode) RenderPlaceholder(g_panelWin, L"Game state panel",
+                                          AnchorTopLeft, PANEL_W);
+        else HideWindow(g_panelWin);
         return;
     }
 
@@ -526,10 +716,10 @@ void RenderPanel() {
 
     ID2D1SolidColorBrush* bg = nullptr, *border = nullptr;
     ID2D1SolidColorBrush* white = nullptr, *dim = nullptr;
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.07f, 0.08f, 0.11f, 0.90f), &bg);
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.35f, 0.40f, 0.55f, 0.55f), &border);
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.97f, 0.99f, 1.0f), &white);
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.62f, 0.66f, 0.74f, 1.0f), &dim);
+    rt->CreateSolidColorBrush(Bg(0.90f), &bg);
+    rt->CreateSolidColorBrush(Acc(0.55f), &border);
+    rt->CreateSolidColorBrush(Txt(1.0f), &white);
+    rt->CreateSolidColorBrush(Dim(1.0f), &dim);
 
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
         D2D1::RectF(1.0f, 1.0f, PANEL_W - 1.0f, height - 1.0f), 12.0f, 12.0f);
@@ -560,11 +750,185 @@ void RenderPanel() {
     SafeRelease(&border); SafeRelease(&bg);
     SafeRelease(&titleLayout);
 
+    if (g_editMode) DrawEditDecoration(rt, PANEL_W, height);
+
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
         DiscardSurface(g_panelWin);
         return;
     }
     CommitWindow(g_panelWin, AnchorTopLeft);
+}
+
+bool InRect(const D2D1_RECT_F& r, int x, int y) {
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
+// ---------------------------------------------------------------------------
+// Edit-mode appearance toolbar (opacity + accent color). Fixed opaque colors so
+// it stays usable regardless of the overlay opacity it is editing.
+// ---------------------------------------------------------------------------
+
+void RenderConfig() {
+    const int h = 108;
+    if (!EnsureSurface(g_configWin, CONFIG_W, h)) return;
+    ID2D1RenderTarget* rt = g_configWin.rt;
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr, *dim = nullptr, *acc = nullptr;
+    const Rgb& a = kAccents[g_accentIdx];
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.10f, 0.11f, 0.14f, 0.97f), &bg);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.95f, 0.96f, 0.98f, 1.0f), &white);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.62f, 0.66f, 0.74f, 1.0f), &dim);
+    rt->CreateSolidColorBrush(D2D1::ColorF(a.r, a.g, a.b, 1.0f), &acc);
+
+    D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
+        D2D1::RectF(1.0f, 1.0f, CONFIG_W - 1.0f, h - 1.0f), 12.0f, 12.0f);
+    rt->FillRoundedRectangle(card, bg);
+    rt->DrawRoundedRectangle(card, acc, 1.4f);
+
+    // Title.
+    rt->DrawText(L"Overlay appearance", 18, g_fmtLabel,
+                 D2D1::RectF(PAD, 8, CONFIG_W - PAD, 28), dim);
+
+    // --- Opacity row: label + [-] [xx%] [+] on the right.
+    rt->DrawText(L"Opacity", 7, g_fmtBody,
+                 D2D1::RectF(PAD, 34, 120, 58), white);
+    const float by = 34, bh = 24, bw = 26;
+    g_rcOpacPlus  = D2D1::RectF(CONFIG_W - PAD - bw, by, CONFIG_W - PAD, by + bh);
+    D2D1_RECT_F pct = D2D1::RectF(g_rcOpacPlus.left - 4 - 48, by,
+                                  g_rcOpacPlus.left - 4, by + bh);
+    g_rcOpacMinus = D2D1::RectF(pct.left - 4 - bw, by, pct.left - 4, by + bh);
+    for (auto* r : {&g_rcOpacMinus, &g_rcOpacPlus}) {
+        D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
+        rt->DrawRoundedRectangle(br, dim, 1.2f);
+    }
+    rt->DrawText(L"\x2212", 1, g_fmtCenter, g_rcOpacMinus, white);  // minus sign
+    rt->DrawText(L"+", 1, g_fmtCenter, g_rcOpacPlus, white);
+    wchar_t pctText[8];
+    swprintf(pctText, 8, L"%d%%", (int)(g_opacity * 100 + 0.5f));
+    rt->DrawText(pctText, (UINT32)wcslen(pctText), g_fmtCenter, pct, white);
+
+    // --- Accent row: swatches, selected one ringed.
+    rt->DrawText(L"Accent", 6, g_fmtBody, D2D1::RectF(PAD, 72, 90, 96), white);
+    const float sw = 24, sgap = 6;
+    float sx = CONFIG_W - PAD - (kAccentCount * (sw + sgap) - sgap);
+    for (int i = 0; i < kAccentCount; ++i) {
+        g_rcSwatch[i] = D2D1::RectF(sx, 72, sx + sw, 72 + sw);
+        ID2D1SolidColorBrush* sb = nullptr;
+        rt->CreateSolidColorBrush(
+            D2D1::ColorF(kAccents[i].r, kAccents[i].g, kAccents[i].b, 1.0f), &sb);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcSwatch[i], 6, 6);
+        rt->FillRoundedRectangle(rr, sb);
+        if (i == g_accentIdx) {
+            D2D1_ROUNDED_RECT ring = D2D1::RoundedRect(
+                D2D1::RectF(sx - 2, 70, sx + sw + 2, 74 + sw), 8, 8);
+            rt->DrawRoundedRectangle(ring, white, 1.8f);
+        }
+        SafeRelease(&sb);
+        sx += sw + sgap;
+    }
+
+    SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+    if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_configWin); return; }
+    CommitWindow(g_configWin, AnchorTopCenter);
+}
+
+// Handle a click inside the config toolbar; returns true if something changed.
+bool ConfigClick(int x, int y) {
+    bool changed = false;
+    if (InRect(g_rcOpacMinus, x, y)) {
+        g_opacity = (g_opacity - 0.05f < 0.40f) ? 0.40f : g_opacity - 0.05f;
+        changed = true;
+    } else if (InRect(g_rcOpacPlus, x, y)) {
+        g_opacity = (g_opacity + 0.05f > 1.00f) ? 1.00f : g_opacity + 0.05f;
+        changed = true;
+    } else {
+        for (int i = 0; i < kAccentCount; ++i)
+            if (InRect(g_rcSwatch[i], x, y)) { g_accentIdx = i; changed = true; break; }
+    }
+    if (changed) {
+        RelayoutToasts();
+        RenderPanel();
+        RenderConfig();
+        SaveLayout();
+    }
+    return changed;
+}
+
+// Toggle edit mode: lift/restore click-through, show/hide the appearance
+// toolbar, re-render every widget, and on exit persist to the config file.
+void ApplyEditMode(bool on) {
+    g_editMode = on;
+    SetClickThrough(g_toastWin, !on);
+    SetClickThrough(g_panelWin, !on);
+    SetClickThrough(g_configWin, !on);
+    RelayoutToasts();
+    RenderPanel();
+    if (on) RenderConfig();
+    else    HideWindow(g_configWin);
+    if (!on) SaveLayout();
+}
+
+// ---------------------------------------------------------------------------
+// Startup banner — fades in, holds, fades out; tells the user about edit mode.
+// ---------------------------------------------------------------------------
+
+constexpr int BANNER_W = 430;
+
+void RenderBanner() {
+    const int w = BANNER_W, h = 78;
+    if (!EnsureSurface(g_bannerWin, w, h)) return;
+
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    g_bannerWin.posX = (screenW - w) / 2;
+    g_bannerWin.posY = screenH / 6;
+
+    ID2D1RenderTarget* rt = g_bannerWin.rt;
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+    const Rgb& a = kAccents[g_accentIdx];
+    ID2D1SolidColorBrush* bg = nullptr, *acc = nullptr, *white = nullptr, *dim = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.08f, 0.09f, 0.12f, 0.94f), &bg);
+    rt->CreateSolidColorBrush(D2D1::ColorF(a.r, a.g, a.b, 1.0f), &acc);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.97f, 0.99f, 1.0f), &white);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.66f, 0.70f, 0.78f, 1.0f), &dim);
+
+    D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
+        D2D1::RectF(1.0f, 1.0f, w - 1.0f, h - 1.0f), 14.0f, 14.0f);
+    rt->FillRoundedRectangle(card, bg);
+    rt->DrawRoundedRectangle(card, acc, 1.4f);
+
+    rt->DrawText(L"Lykompanion overlay active", 26, g_fmtCenter,
+                 D2D1::RectF(PAD, 14, w - PAD, 40), white);
+    const wchar_t* sub = L"Press Ctrl+Shift+O to move widgets & customize appearance";
+    IDWriteTextLayout* subLayout = nullptr;
+    if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(
+            sub, (UINT32)wcslen(sub), g_fmtLabel, w - 2 * PAD, 26.0f, &subLayout)) &&
+        subLayout) {
+        subLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt->DrawTextLayout(D2D1::Point2F(PAD, 44), subLayout, dim);
+        SafeRelease(&subLayout);
+    }
+
+    SafeRelease(&dim); SafeRelease(&white); SafeRelease(&acc); SafeRelease(&bg);
+    if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_bannerWin); return; }
+    CommitWindow(g_bannerWin, AnchorFixed, 0);  // starts transparent; timer fades in
+}
+
+// Advance the banner fade; returns false when the animation is finished.
+bool TickBanner() {
+    const ULONGLONG kIn = 350, kHold = 2600, kOut = 800, kTotal = kIn + kHold + kOut;
+    ULONGLONG t = GetTickCount64() - g_bannerStart;
+    float alpha;
+    if (t < kIn)                 alpha = (float)t / kIn;
+    else if (t < kIn + kHold)    alpha = 1.0f;
+    else if (t < kTotal)         alpha = 1.0f - (float)(t - kIn - kHold) / kOut;
+    else                         { HideWindow(g_bannerWin); return false; }
+    CommitWindow(g_bannerWin, AnchorFixed, (BYTE)(alpha * 255.0f));
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,8 +962,7 @@ void HandleCommand(const std::wstring& line) {
         RenderPanel();
     } else if (type == L"edit_mode") {
         const JsonValue* en = v.find(L"enabled");
-        g_editMode = en ? en->asBool() : false;
-        // Sprint C3: lift WS_EX_TRANSPARENT, draw drag affordances, persist layout.
+        ApplyEditMode(en ? en->asBool() : false);
     } else if (type == L"quit") {
         PostQuitMessage(0);
     }
@@ -668,9 +1031,15 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
         }
+        case WM_HOTKEY:
+            if (wParam == HOTKEY_EDIT) ApplyEditMode(!g_editMode);
+            return 0;
         case WM_TIMER:
             if (wParam == TIMER_TICK) {
-                if (ExpireToasts()) RelayoutToasts();
+                // Don't let toasts expire out from under you while arranging.
+                if (!g_editMode && ExpireToasts()) RelayoutToasts();
+            } else if (wParam == TIMER_BANNER) {
+                if (!TickBanner()) KillTimer(g_ctrl, TIMER_BANNER);
             } else if (wParam == TIMER_DEMO) {
                 PostQuitMessage(0);
             }
@@ -683,9 +1052,49 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 }
 
+LayeredWindow* FromHwnd(HWND h) {
+    if (h == g_toastWin.hwnd) return &g_toastWin;
+    if (h == g_panelWin.hwnd) return &g_panelWin;
+    return nullptr;
+}
+
 LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    // Layered widgets are click-through in C2 (WS_EX_TRANSPARENT); no input yet.
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    // The appearance toolbar holds clickable controls — it is never a drag
+    // handle, and clicks are dispatched to ConfigClick().
+    if (hwnd == g_configWin.hwnd) {
+        switch (msg) {
+            case WM_NCHITTEST:
+                return g_editMode ? HTCLIENT : HTTRANSPARENT;
+            case WM_LBUTTONDOWN:
+                if (g_editMode) ConfigClick(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+                return 0;
+            default:
+                return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+    }
+
+    switch (msg) {
+        case WM_NCHITTEST:
+            // In edit mode the whole widget is a drag handle; DefWindowProc then
+            // moves the window for us. Otherwise it's click-through anyway.
+            return g_editMode ? HTCAPTION : HTTRANSPARENT;
+        case WM_MOVE: {
+            // Keep the stored position in sync so later re-renders (new toast,
+            // etc.) commit at the dragged spot instead of snapping back.
+            LayeredWindow* lw = FromHwnd(hwnd);
+            if (lw) {
+                lw->posX = (int)(short)LOWORD(lParam);
+                lw->posY = (int)(short)HIWORD(lParam);
+                lw->hasPos = true;
+            }
+            return 0;
+        }
+        case WM_EXITSIZEMOVE:
+            SaveLayout();
+            return 0;
+        default:
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
 }
 
 HWND CreateLayeredHwnd(HINSTANCE hInst) {
@@ -731,11 +1140,25 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR lpCmdLine, int) {
                             0, 0, 0, 0, HWND_MESSAGE, nullptr, hInstance, nullptr);
     if (!g_ctrl) return 2;
 
-    g_toastWin.hwnd = CreateLayeredHwnd(hInstance);
-    g_panelWin.hwnd = CreateLayeredHwnd(hInstance);
-    if (!g_toastWin.hwnd || !g_panelWin.hwnd) return 3;
+    g_toastWin.hwnd  = CreateLayeredHwnd(hInstance);
+    g_panelWin.hwnd  = CreateLayeredHwnd(hInstance);
+    g_configWin.hwnd = CreateLayeredHwnd(hInstance);
+    g_bannerWin.hwnd = CreateLayeredHwnd(hInstance);
+    if (!g_toastWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd || !g_bannerWin.hwnd)
+        return 3;
+
+    LoadLayout();  // restore saved positions + appearance before first commit
+
+    // Ctrl+Shift+O toggles edit mode. Registered on the controller window so its
+    // message loop (already running) delivers WM_HOTKEY.
+    RegisterHotKey(g_ctrl, HOTKEY_EDIT, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'O');
 
     SetTimer(g_ctrl, TIMER_TICK, 250, nullptr);
+
+    // Startup hint banner (fade in/out).
+    g_bannerStart = GetTickCount64();
+    RenderBanner();
+    SetTimer(g_ctrl, TIMER_BANNER, 30, nullptr);
 
     // Local API server thread (detached: process exit tears it down).
     std::thread(PipeThread).detach();
@@ -751,8 +1174,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR lpCmdLine, int) {
         DispatchMessage(&msg);
     }
 
+    UnregisterHotKey(g_ctrl, HOTKEY_EDIT);
     DiscardSurface(g_toastWin);
     DiscardSurface(g_panelWin);
+    DiscardSurface(g_configWin);
+    DiscardSurface(g_bannerWin);
+    SafeRelease(&g_dashStroke);
+    SafeRelease(&g_fmtCenter);
     SafeRelease(&g_fmtLabel);
     SafeRelease(&g_fmtBody);
     SafeRelease(&g_fmtTitle);

@@ -49,11 +49,16 @@
     window per widget (toast stack + game-state panel) is simplest; revisit if perf demands merging.
     **Acceptance:** a trivial non-Python client (e.g. a `.cmd`/`echo` into the pipe) drives toasts
     and the game-state panel — proving the overlay is fully standalone.
-  - [ ] **Sprint C3 — edit mode + layout persistence (all C++).** On `edit_mode:true`, drop
-    `WS_EX_TRANSPARENT` so widgets take the mouse; draw a dashed outline + hint; drag either widget;
-    the overlay **persists positions to its own config file** (e.g. `overlay/layouts.json` next to the
-    exe or in `%LOCALAPPDATA%`) — Python is not involved. `RegisterHotKey` for Ctrl+Shift+O
-    (configurable) INSIDE the exe to toggle edit mode; its message loop is already running.
+  - [x] **Sprint C3 — edit mode + layout persistence + appearance config (all C++).** DONE
+    (2026-07-03). `RegisterHotKey` Ctrl+Shift+O toggles edit mode inside the exe; `WM_NCHITTEST`
+    returns `HTCAPTION` so DefWindowProc drags each widget; positions sync via `WM_MOVE` and persist
+    on `WM_EXITSIZEMOVE`. All widgets stay visible in edit mode (empty ones show a labeled draggable
+    placeholder that previews live opacity). Appearance toolbar (top-center, edit-mode only, fixed
+    opaque so it stays usable): opacity −/+ (0.40–1.00) and a 6-swatch accent picker, applied via
+    central `Acc/Bg/Txt/Dim/Warm` color helpers. Startup banner fades in/out (`UpdateLayeredWindow`
+    `SourceConstantAlpha`) announcing edit mode + hotkey. Persisted to
+    `%LOCALAPPDATA%\Lykompanion\overlay_layout.json` (`toast`/`panel` positions + `opacity`/`accent`).
+    Python is not involved in any of it.
   - [ ] **Sprint C4 — Python as a thin client.** `app/services/overlay_process.py` does only two
     things: (1) process lifecycle — launch `overlay/overlay.exe` when game-state tracking starts, ask
     it to quit when tracking stops and on app exit; (2) push content — connect to the overlay's API
