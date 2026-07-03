@@ -1132,61 +1132,45 @@ bool InRect(const D2D1_RECT_F& r, int x, int y) {
 }
 
 // ---------------------------------------------------------------------------
-// Hands-free (live-mic) indicator: a persistent pill with a mic glyph and a
-// pulsing, scrolling accent gradient while listening.
+// Hands-free (live-mic) indicator: a small circular badge with a mic glyph and
+// a pulsing accent glow while listening.
 // ---------------------------------------------------------------------------
 
-constexpr int HANDSFREE_W = 190;
+constexpr int HANDSFREE_W = 44;
 
 void RenderHandsFree() {
     if (!g_handsfreeActive && !g_editMode) { HideWindow(g_handsfreeWin); return; }
-    const int w = HANDSFREE_W, h = 46;
+    const int w = HANDSFREE_W, h = HANDSFREE_W;
     if (!EnsureSurface(g_handsfreeWin, w, h)) return;
 
     ID2D1DCRenderTarget* rt = g_handsfreeWin.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(
-        D2D1::RectF(1.0f, 1.0f, w - 1.0f, h - 1.0f), h / 2.0f, h / 2.0f);
+    D2D1_ELLIPSE circle = D2D1::Ellipse(
+        D2D1::Point2F(w / 2.0f, h / 2.0f), w / 2.0f - 1.0f, h / 2.0f - 1.0f);
 
     ID2D1SolidColorBrush* bg = nullptr;
     rt->CreateSolidColorBrush(Bg(0.90f), &bg);
-    rt->FillRoundedRectangle(pill, bg);
+    rt->FillEllipse(circle, bg);
 
-    // Scrolling accent gradient (wrapped) — animated only while active.
-    D2D1_GRADIENT_STOP stops[3] = {
-        {0.0f, Acc(0.05f)}, {0.5f, Acc(0.42f)}, {1.0f, Acc(0.05f)}};
-    ID2D1GradientStopCollection* gsc = nullptr;
-    if (SUCCEEDED(rt->CreateGradientStopCollection(
-            stops, 3, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gsc)) && gsc) {
-        float phase = (GetTickCount64() - g_handsfreeStart) / 1000.0f;
-        const float span = 95.0f;
-        float off = g_handsfreeActive ? fmodf(phase * 55.0f, span) : 0.0f;
-        ID2D1LinearGradientBrush* grad = nullptr;
-        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp = {{off, 0}, {off + span, 0}};
-        if (SUCCEEDED(rt->CreateLinearGradientBrush(gp, gsc, &grad)) && grad) {
-            rt->FillRoundedRectangle(pill, grad);
-            SafeRelease(&grad);
-        }
-        SafeRelease(&gsc);
-    }
+    // Pulsing accent fill — breathes only while active.
+    float phase = (GetTickCount64() - g_handsfreeStart) / 1000.0f;
+    float pulse = g_handsfreeActive ? 0.18f + 0.24f * (0.5f + 0.5f * sinf(phase * 3.0f)) : 0.15f;
+    ID2D1SolidColorBrush* glow = nullptr;
+    rt->CreateSolidColorBrush(Acc(pulse), &glow);
+    rt->FillEllipse(circle, glow);
 
     ID2D1SolidColorBrush* border = nullptr, *white = nullptr;
     rt->CreateSolidColorBrush(Acc(0.75f), &border);
     rt->CreateSolidColorBrush(Txt(1.0f), &white);
-    rt->DrawRoundedRectangle(pill, border, 1.4f);
+    rt->DrawEllipse(circle, border, 1.4f);
 
     DrawEmoji(rt, L"\U0001F3A4",
-              D2D1::RectF(PAD, (h - 24) / 2.0f, PAD + 24, (h + 24) / 2.0f), white);
-    float th = 0;
-    IDWriteTextLayout* tl = MakeLayout(L"Listening\x2026", g_fmtHead, (float)(w - PAD - 34), &th);
-    if (tl) {
-        rt->DrawTextLayout(D2D1::Point2F(PAD + 30, (h - th) / 2.0f), tl, white);
-        SafeRelease(&tl);
-    }
+              D2D1::RectF((w - 22) / 2.0f, (h - 22) / 2.0f,
+                          (w + 22) / 2.0f, (h + 22) / 2.0f), white);
 
-    SafeRelease(&white); SafeRelease(&border); SafeRelease(&bg);
+    SafeRelease(&white); SafeRelease(&border); SafeRelease(&glow); SafeRelease(&bg);
     if (g_editMode) DrawEditDecoration(rt, w, h);
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_handsfreeWin); return; }
     CommitWindow(g_handsfreeWin, AnchorBottomCenter);

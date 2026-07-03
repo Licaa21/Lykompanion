@@ -193,6 +193,31 @@ def _remove_window_border(hwnd: int) -> None:
     _dwmapi.DwmSetWindowAttribute(hwnd, _DWMWA_BORDER_COLOR, ctypes.byref(color), ctypes.sizeof(color))
 
 
+# Window position/size persistence — logical px, matching create_window's units and the values
+# the frontend sends via window_save_bounds.
+_WINDOW_STATE_FILE = ROOT / "data" / "window_state.json"
+
+
+def _load_window_state() -> dict | None:
+    try:
+        s = json.loads(_WINDOW_STATE_FILE.read_text(encoding="utf-8"))
+        x, y, w, h = int(s["x"]), int(s["y"]), int(s["w"]), int(s["h"])
+    except Exception:
+        return None
+    if w < 800 or h < 600:
+        return None
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _save_window_state(x: float, y: float, w: float, h: float) -> None:
+    try:
+        _WINDOW_STATE_FILE.write_text(
+            json.dumps({"x": int(x), "y": int(y), "w": int(w), "h": int(h)}), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
 def _run_tray(win, tray: dict, quit_fn) -> None:
     """Run the system-tray icon loop (blocking — call in a daemon thread).
 
@@ -234,13 +259,16 @@ def main() -> None:
     _configure_profile(profile_dir)  # apply before start (2nd+ launch, or pre-seeds fresh install)
 
     # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
-    # minimize/close buttons. easy_drag=False so only the explicit .pywebview-drag-region element
-    # (the titlebar) moves the window, not clicks anywhere in the body.
+    # minimize/close buttons. easy_drag=False; the titlebar drives its own move/snap from JS.
+    # Restore the last window position+size if we saved one, else default centered.
+    state = _load_window_state()
     win = webview.create_window(
         "Lykompanion",
         f"{URL}/?token={API_TOKEN}",
-        width=1280,
-        height=820,
+        width=state["w"] if state else 1280,
+        height=state["h"] if state else 820,
+        x=state["x"] if state else None,
+        y=state["y"] if state else None,
         min_size=(800, 600),
         frameless=True,
         easy_drag=False,
@@ -281,8 +309,14 @@ def main() -> None:
         except Exception:
             pass
 
+    # Persist logical bounds for next-launch restore. The frontend calls this only at gesture end
+    # (drag/resize release, snap, maximize), not every frame, so file writes stay cheap.
+    def window_save_bounds(x: float, y: float, w: float, h: float) -> None:
+        _save_window_state(x, y, w, h)
+
     win.expose(
-        _make_download_api(win), window_minimize, window_close, window_set_bounds,
+        _make_download_api(win), window_minimize, window_close,
+        window_set_bounds, window_save_bounds,
     )
 
     def _on_loaded() -> None:
