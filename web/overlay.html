@@ -32,7 +32,12 @@
     body.editing {
       outline: 2px dashed #7aa2f7;
       outline-offset: -2px;
-      background: rgba(122, 162, 247, 0.10);
+      /* While editing, the native window region covers the whole window and WebView2
+         renders the page's transparent background as BLACK (alpha-0 in a normal hwnd) -
+         so paint a deliberate, clearly-visible panel instead of what reads as a broken
+         black box. Normal (non-editing) mode never shows this area at all: the region is
+         clipped to exactly the opaque cards. */
+      background: #1c2233;
       cursor: move;
     }
 
