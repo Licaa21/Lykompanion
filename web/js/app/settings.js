@@ -497,7 +497,6 @@ function applyConfigToForm(cfg) {
   applyNarrationVolume(cfg.narration_volume);
   document.getElementById("cfg-narrate").checked = cfg.narrate_enabled !== false;
   document.getElementById("cfg-sfx-enabled").checked = cfg.sfx_enabled !== false;
-  document.getElementById("cfg-overlay-enabled").checked = cfg.overlay_enabled === true;
 
   contextWindowInput.value = cfg.context_window_messages;
   contextWindowValue.textContent = cfg.context_window_messages === 0 ? "all" : cfg.context_window_messages;
@@ -645,7 +644,6 @@ async function saveSettings(saveButton) {
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
     narrate_enabled: document.getElementById("cfg-narrate").checked,
     sfx_enabled: document.getElementById("cfg-sfx-enabled").checked,
-    overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     context_window_messages: parseInt(contextWindowInput.value, 10),
     screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
     screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
@@ -694,17 +692,6 @@ async function saveSettings(saveButton) {
 
 document.getElementById("cfg-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
 document.getElementById("ga-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
-
-// In-game overlay layout editor: flips the overlay window into edit mode (server lifts its
-// native click-through and tells the overlay page over SSE). Saving/cancelling happens on
-// the overlay itself - this button only opens the session.
-document.getElementById("btn-overlay-edit").addEventListener("click", async () => {
-  await fetch("/api/overlay/edit-mode", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: true }),
-  }).catch(() => {});
-});
 
 // --- Personal Data modal (Instructions + Memory) ---
 

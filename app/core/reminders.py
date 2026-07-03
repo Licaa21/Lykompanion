@@ -4,8 +4,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.core import events as overlay_events
-
 REMINDERS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reminders.json"
 PENDING_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reminders_pending.json"
 
@@ -150,10 +148,7 @@ def add_pending(text: str) -> dict:
         entry = {"id": uuid.uuid4().hex[:8], "text": text}
         pending.append(entry)
         save_pending(pending)
-    # Mirror to the in-game overlay at fire time - the main window separately drains the
-    # pending queue on its own 20s poll and owns the ack, so this is display-only.
-    overlay_events.publish({"type": "reminder", "text": text})
-    return entry
+        return entry
 
 
 def remove_pending(pending_id: str) -> bool:
