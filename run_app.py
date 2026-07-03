@@ -184,6 +184,7 @@ def _make_download_api(win) -> object:
 _DWMWA_BORDER_COLOR = 34          # Win11 22000+
 _DWMWA_COLOR_NONE = 0xFFFFFFFE
 _dwmapi = ctypes.windll.dwmapi
+_user32 = ctypes.windll.user32
 _dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long  # HRESULT
 _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 
@@ -198,6 +199,28 @@ def _remove_window_border(hwnd: int) -> None:
 _WINDOW_STATE_FILE = ROOT / "data" / "window_state.json"
 
 
+def _clamp_window_state(state: dict) -> dict:
+    """Keep a restored window on-screen. If its titlebar centre falls outside every connected
+    monitor (e.g. a second display was unplugged since we saved), recentre on the virtual desktop
+    while preserving the size. GetSystemMetrics returns physical px, so divide by the system DPI
+    scale to compare against the logical px the saved bounds use.
+    """
+    try:
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
+        scale = (_user32.GetDpiForSystem() or 96) / 96.0
+        vx = _user32.GetSystemMetrics(SM_XVIRTUALSCREEN) / scale
+        vy = _user32.GetSystemMetrics(SM_YVIRTUALSCREEN) / scale
+        vw = _user32.GetSystemMetrics(SM_CXVIRTUALSCREEN) / scale
+        vh = _user32.GetSystemMetrics(SM_CYVIRTUALSCREEN) / scale
+    except Exception:
+        return state
+    x, y, w, h = state["x"], state["y"], state["w"], state["h"]
+    cx, cy = x + w / 2, y + 20  # centre of the titlebar
+    if vx <= cx <= vx + vw and vy <= cy <= vy + vh:
+        return state
+    return {"x": int(vx + (vw - w) / 2), "y": int(vy + (vh - h) / 2), "w": w, "h": h}
+
+
 def _load_window_state() -> dict | None:
     try:
         s = json.loads(_WINDOW_STATE_FILE.read_text(encoding="utf-8"))
@@ -206,7 +229,7 @@ def _load_window_state() -> dict | None:
         return None
     if w < 800 or h < 600:
         return None
-    return {"x": x, "y": y, "w": w, "h": h}
+    return _clamp_window_state({"x": x, "y": y, "w": w, "h": h})
 
 
 def _save_window_state(x: float, y: float, w: float, h: float) -> None:

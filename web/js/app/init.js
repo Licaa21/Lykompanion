@@ -60,19 +60,21 @@ function setupDesktopTitlebar() {
       const b = snapTarget(zone);
       commit(b.x, b.y, b.w, b.h);
     };
-    const restoreFromSnap = () => {
-      if (!restoreBounds) return;
-      const b = restoreBounds;
-      restoreBounds = null; snapZone = null;
-      commit(b.x, b.y, b.w, b.h);
-    };
 
     const drag = document.querySelector('.titlebar-drag');
     if (drag) {
-      // Double-click titlebar → maximize/restore.
+      // Double-click titlebar: maximize when floating; when already maximized, shrink to a
+      // half-size window centered on the work area (min-size clamped).
+      const centerHalf = () => {
+        const a = workArea();
+        const w = Math.max(Math.round(a.w / 2), 800);
+        const h = Math.max(Math.round(a.h / 2), 600);
+        snapZone = null; restoreBounds = null;
+        commit(Math.round(a.x + (a.w - w) / 2), Math.round(a.y + (a.h - h) / 2), w, h);
+      };
       drag.addEventListener('dblclick', () => {
         if (!api()?.window_set_bounds) return;
-        if (snapZone) restoreFromSnap();
+        if (snapZone === 'max') centerHalf();
         else applySnap('max', curBounds());
       });
 
