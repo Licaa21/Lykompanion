@@ -61,6 +61,29 @@ function playWakeChime() {
   }
 }
 
+// Descending two-note chime for the sleep word — the inverse of playWakeChime, so turning
+// hands-free off has its own eyes-off-the-screen confirmation.
+function playSleepChime() {
+  ensureAudioCtx();
+  const notes = [
+    { frequency: 660, start: 0 },
+    { frequency: 440, start: 0.12 },
+  ];
+  const duration = 0.16;
+  for (const { frequency, start } of notes) {
+    const startTime = audioCtx.currentTime + start;
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    oscillator.frequency.value = frequency;
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+    gain.gain.setValueAtTime(0.15, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration);
+  }
+}
+
 // --- Cosmetic sound effects (message sent, tool calls) - synthesized the same way as the
 // mic beeps above, gated by the "Sound effects" setting since (unlike the mic beeps) they're
 // purely decorative rather than functional feedback. ---

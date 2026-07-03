@@ -9,6 +9,11 @@ const wakeWordDebugEl = document.getElementById("wake-word-debug");
 const wakeWordStatusEl = document.getElementById("wake-word-status");
 const wakeWordTranscriptEl = document.getElementById("wake-word-transcript");
 
+const sleepWordControlsEl = document.getElementById("sleep-word-controls");
+const sleepWordEnabledInput = document.getElementById("cfg-sleep-word-enabled");
+const sleepWordPhraseInput = document.getElementById("cfg-sleep-word-phrase");
+const sleepWordDependentEl = document.getElementById("sleep-word-dependent");
+
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 const wakeWordSupported = Boolean(SpeechRecognitionCtor);
 
@@ -56,6 +61,24 @@ function handleWakeWordDetected() {
   updateWakeWordListenerState();
 }
 
+function handleSleepWordDetected() {
+  if (!liveMicEnabled) return;
+  // Suppress the live-mic utterance carrying this same phrase so it's never sent to the model
+  // (the client's job); the LLM stop-intent backstop covers the rare case it already went out.
+  if (typeof suppressLiveUtterance === "function") suppressLiveUtterance();
+  liveMicEnabled = false;
+  liveMicToggle.classList.remove("active");
+  stopLiveMic();
+  playSleepChime();
+  if (!wakeWordDebugEl.hidden) {
+    wakeWordStatusEl.textContent = "Sleeping 💤";
+    setTimeout(() => {
+      if (wakeWordStatusEl && !liveMicEnabled) wakeWordStatusEl.textContent = "Listening for wake phrase...";
+    }, 1500);
+  }
+  updateWakeWordListenerState();  // hands-free now off → recognizer switches back to wake duty
+}
+
 function startWakeWordRecognition() {
   if (!wakeWordSupported || wakeWordRecognition) return;
   wakeWordRecognition = new SpeechRecognitionCtor();
@@ -73,9 +96,19 @@ function startWakeWordRecognition() {
     transcript = transcript.trim();
     wakeWordTranscriptEl.textContent = transcript;
 
-    const normalizedPhrase = normalizeForWakeMatch(wakeWordPhrase);
-    if (normalizedPhrase && normalizeForWakeMatch(transcript).includes(normalizedPhrase)) {
-      handleWakeWordDetected();
+    const normalizedTranscript = normalizeForWakeMatch(transcript);
+    // One recognizer, two jobs depending on hands-free state: while OFF it listens for the wake
+    // phrase (turn on); while ON it listens for the sleep phrase (turn off).
+    if (!liveMicEnabled) {
+      const normalizedWake = normalizeForWakeMatch(wakeWordPhrase);
+      if (normalizedWake && normalizedTranscript.includes(normalizedWake)) {
+        handleWakeWordDetected();
+      }
+    } else if (sleepWordEnabled) {
+      const normalizedSleep = normalizeForWakeMatch(sleepWordPhrase);
+      if (normalizedSleep && normalizedTranscript.includes(normalizedSleep)) {
+        handleSleepWordDetected();
+      }
     }
   };
 
@@ -117,7 +150,11 @@ function stopWakeWordRecognition() {
 
 function updateWakeWordListenerState() {
   const wasRunning = wakeWordShouldRun;
-  wakeWordShouldRun = wakeWordSupported && wakeWordEnabled && !liveMicEnabled;
+  // The recognizer runs to catch the wake phrase (while hands-free is off) OR the sleep phrase
+  // (while it's on) — so it stays alive across the on/off transition instead of stopping.
+  const wantWake = wakeWordSupported && wakeWordEnabled && !liveMicEnabled;
+  const wantSleep = wakeWordSupported && sleepWordEnabled && liveMicEnabled;
+  wakeWordShouldRun = wantWake || wantSleep;
 
   if (wakeWordShouldRun) {
     if (!wasRunning) wakeWordConsecutiveFailures = 0; // fresh start - give it a clean shot
@@ -127,16 +164,20 @@ function updateWakeWordListenerState() {
   }
 
   wakeWordDependentEl.hidden = !wakeWordEnabled;
-  wakeWordDebugEl.hidden = !(wakeWordEnabled && wakeWordSupported);
-  if (wakeWordEnabled && wakeWordSupported) {
-    wakeWordStatusEl.textContent = liveMicEnabled ? "Hands-free is already on." : "Listening for wake phrase...";
-    if (liveMicEnabled) wakeWordTranscriptEl.textContent = "";
+  sleepWordDependentEl.hidden = !sleepWordEnabled;
+  wakeWordDebugEl.hidden = !(wakeWordSupported && (wakeWordEnabled || sleepWordEnabled));
+  if (wakeWordSupported && (wakeWordEnabled || sleepWordEnabled)) {
+    wakeWordStatusEl.textContent = liveMicEnabled
+      ? (sleepWordEnabled ? "Listening for sleep phrase..." : "Hands-free is already on.")
+      : (wakeWordEnabled ? "Listening for wake phrase..." : "");
+    if (liveMicEnabled && !sleepWordEnabled) wakeWordTranscriptEl.textContent = "";
   }
 }
 
 if (!wakeWordSupported) {
   wakeWordUnsupportedEl.hidden = false;
   wakeWordControlsEl.hidden = true;
+  sleepWordControlsEl.hidden = true;
 }
 
 wakeWordEnabledInput.addEventListener("change", () => {
@@ -146,6 +187,15 @@ wakeWordEnabledInput.addEventListener("change", () => {
 
 wakeWordPhraseInput.addEventListener("change", () => {
   wakeWordPhrase = wakeWordPhraseInput.value.trim() || "Hey Buddy";
+});
+
+sleepWordEnabledInput.addEventListener("change", () => {
+  sleepWordEnabled = sleepWordEnabledInput.checked;
+  updateWakeWordListenerState();
+});
+
+sleepWordPhraseInput.addEventListener("change", () => {
+  sleepWordPhrase = sleepWordPhraseInput.value.trim() || "Go to sleep";
 });
 
 updateWakeWordListenerState();

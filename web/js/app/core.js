@@ -145,6 +145,11 @@ let vadMinSpeechMs = 300;
 let wakeWordEnabled = false;
 let wakeWordPhrase = "Hey Buddy";
 
+// Sleep word - the mirror of the wake word: a spoken phrase that turns hands-free OFF while it's
+// on. Detected in-browser; the matching utterance is suppressed so it's never sent to the model.
+let sleepWordEnabled = false;
+let sleepWordPhrase = "Go to sleep";
+
 // Toast manager — max 3 visible, queues the rest as "+N more", deduplicates by id.
 const _toasts = (() => {
   const MAX = 3;

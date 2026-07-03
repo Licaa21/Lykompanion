@@ -246,6 +246,17 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     if custom_instructions:
         system_content += "\n\n" + custom_instructions
 
+    # LLM backstop for the client-side sleep word: if the browser's speech recognition misses the
+    # phrase (or isn't available) and it reaches the model instead, treat it as a stop command
+    # rather than a question to answer.
+    if settings.sleep_word_enabled and settings.sleep_word_phrase.strip():
+        system_content += (
+            f'\n\n[Sleep word] If the user\'s message is essentially just "{settings.sleep_word_phrase.strip()}" '
+            "(or a clear stop-listening request), treat it purely as a command to stop hands-free listening: "
+            'call stop_listening and reply with exactly "Signing off..." and nothing else. Never answer it as a '
+            "question or repeat it back."
+        )
+
     monitors = format_monitors_for_prompt()
     if monitors:
         system_content += "\n\n" + monitors

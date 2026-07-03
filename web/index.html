@@ -451,6 +451,20 @@
               </div>
             </div>
           </div>
+
+          <div id="sleep-word-controls">
+            <label class="checkbox">
+              <input id="cfg-sleep-word-enabled" type="checkbox" />
+              Enable sleep word
+              <button type="button" class="cfg-help" data-tip="Lets you say a phrase to turn hands-free listening OFF, hands-free. Detected in-browser (like the wake word); the utterance is suppressed so it's never sent, and the model also treats a clear 'stop listening' as a command rather than answering it.">?</button>
+            </label>
+            <div id="sleep-word-dependent">
+              <label>
+                <span class="cfg-label">Sleep Phrase <button type="button" class="cfg-help" data-tip="The phrase that turns hands-free listening off when spoken while it's active.">?</button></span>
+                <input id="cfg-sleep-word-phrase" type="text" value="Go to sleep" autocomplete="off" />
+              </label>
+            </div>
+          </div>
         </section>
 
         </div>

@@ -582,9 +582,13 @@ function applyConfigToForm(cfg) {
   wakeWordMaxFailures = cfg.wake_word_max_failures ?? 3;
   wakeWordMaxFailuresInput.value = wakeWordMaxFailures;
   wakeWordMaxFailuresValue.textContent = wakeWordMaxFailures;
+  sleepWordEnabled = cfg.sleep_word_enabled;
+  sleepWordPhrase = cfg.sleep_word_phrase || "Go to sleep";
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
+    sleepWordEnabledInput.checked = sleepWordEnabled;
+    sleepWordPhraseInput.value = sleepWordPhrase;
     updateWakeWordListenerState();
   }
 
@@ -715,6 +719,8 @@ async function saveSettings(saveButton) {
     memory_rag_limit: parseInt(document.getElementById("cfg-memory-rag-limit").value, 10),
     wake_word_enabled: wakeWordEnabledInput.checked,
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
+    sleep_word_enabled: sleepWordEnabledInput.checked,
+    sleep_word_phrase: sleepWordPhraseInput.value.trim() || "Go to sleep",
     wake_word_max_failures: wakeWordMaxFailures,
     vad_threshold: vadThreshold,
     vad_silence_ms: vadSilenceMs,

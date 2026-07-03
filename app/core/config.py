@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     wake_word_phrase: str = "Hey Buddy"
     wake_word_max_failures: int = 3
 
+    # Spoken command that turns hands-free OFF (mirror of the wake word). Detected client-side while
+    # hands-free is on; also enforced as an LLM backstop (stop_listening on stop-intent).
+    sleep_word_enabled: bool = False
+    sleep_word_phrase: str = "Go to sleep"
+
     vad_threshold: int = 8
     vad_silence_ms: int = 3000
     vad_min_speech_ms: int = 300

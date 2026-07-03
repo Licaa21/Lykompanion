@@ -38,6 +38,12 @@ async function blobToWavBlob(blob) {
 }
 
 async function sendDirectVoice(wavBlob) {
+  // Sleep word landed during finalize (after its own suppression check) — don't send. Reset
+  // awaitingReply (finalize set it true) so a later hands-free session isn't left blocked.
+  if (Date.now() < suppressUtteranceUntil) {
+    awaitingReply = false;
+    return;
+  }
   exitEmptyState();
   if (!getActiveChat()) createNewChat();
   const chat = getActiveChat();
@@ -291,6 +297,14 @@ let utteranceStartAbsolute = 0;
 let liveSilenceStart = null;
 let liveSpeechStartTime = null;
 
+// When the sleep word is detected (wake-word.js), the same utterance is being captured by the VAD;
+// this short window makes finalizeLiveUtterance drop it instead of sending the sleep phrase to the
+// model. Covers the VAD's silence-finalize delay plus a little processing slack.
+let suppressUtteranceUntil = 0;
+function suppressLiveUtterance() {
+  suppressUtteranceUntil = Date.now() + 3000;
+}
+
 function computeAmplitude(samples) {
   let sum = 0;
   for (let i = 0; i < samples.length; i++) {
@@ -408,6 +422,11 @@ function setOverlayHandsFree(active) {
 async function finalizeLiveUtterance() {
   if (!liveRecording) return;
   liveRecording = false;
+  // The sleep word was just detected — this utterance is the sleep phrase itself; drop it silently
+  // instead of sending it to the model.
+  if (Date.now() < suppressUtteranceUntil) {
+    return;
+  }
   // Block new recordings immediately — without this, the gap between here and
   // sendDirectVoice setting awaitingReply (after the async isLikelySpeech call)
   // is wide enough that ambient noise starts a second utterance. WebView2 makes
