@@ -206,73 +206,98 @@ def _make_overlay_move_api(overlay_window):
 
 def _apply_overlay_base_styles(overlay_window) -> None:
     """One-time styles applied at window init, independent of click-through toggling:
-    WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus, even
-    while click-through is lifted for editing), and - the actual transparency mechanism -
-    WinForms color-key transparency (form BackColor == TransparencyKey).
+    WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus,
+    even while click-through is lifted for editing), and an initially EMPTY window region so
+    the widget is invisible until its page pushes real content rects (round 6 - see below).
 
-    Why color-key (round 5): reading pywebview 6.2.1's own source settled the transparency
-    saga - `transparent=True` on Windows only sets the WebView2 control's
-    DefaultBackgroundColor to transparent; it NEVER makes the WinForms form itself
-    transparent (no TransparencyKey/AllowTransparency anywhere in winforms.py), so the page's
-    transparent pixels always showed the form's opaque default-gray background. No exstyle
-    combination on top of that could ever have worked. Additionally, round 3/4's bare
-    WS_EX_LAYERED actively broke rendering: a layered window is never displayed at all until
-    SetLayeredWindowAttributes/UpdateLayeredWindow commits it (documented Win32 behavior) -
-    that's why "nothing ever showed up" in the overlays.
+    Round-6 design - window-region clipping, no transparency at all: every alpha-based
+    approach is a dead end for WebView2. Rounds 1-4 (exstyle/DWM permutations) failed
+    because pywebview 6.2.1's transparent=True never makes the WinForms form transparent
+    (only the WebView2 control's DefaultBackgroundColor), and bare WS_EX_LAYERED stops a
+    window rendering at all until its attributes are committed. Round 5 (color-key via
+    SetLayeredWindowAttributes LWA_COLORKEY - NEVER via Form.TransparencyKey, whose setter
+    recreates the window handle and hung the whole app at boot) rendered the widgets black
+    with a split-second flash of real UI: Chromium's GPU compositor cannot render into a
+    WS_EX_LAYERED window (the layered redirection surface never receives the GPU frames -
+    documented WebView2 limitation), so after the first software paint the window goes
+    permanently black. No key color can match "no content".
 
-    The fix is the standard WebView2-overlay color-key recipe: paint the form background in
-    a sentinel color and register that color as the window's transparency key, so every
-    pixel where the page background is transparent renders as the key color -> keyed out ->
-    the game shows through, and mouse input in keyed regions passes through natively. The
-    key is near-black (1,1,1) so anti-aliased edges of the dark overlay cards fringe toward
-    black (reads as a subtle edge shadow) instead of haloing in a visible color;
-    overlay.html avoids box-shadows, which under color-key would render as opaque dark
-    halos.
-
-    CRITICAL: the key must be registered via SetLayeredWindowAttributes(LWA_COLORKEY)
-    directly, NEVER via the WinForms Form.TransparencyKey property - that property's setter
-    flips Form.AllowTransparency, which makes WinForms RECREATE the window handle, and
-    recreating the hwnd under a live WebView2 host wedges the single shared WinForms UI
-    thread: every window in the app (including the main one) went permanently Not Responding
-    at boot. LWA_COLORKEY is also exempt from the earlier "never pair WS_EX_LAYERED with
-    SetLayeredWindowAttributes" rule - that rule is about LWA_ALPHA (legacy flat-alpha
-    blending, the round-1 dark tint); color-key mode is a different, safe code path, and
-    committing the layered attributes this way is also exactly what makes a WS_EX_LAYERED
-    window start rendering at all (rounds 3-4 set the bit bare and never committed, which is
-    why nothing ever showed up)."""
+    SetWindowRgn sidesteps the whole problem: the window is clipped to exactly the rounded
+    rects of its visible cards (pushed by overlay.js via the set_overlay_regions bridge as
+    content comes and goes; full-window while the layout editor is active) and simply does
+    not exist anywhere else - no layers, no alpha, fully compatible with GPU rendering, and
+    clicks outside the region fall through natively. Starting with an empty region also
+    means a freshly launched widget shows nothing until there is actually something to
+    show."""
     import ctypes
 
     user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x80
-    WS_EX_LAYERED = 0x80000
     WS_EX_NOACTIVATE = 0x8000000
-    LWA_COLORKEY = 0x1
-    KEY_COLORREF = 0x00010101  # COLORREF is 0x00BBGGRR - near-black (1,1,1)
     SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     try:
-        form = overlay_window.native
-        hwnd = form.Handle.ToInt32()
+        hwnd = overlay_window.native.Handle.ToInt32()
     except Exception:
         return  # window already destroyed
 
-    try:
-        # Paint the form's background (what shows through the page's transparent pixels,
-        # since pywebview sets the WebView2 control's DefaultBackgroundColor transparent) in
-        # the key color. BackColor is a plain repaint - unlike TransparencyKey it does NOT
-        # recreate the handle. pythonnet is already initialized by pywebview at this point
-        # (`shown` fires on the WinForms UI thread, the only thread allowed to touch Forms).
-        from System.Drawing import Color
-
-        form.BackColor = Color.FromArgb(255, 1, 1, 1)
-    except Exception:
-        pass  # worst case: the widget keys out on the default gray mismatch -> stays opaque
-
     current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
-    user32.SetLayeredWindowAttributes(hwnd, KEY_COLORREF, 0, LWA_COLORKEY)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
+
+    # Invisible until the page pushes its first content rects. On success the system owns
+    # the region handle - never DeleteObject it.
+    empty = gdi32.CreateRectRgn(0, 0, 0, 0)
+    if not user32.SetWindowRgn(hwnd, empty, True):
+        gdi32.DeleteObject(empty)
+
+
+def _make_overlay_region_api(overlay_window):
+    """Returns set_overlay_regions(rects), exposed to a widget window's JS: clips the native
+    window to the union of the given rounded rects ([{x, y, w, h, r}] in physical window
+    pixels; empty list -> empty region -> invisible window). overlay.js calls it whenever
+    its visible content changes (toast added/expired, game-state panel shown/hidden, edit
+    mode toggled). Cross-thread use from pywebview's JS-bridge thread is fine - SetWindowRgn,
+    like the SetWindowPos behind window.move(), doesn't require the owning UI thread."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    RGN_OR = 2
+
+    def set_overlay_regions(rects) -> None:
+        try:
+            hwnd = overlay_window.native.Handle.ToInt32()
+        except Exception:
+            return  # window already destroyed
+
+        region = None
+        for rect in rects or []:
+            try:
+                x, y = int(rect["x"]), int(rect["y"])
+                w, h = int(rect["w"]), int(rect["h"])
+                radius = int(rect.get("r", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if w <= 0 or h <= 0:
+                continue
+            # Right/bottom are exclusive; +1 keeps the last pixel row/column visible.
+            part = gdi32.CreateRoundRectRgn(x, y, x + w + 1, y + h + 1, radius * 2, radius * 2)
+            if region is None:
+                region = part
+            else:
+                gdi32.CombineRgn(region, region, part, RGN_OR)
+                gdi32.DeleteObject(part)
+
+        if region is None:
+            region = gdi32.CreateRectRgn(0, 0, 0, 0)
+        # On success the system owns the region handle - only delete it on failure.
+        if not user32.SetWindowRgn(hwnd, region, True):
+            gdi32.DeleteObject(region)
+
+    return set_overlay_regions
 
 
 def _make_overlay_click_through_setter(overlay_window):
@@ -427,15 +452,15 @@ def main() -> None:
                 focus=False,
             )
             overlay_windows[element_id] = widget_win
-            widget_win.expose(_make_overlay_move_api(widget_win))
+            widget_win.expose(_make_overlay_move_api(widget_win), _make_overlay_region_api(widget_win))
 
             set_click_through = _make_overlay_click_through_setter(widget_win)
 
             def _init_widget_styles(w=widget_win, sct=set_click_through) -> None:
-                # Apply the color-key + exstyle setup as early as possible so the window is
-                # keyed out before its first real paint - `shown` fires as soon as the native
-                # window appears, well before `loaded` (page content finished loading), and
-                # on the WinForms UI thread, which Form property writes require.
+                # Apply the exstyles + empty window region as early as possible so nothing
+                # flashes before the page pushes its first content rects - `shown` fires as
+                # soon as the native window appears, well before `loaded` (page content
+                # finished loading).
                 _apply_overlay_base_styles(w)
                 sct(True)
                 # WebView2 spawns its Chromium child windows asynchronously - a single pass

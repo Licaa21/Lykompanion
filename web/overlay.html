@@ -5,11 +5,13 @@
   <title>Lykompanion Overlay</title>
   <!-- One instance of this page is loaded per overlay widget, each in its own small native
        window sized and positioned by run_app.py (?widget=toasts or ?widget=game-state picks
-       which one to render) - NOT one shared full-screen window. A full-screen transparent
-       WebView2 window proved unreliable across several win32/DWM attempts (see CLAUDE.md's
-       in-game overlay section); small per-widget windows are a far more common, better-tested
-       case for real desktop transparency. Everything here must keep a fully transparent
-       background. Normally nothing is interactive (clicks pass through to the game); the
+       which one to render) - NOT one shared full-screen window. There is NO pixel
+       transparency at all (every alpha-based approach fails for WebView2 - see CLAUDE.md's
+       in-game overlay section): instead the native window is clipped to exactly the rounded
+       rects of the visible cards via SetWindowRgn, pushed from syncWindowRegion in
+       overlay.js whenever content changes - so card styling must stay rectangular-ish
+       (border-radius 10px matches the region's rounded corners; no box-shadows, they'd be
+       cut off). Normally nothing is interactive (clicks pass through to the game); the
        layout editor (Settings → "Edit layout", or Ctrl+Shift+O) temporarily lifts the
        click-through so the whole widget window can be dragged to reposition it - dragging
        moves the actual native window (via a Python-exposed move_overlay bridge) and saves on
@@ -69,9 +71,9 @@
       font-size: 15px;
       line-height: 1.45;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-      /* No box-shadow: under the native color-key transparency (see run_app.py's
-         _apply_overlay_base_styles) a soft shadow's semi-transparent pixels stop matching
-         the key color and render as an opaque dark halo box around the card. */
+      /* No box-shadow: the native window is clipped to exactly this card's rect via
+         SetWindowRgn (see syncWindowRegion in overlay.js), so anything painted outside
+         the card - like a soft shadow - would just be cut off. */
       opacity: 0;
       transform: translateY(12px);
       transition: opacity 0.35s ease, transform 0.35s ease;

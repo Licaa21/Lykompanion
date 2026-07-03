@@ -43,6 +43,52 @@ function moveWindow(x, y) {
   window.pywebview?.api?.move_overlay(Math.round(x), Math.round(y));
 }
 
+// --- Window region sync ---
+// The native window is clipped to exactly the rounded rects of the visible cards via
+// SetWindowRgn (see _make_overlay_region_api in run_app.py) - outside those rects the window
+// does not exist at all. This replaces every transparency mechanism (WebView2 can't render
+// GPU content into layered windows - it goes black). Must be re-pushed whenever visible
+// content changes; rects are physical pixels (offsetTop/Left/Width/Height are CSS px and
+// ignore in-flight CSS transforms, which is what we want - the region sits at the element's
+// settled position, not mid-animation).
+
+const CARD_RADIUS_CSS = 10; // matches border-radius in overlay.html
+let lastRegionsJson = null;
+
+function syncWindowRegion() {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || !api.set_overlay_regions) return; // bridge not injected yet - retried by the safety interval
+  const dpr = window.devicePixelRatio || 1;
+
+  let rects = [];
+  if (editing) {
+    rects = [{ x: 0, y: 0, w: Math.ceil(window.innerWidth * dpr), h: Math.ceil(window.innerHeight * dpr), r: 0 }];
+  } else {
+    const cards = [];
+    if (WIDGET === "toasts") cards.push(...toastStack.children);
+    if (WIDGET === "game-state" && gsPanel.classList.contains("visible")) cards.push(gsPanel);
+    for (const el of cards) {
+      rects.push({
+        x: Math.floor(el.offsetLeft * dpr),
+        y: Math.floor(el.offsetTop * dpr),
+        w: Math.ceil(el.offsetWidth * dpr),
+        h: Math.ceil(el.offsetHeight * dpr),
+        r: Math.round(CARD_RADIUS_CSS * dpr),
+      });
+    }
+  }
+
+  const json = JSON.stringify(rects);
+  if (json === lastRegionsJson) return; // SetWindowRgn forces a redraw - skip no-op pushes
+  lastRegionsJson = json;
+  api.set_overlay_regions(rects);
+}
+
+// Safety net for anything that shifts layout without an explicit syncWindowRegion() call
+// (fonts settling, the bridge appearing after first content, toast heights reflowing).
+setInterval(syncWindowRegion, 1000);
+window.addEventListener("pywebviewready", syncWindowRegion);
+
 async function applyLayoutForProcess(force) {
   const key = currentProcess || "default";
   if (!force && key === appliedLayoutKey) return;
@@ -109,13 +155,17 @@ function showToast(text, kind) {
   const toast = buildToast(clean, kind);
   toastStack.appendChild(toast);
   while (toastStack.children.length > MAX_TOASTS) toastStack.removeChild(toastStack.firstChild);
+  syncWindowRegion();
   requestAnimationFrame(() => toast.classList.add("visible"));
 
   // Linger long enough to read: base time plus a per-character allowance, capped.
   const lingerMs = Math.min(6000 + clean.length * 45, 25000);
   setTimeout(() => {
     toast.classList.add("leaving");
-    setTimeout(() => toast.remove(), 400);
+    setTimeout(() => {
+      toast.remove();
+      syncWindowRegion();
+    }, 400);
   }, lingerMs);
 }
 
@@ -154,14 +204,15 @@ async function pollGameState() {
 
   const tracking = overlayEnabled && state.enabled && state.tracking;
   gsPanel.classList.toggle("visible", Boolean(tracking));
-  if (!tracking) return;
-
-  gsTitle.textContent = state.session_name || state.process || "In game";
-  gsRows.innerHTML = "";
-  for (const tracker of state.trackers || []) {
-    if (tracker.value === null || tracker.value === undefined || tracker.value === "") continue;
-    renderGsRow(tracker.label, String(tracker.value));
+  if (tracking) {
+    gsTitle.textContent = state.session_name || state.process || "In game";
+    gsRows.innerHTML = "";
+    for (const tracker of state.trackers || []) {
+      if (tracker.value === null || tracker.value === undefined || tracker.value === "") continue;
+      renderGsRow(tracker.label, String(tracker.value));
+    }
   }
+  syncWindowRegion();
 }
 
 // --- Layout editor ---
@@ -188,6 +239,7 @@ function enterEditMode() {
     renderGsRow("Example tracker", "42");
     gsPanel.classList.add("visible");
   }
+  syncWindowRegion();
 }
 
 function exitEditMode() {
@@ -200,8 +252,9 @@ function exitEditMode() {
   }
   if (WIDGET === "game-state") {
     gsPanel.classList.remove("visible");
-    pollGameState(); // restore real content/visibility
+    pollGameState(); // restore real content/visibility (also re-syncs the window region)
   }
+  syncWindowRegion();
 }
 
 document.body.addEventListener("pointerdown", (e) => {
