@@ -37,11 +37,11 @@ REM /O2 optimized, /EHsc C++ exceptions, /std:c++17, GUI subsystem (no console).
 cl /nologo /O2 /EHsc /std:c++17 /W3 ^
     overlay.cpp ^
     /link /SUBSYSTEM:WINDOWS ^
-    user32.lib gdi32.lib d2d1.lib dwrite.lib ^
-    /OUT:overlay.exe
+    user32.lib gdi32.lib d2d1.lib dwrite.lib shell32.lib ^
+    /OUT:Lykompanion-overlay.exe
 
 if %ERRORLEVEL%==0 (
-    echo [build] OK -^> overlay\overlay.exe
+    echo [build] OK -^> overlay\Lykompanion-overlay.exe
     del /q overlay.obj >nul 2>nul
 ) else (
     echo [build] FAILED

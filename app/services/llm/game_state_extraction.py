@@ -423,9 +423,12 @@ def _push_overlay_game_state(process: str) -> None:
         values = game_state.get_values(process)
         rows: list[list[str]] = []
         for tracker in trackers:
+            if not tracker.get("overlay", True):  # per-tracker "show in overlay" toggle
+                continue
             value = values.get(tracker["id"])
-            if value:
-                rows.append([tracker["label"], str(value)])
+            # Mirror the web panel: show every overlay-enabled tracker, empty ones
+            # included (the overlay renders "(not seen yet)" for a blank value).
+            rows.append([tracker["label"], str(value) if value else ""])
         title = process.rsplit(".", 1)[0].replace("_", " ").title()
         overlay_process.push_game_state(title, rows)
     except Exception:

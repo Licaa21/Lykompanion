@@ -107,6 +107,33 @@ def _voice_user_message(audio_b64: str) -> dict:
     }
 
 
+def _extract_overlay_sentences(buffer: str) -> tuple[list[str], str]:
+    """Linear scan pulling complete sentences off a streaming buffer so the overlay
+    can show reply text sentence-by-sentence (keeping pace with the TTS narrator)
+    instead of only getting the whole reply once it's done. Returns
+    (complete_sentences, remainder). Deliberately NOT a regex — see the streaming
+    freeze gotcha in CLAUDE.md."""
+    sentences: list[str] = []
+    start = 0
+    i = 0
+    n = len(buffer)
+    while i < n:
+        if buffer[i] in ".!?":
+            j = i + 1
+            while j < n and buffer[j] in ".!?":  # swallow "?!", "..."
+                j += 1
+            sentence = buffer[start:j].strip()
+            if sentence:
+                sentences.append(sentence)
+            while j < n and buffer[j].isspace():
+                j += 1
+            start = j
+            i = j
+        else:
+            i += 1
+    return sentences, buffer[start:]
+
+
 def _split_transcript(reply: str) -> tuple[str | None, str]:
     """Splits a leading <transcript>...</transcript> block off a complete reply. Returns
     (transcript-or-None, reply without the block)."""
@@ -457,6 +484,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     async def event_generator():
         full_reply = ""
+        overlay_buf = ""
         try:
             # Typed turns carry no transcript instruction, but a model that just did voice turns
             # in the same conversation sometimes emits the block out of habit - peel and drop it.
@@ -465,6 +493,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     continue
                 if event["type"] == "delta":
                     full_reply += event["text"]
+                    # Push completed sentences to the overlay as they stream (even mid
+                    # tool-loop, before the full reply lands) so it keeps pace with TTS.
+                    overlay_buf += event["text"]
+                    sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
+                    for sentence in sentences:
+                        overlay_process.push_toast(sentence, "reply")
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "volume":
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
@@ -475,8 +509,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
+        if overlay_buf.strip():  # flush any trailing partial sentence
+            overlay_process.push_toast(overlay_buf, "reply")
         _schedule_memory_extraction(last_user_message, full_reply)
-        overlay_process.push_toast(full_reply, "reply")
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -566,11 +601,16 @@ async def chat_voice_stream(
     async def event_generator():
         nonlocal transcript
         full_reply = ""
+        overlay_buf = ""
         stop_listening = False
         try:
             async for event in _peel_transcript(_stream_chat_with_tools(messages, model=model, source="chat_voice_stream")):
                 if event["type"] == "delta":
                     full_reply += event["text"]
+                    overlay_buf += event["text"]
+                    sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
+                    for sentence in sentences:
+                        overlay_process.push_toast(sentence, "reply")
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "transcript":
                     # Raw-audio turns: peeled from the model's reply prefix. Delivered only in
@@ -590,9 +630,10 @@ async def chat_voice_stream(
 
         # Transcription mode transcribes up front; raw-audio turns get theirs from the model's
         # <transcript> reply prefix - either way the extraction pass now has real user text.
+        if overlay_buf.strip():
+            overlay_process.push_toast(overlay_buf, "reply")
         if transcript:
             _schedule_memory_extraction(transcript, full_reply)
-        overlay_process.push_toast(full_reply, "reply")
 
         yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening, 'transcript': transcript})}\n\n"
 

@@ -14,6 +14,7 @@ silently and never raise into a caller (they run on latency-sensitive paths).
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -23,8 +24,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# overlay/overlay.exe sits at the repo root, next to app/.
-_OVERLAY_EXE = Path(__file__).resolve().parents[2] / "overlay" / "overlay.exe"
+# overlay/Lykompanion-overlay.exe sits at the repo root, next to app/.
+_OVERLAY_EXE = Path(__file__).resolve().parents[2] / "overlay" / "Lykompanion-overlay.exe"
 _PIPE_PATH = r"\\.\pipe\lykompanion-overlay"
 
 _proc: subprocess.Popen | None = None
@@ -94,7 +95,9 @@ def start() -> None:
             return
         try:
             _proc = subprocess.Popen(
-                [str(_OVERLAY_EXE)],
+                # --parent lets the overlay self-exit if we're hard-killed (its
+                # graceful stop() may never run in that case).
+                [str(_OVERLAY_EXE), "--parent", str(os.getpid())],
                 cwd=str(_OVERLAY_EXE.parent),
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

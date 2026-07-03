@@ -42,11 +42,13 @@
 #include <utility>
 #include <fstream>
 #include <iterator>
+#include <cwctype>
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace {
 
@@ -75,13 +77,14 @@ constexpr UINT WM_APP_COMMAND = WM_APP + 1;  // a JSON line is queued
 constexpr UINT_PTR TIMER_TICK   = 1;         // toast-expiry tick
 constexpr UINT_PTR TIMER_DEMO   = 2;         // --demo auto-quit
 constexpr UINT_PTR TIMER_BANNER = 3;         // startup banner fade animation
+constexpr UINT_PTR TIMER_PARENT = 4;         // watch the parent process for exit
 constexpr int      HOTKEY_EDIT = 100;        // Ctrl+Shift+O edit-mode toggle
 
 constexpr wchar_t kEditHint[] = L"Drag to move  \x2022  Ctrl+Shift+O to lock";
 
 // Widget geometry (device pixels @ 96 DPI; DPI scaling is a later concern).
 constexpr int   TOAST_W   = 340;
-constexpr int   PANEL_W   = 300;
+constexpr int   PANEL_W   = 320;
 constexpr float PAD       = 14.0f;
 constexpr int   MARGIN    = 24;     // gap from the screen edge
 constexpr int   TOAST_GAP = 10;     // vertical gap between stacked toasts
@@ -253,6 +256,7 @@ IDWriteFactory*   g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_fmtTitle = nullptr;  // toast title / panel title
 IDWriteTextFormat* g_fmtBody  = nullptr;  // toast body / panel value
 IDWriteTextFormat* g_fmtLabel = nullptr;  // panel label (dim, leading)
+IDWriteTextFormat* g_fmtSmall = nullptr;  // panel row label (11px uppercase)
 IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
 ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
 
@@ -321,6 +325,7 @@ LayeredWindow g_panelWin;
 LayeredWindow g_configWin;         // edit-mode appearance toolbar
 LayeredWindow g_bannerWin;         // startup fade-in/out hint
 ULONGLONG     g_bannerStart = 0;
+HANDLE        g_parentProcess = nullptr;  // Lykompanion's process; overlay self-exits if it dies
 std::vector<Toast> g_toasts;
 Panel         g_panel;
 bool          g_editMode = false;
@@ -358,6 +363,10 @@ bool CreateFactories() {
             DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtLabel)))
         return false;
 
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"en-us", &g_fmtSmall)))
+        return false;
     if (FAILED(g_dwriteFactory->CreateTextFormat(
             L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 15.0f, L"en-us", &g_fmtCenter)))
@@ -687,6 +696,26 @@ bool ExpireToasts() {
 // Game-state panel widget
 // ---------------------------------------------------------------------------
 
+// Split a value on ';' into trimmed non-empty parts (mirrors the web panel's
+// multi-part "Known Stats"-style rendering).
+std::vector<std::wstring> SplitValueParts(const std::wstring& value) {
+    std::vector<std::wstring> parts;
+    size_t start = 0;
+    while (true) {
+        size_t pos = value.find(L';', start);
+        std::wstring part = value.substr(
+            start, pos == std::wstring::npos ? std::wstring::npos : pos - start);
+        size_t a = part.find_first_not_of(L" \t\r\n");
+        size_t b = part.find_last_not_of(L" \t\r\n");
+        if (a != std::wstring::npos) parts.push_back(part.substr(a, b - a + 1));
+        if (pos == std::wstring::npos) break;
+        start = pos + 1;
+    }
+    return parts;
+}
+
+// Each row is a stacked sub-card: an uppercase dim label above a wrapping value
+// (bulleted when the value is ';'-separated) — matching web/js/app/game-state.js.
 void RenderPanel() {
     if (!g_panel.valid ||
         (g_panel.title.empty() && g_panel.rows.empty())) {
@@ -696,17 +725,63 @@ void RenderPanel() {
         return;
     }
 
-    const float innerW = PANEL_W - 2 * PAD;
+    const float innerW   = PANEL_W - 2 * PAD;         // panel content width
+    const float rowPadX  = 10.0f, rowPadY = 7.0f;     // padding inside a row card
+    const float rowGap   = 6.0f, lblGap = 3.0f;
+    const float rowTextW = innerW - 2 * rowPadX;
+
     float titleH = 0;
     IDWriteTextLayout* titleLayout = nullptr;
     if (!g_panel.title.empty())
         titleLayout = MakeLayout(g_panel.title, g_fmtTitle, innerW, &titleH);
 
-    int height = (int)(PAD + titleH + (titleH > 0 ? 8 : 0) +
-                       g_panel.rows.size() * ROW_H + PAD);
+    struct RowLayout {
+        IDWriteTextLayout* label = nullptr;
+        float labelH = 0;
+        std::vector<IDWriteTextLayout*> values;
+        std::vector<float> valueH;
+        float rowH = 0;
+    };
+    std::vector<RowLayout> rows;
+    rows.reserve(g_panel.rows.size());
+
+    for (auto& row : g_panel.rows) {
+        RowLayout r;
+        std::wstring upper = row.first;
+        for (auto& ch : upper) ch = (wchar_t)towupper(ch);
+        r.label = MakeLayout(upper, g_fmtSmall, rowTextW, &r.labelH);
+
+        std::vector<std::wstring> parts = SplitValueParts(row.second);
+        if (parts.empty()) parts.push_back(L"(not seen yet)");
+        bool bullet = parts.size() > 1;
+        float valuesH = 0;
+        for (size_t i = 0; i < parts.size(); ++i) {
+            std::wstring line = bullet ? (L"\x2022  " + parts[i]) : parts[i];
+            float hh = 0;
+            r.values.push_back(MakeLayout(line, g_fmtBody, rowTextW, &hh));
+            r.valueH.push_back(hh);
+            valuesH += hh + (i + 1 < parts.size() ? 2.0f : 0.0f);
+        }
+        r.rowH = rowPadY + r.labelH + lblGap + valuesH + rowPadY;
+        rows.push_back(std::move(r));
+    }
+
+    float total = PAD + (titleLayout ? titleH + 8.0f : 0.0f);
+    for (auto& r : rows) total += r.rowH + rowGap;
+    if (!rows.empty()) total -= rowGap;
+    total += PAD;
+    int height = (int)(total + 0.5f);
+
+    auto freeRows = [&]() {
+        for (auto& r : rows) {
+            SafeRelease(&r.label);
+            for (auto* v : r.values) SafeRelease(&v);
+        }
+    };
 
     if (!EnsureSurface(g_panelWin, PANEL_W, height)) {
         SafeRelease(&titleLayout);
+        freeRows();
         return;
     }
 
@@ -714,12 +789,14 @@ void RenderPanel() {
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    ID2D1SolidColorBrush* bg = nullptr, *border = nullptr;
-    ID2D1SolidColorBrush* white = nullptr, *dim = nullptr;
-    rt->CreateSolidColorBrush(Bg(0.90f), &bg);
+    ID2D1SolidColorBrush *bg = nullptr, *border = nullptr, *white = nullptr,
+                         *dim = nullptr, *rowBg = nullptr, *rowBorder = nullptr;
+    rt->CreateSolidColorBrush(Bg(0.92f), &bg);
     rt->CreateSolidColorBrush(Acc(0.55f), &border);
     rt->CreateSolidColorBrush(Txt(1.0f), &white);
     rt->CreateSolidColorBrush(Dim(1.0f), &dim);
+    rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.05f * g_opacity), &rowBg);
+    rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.10f * g_opacity), &rowBorder);
 
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
         D2D1::RectF(1.0f, 1.0f, PANEL_W - 1.0f, height - 1.0f), 12.0f, 12.0f);
@@ -729,26 +806,32 @@ void RenderPanel() {
     float y = PAD;
     if (titleLayout) {
         rt->DrawTextLayout(D2D1::Point2F(PAD, y), titleLayout, white);
-        y += titleH + 8;
-    }
-    for (auto& row : g_panel.rows) {
-        D2D1_RECT_F lr = D2D1::RectF(PAD, y, PAD + innerW, y + ROW_H);
-        rt->DrawText(row.first.c_str(), (UINT32)row.first.size(), g_fmtLabel, lr, dim);
-        // Value: right-aligned within the same row rect.
-        IDWriteTextLayout* vl = nullptr;
-        if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(
-                row.second.c_str(), (UINT32)row.second.size(), g_fmtBody,
-                innerW, (float)ROW_H, &vl)) && vl) {
-            vl->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            rt->DrawTextLayout(D2D1::Point2F(PAD, y + 1), vl, white);
-            SafeRelease(&vl);
-        }
-        y += ROW_H;
+        y += titleH + 8.0f;
     }
 
+    for (auto& r : rows) {
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+            D2D1::RectF(PAD, y, PAD + innerW, y + r.rowH), 8.0f, 8.0f);
+        rt->FillRoundedRectangle(rr, rowBg);
+        rt->DrawRoundedRectangle(rr, rowBorder, 1.0f);
+
+        float ty = y + rowPadY;
+        if (r.label) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD + rowPadX, ty), r.label, dim);
+            ty += r.labelH + lblGap;
+        }
+        for (size_t i = 0; i < r.values.size(); ++i) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD + rowPadX, ty), r.values[i], white);
+            ty += r.valueH[i] + 2.0f;
+        }
+        y += r.rowH + rowGap;
+    }
+
+    SafeRelease(&rowBorder); SafeRelease(&rowBg);
     SafeRelease(&dim); SafeRelease(&white);
     SafeRelease(&border); SafeRelease(&bg);
     SafeRelease(&titleLayout);
+    freeRows();
 
     if (g_editMode) DrawEditDecoration(rt, PANEL_W, height);
 
@@ -1040,6 +1123,12 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (!g_editMode && ExpireToasts()) RelayoutToasts();
             } else if (wParam == TIMER_BANNER) {
                 if (!TickBanner()) KillTimer(g_ctrl, TIMER_BANNER);
+            } else if (wParam == TIMER_PARENT) {
+                // Parent (Lykompanion) exited — including a hard kill that skips
+                // its graceful stop() — so tear ourselves down too.
+                if (g_parentProcess &&
+                    WaitForSingleObject(g_parentProcess, 0) == WAIT_OBJECT_0)
+                    PostQuitMessage(0);
             } else if (wParam == TIMER_DEMO) {
                 PostQuitMessage(0);
             }
@@ -1116,8 +1205,21 @@ void InjectDemo() {
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR lpCmdLine, int) {
-    const bool demo = (wcsstr(lpCmdLine ? lpCmdLine : L"", L"--demo") != nullptr);
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
+    // Args: --demo (sample content, auto-quit) and --parent <pid> (self-exit if
+    // that process dies — our safety net against the parent being hard-killed).
+    bool demo = false;
+    DWORD parentPid = 0;
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc; ++i) {
+            if (wcscmp(argv[i], L"--demo") == 0) demo = true;
+            else if (wcscmp(argv[i], L"--parent") == 0 && i + 1 < argc)
+                parentPid = (DWORD)_wtoi(argv[++i]);
+        }
+        LocalFree(argv);
+    }
 
     if (!CreateFactories()) return 1;
 
@@ -1155,6 +1257,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR lpCmdLine, int) {
 
     SetTimer(g_ctrl, TIMER_TICK, 250, nullptr);
 
+    // Watch the parent process (if given) so we never outlive Lykompanion.
+    if (parentPid) {
+        g_parentProcess = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        if (g_parentProcess) SetTimer(g_ctrl, TIMER_PARENT, 1000, nullptr);
+    }
+
     // Startup hint banner (fade in/out).
     g_bannerStart = GetTickCount64();
     RenderBanner();
@@ -1179,8 +1287,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR lpCmdLine, int) {
     DiscardSurface(g_panelWin);
     DiscardSurface(g_configWin);
     DiscardSurface(g_bannerWin);
+    if (g_parentProcess) CloseHandle(g_parentProcess);
     SafeRelease(&g_dashStroke);
     SafeRelease(&g_fmtCenter);
+    SafeRelease(&g_fmtSmall);
     SafeRelease(&g_fmtLabel);
     SafeRelease(&g_fmtBody);
     SafeRelease(&g_fmtTitle);

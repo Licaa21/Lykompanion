@@ -1482,9 +1482,15 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .tracker-item-label {
+  flex: 1;
   font-size: 13px; font-weight: 600; line-height: 1.5;
   color: var(--t1); outline: none; cursor: text;
 }
+.tracker-overlay-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--t2); white-space: nowrap; cursor: pointer;
+}
+.tracker-overlay-toggle input { cursor: pointer; }
 .tracker-item-desc {
   font-size: 12px; line-height: 1.5;
   color: var(--t2); outline: none; cursor: text;

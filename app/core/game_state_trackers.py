@@ -136,6 +136,8 @@ def set_trackers(process: str, trackers: list[dict]) -> list[dict]:
                 "label": label,
                 "description": (t.get("description") or "").strip(),
                 "locked": False,
+                # Whether this tracker is drawn in the native overlay panel. Default on.
+                "overlay": t.get("overlay", True) is not False,
             }
         )
 

@@ -32,7 +32,7 @@ just one client. Commands:
 Quick manual test (PowerShell, no Python involved):
 
 ```powershell
-.\overlay.exe            # run it (nothing shows until a command arrives)
+.\Lykompanion-overlay.exe            # run it (nothing shows until a command arrives)
 # in a second shell:
 $p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'lykompanion-overlay', 'Out')
 $p.Connect(2000); $w = New-Object System.IO.StreamWriter($p); $w.AutoFlush = $true
@@ -47,11 +47,11 @@ mode: widgets become draggable, empty ones show a placeholder, and a top-center
 toolbar exposes **opacity** and an **accent-color** picker. Positions + appearance
 persist to `%LOCALAPPDATA%\Lykompanion\overlay_layout.json`.
 
-`overlay.exe --demo` shows sample content for ~20s for a quick visual check.
+`Lykompanion-overlay.exe --demo` shows sample content for ~20s for a quick visual check.
 
 ## Building
 
-A prebuilt `overlay.exe` is committed so most users don't need a compiler. To
+A prebuilt `Lykompanion-overlay.exe` is committed so most users don't need a compiler. To
 rebuild after changing `overlay.cpp`:
 
 ```

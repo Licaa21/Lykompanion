@@ -105,6 +105,7 @@ class GameStateTracker(BaseModel):
     label: str
     description: str = ""
     locked: bool = False
+    overlay: bool = True
     value: str | None = None
 
 
@@ -112,6 +113,7 @@ class TrackerInput(BaseModel):
     id: str | None = None
     label: str
     description: str = ""
+    overlay: bool = True
 
 
 class TrainingDataDocument(BaseModel):

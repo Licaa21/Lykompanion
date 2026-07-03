@@ -469,7 +469,7 @@ async function saveTrackers() {
   if (!process) return;
   const body = currentTrackers
     .filter((t) => !t.locked)
-    .map((t) => ({ id: t.id, label: t.label, description: t.description }));
+    .map((t) => ({ id: t.id, label: t.label, description: t.description, overlay: t.overlay !== false }));
   currentTrackers = await fetch(`/api/game-state/trackers/${encodeURIComponent(process)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -542,6 +542,20 @@ function renderTrackersList() {
     header.appendChild(label);
 
     if (!tracker.locked) {
+      const overlayToggle = document.createElement("label");
+      overlayToggle.className = "tracker-overlay-toggle";
+      overlayToggle.title = "Show this tracker in the in-game overlay panel";
+      const overlayCb = document.createElement("input");
+      overlayCb.type = "checkbox";
+      overlayCb.checked = tracker.overlay !== false;
+      overlayCb.addEventListener("change", () => {
+        tracker.overlay = overlayCb.checked;
+        saveTrackers();
+      });
+      overlayToggle.appendChild(overlayCb);
+      overlayToggle.appendChild(document.createTextNode("Overlay"));
+      header.appendChild(overlayToggle);
+
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "memory-item-delete";
       deleteBtn.textContent = "×";
@@ -567,7 +581,7 @@ gameStateTrackerAddForm.addEventListener("submit", async (event) => {
   const label = gameStateTrackerAddLabel.value.trim();
   if (!label || !gameStateTrackerProcessEl.value) return;
   const description = gameStateTrackerAddDesc.value.trim();
-  currentTrackers.push({ id: "", label, description, locked: false });
+  currentTrackers.push({ id: "", label, description, locked: false, overlay: true });
   gameStateTrackerAddLabel.value = "";
   gameStateTrackerAddDesc.value = "";
   await saveTrackers();
