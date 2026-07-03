@@ -1,0 +1,5 @@
+# Build artifacts. The prebuilt overlay.exe is committed later in Sprint C5.
+*.obj
+*.exe
+*.pdb
+*.ilk
