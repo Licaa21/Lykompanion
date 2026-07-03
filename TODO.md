@@ -32,7 +32,8 @@
   Python does beyond posting content is process lifecycle: launch the exe when a game starts, ask it
   to quit when tracking stops.
 
-  - [ ] **Sprint C1 — window + render skeleton.** `overlay/overlay.cpp`: register a
+  - [x] **Sprint C1 — window + render skeleton.** DONE (verified on-machine 2026-07-03).
+        `overlay/overlay.cpp`: register a
     `WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` popup
     (no taskbar entry, click-through, never steals focus). `ID2D1DCRenderTarget` bound to a memory
     DC holding a top-down 32bpp PARGB `CreateDIBSection`; draw a rounded dark card + DirectWrite
