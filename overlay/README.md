@@ -24,10 +24,15 @@ just one client. Commands:
 
 ```json
 {"type":"toast","text":"...","kind":"reply"|"reminder"}
+{"type":"image","url":"https://...","alt":"caption"}
 {"type":"game_state","title":"...","rows":[["Label","Value"], ...]}
 {"type":"edit_mode","enabled":true}
 {"type":"quit"}
 ```
+
+`image` commands download the URL on a background thread (WIC decode + downscale)
+and render it as a toast with an optional caption — so companion replies that
+embed a web image (e.g. a map screenshot) show up in the overlay too.
 
 Quick manual test (PowerShell, no Python involved):
 

@@ -3,6 +3,7 @@ import base64
 import json
 import re
 import time
+from urllib.parse import parse_qs, unquote, urlparse
 from collections.abc import AsyncIterator
 
 import httpx
@@ -132,6 +133,25 @@ def _extract_overlay_sentences(buffer: str) -> tuple[list[str], str]:
         else:
             i += 1
     return sentences, buffer[start:]
+
+
+_OVERLAY_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+
+
+def _extract_overlay_images(reply: str) -> list[tuple[str, str]]:
+    """Pull markdown image tags (![alt](url)) out of a reply so the overlay can
+    fetch + render them itself. A `/api/proxy/image?url=...` wrapper (from the
+    SearXNG image search) is unwrapped back to the real external URL so the
+    overlay needs neither the app base URL nor the API token. Returns (url, alt)."""
+    images: list[tuple[str, str]] = []
+    for match in _OVERLAY_IMAGE_RE.finditer(reply):
+        alt, url = match.group(1).strip(), match.group(2).strip()
+        if url.startswith("/api/proxy/image?"):
+            real = parse_qs(urlparse(url).query).get("url", [""])[0]
+            url = unquote(real) if real else ""
+        if url.startswith(("http://", "https://")):
+            images.append((url, alt))
+    return images
 
 
 def _split_transcript(reply: str) -> tuple[str | None, str]:
@@ -511,6 +531,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             return
         if overlay_buf.strip():  # flush any trailing partial sentence
             overlay_process.push_toast(overlay_buf, "reply")
+        for img_url, img_alt in _extract_overlay_images(full_reply):
+            overlay_process.push_image(img_url, img_alt)
         _schedule_memory_extraction(last_user_message, full_reply)
         yield f"data: {json.dumps({'done': True})}\n\n"
 
@@ -632,6 +654,8 @@ async def chat_voice_stream(
         # <transcript> reply prefix - either way the extraction pass now has real user text.
         if overlay_buf.strip():
             overlay_process.push_toast(overlay_buf, "reply")
+        for img_url, img_alt in _extract_overlay_images(full_reply):
+            overlay_process.push_image(img_url, img_alt)
         if transcript:
             _schedule_memory_extraction(transcript, full_reply)
 

@@ -130,6 +130,14 @@ def push_toast(text: str, kind: str = "reply") -> None:
     push({"type": "toast", "text": text, "kind": kind})
 
 
+def push_image(url: str, alt: str = "") -> None:
+    """Forward a web image URL for the overlay to download + render itself."""
+    url = (url or "").strip()
+    if not url:
+        return
+    push({"type": "image", "url": url, "alt": alt or ""})
+
+
 def push_game_state(title: str, rows: list[list[str]]) -> None:
     push({"type": "game_state", "title": title, "rows": rows})
 

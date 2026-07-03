@@ -33,6 +33,8 @@
 #include <windowsx.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <wincodec.h>
+#include <urlmon.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -43,12 +45,16 @@
 #include <fstream>
 #include <iterator>
 #include <cwctype>
+#include <memory>
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "ole32.lib")
 
 namespace {
 
@@ -73,7 +79,8 @@ constexpr wchar_t kPipeName[]   = L"\\\\.\\pipe\\lykompanion-overlay";
 constexpr wchar_t kCtrlClass[]  = L"LykoOverlayCtrl";
 constexpr wchar_t kWinClass[]   = L"LykoOverlayWin";
 
-constexpr UINT WM_APP_COMMAND = WM_APP + 1;  // a JSON line is queued
+constexpr UINT WM_APP_COMMAND     = WM_APP + 1;  // a JSON line is queued
+constexpr UINT WM_APP_IMAGE_READY = WM_APP + 2;  // a worker finished decoding an image
 constexpr UINT_PTR TIMER_TICK   = 1;         // toast-expiry tick
 constexpr UINT_PTR TIMER_DEMO   = 2;         // --demo auto-quit
 constexpr UINT_PTR TIMER_BANNER = 3;         // startup banner fade animation
@@ -90,6 +97,8 @@ constexpr int   MARGIN    = 24;     // gap from the screen edge
 constexpr int   TOAST_GAP = 10;     // vertical gap between stacked toasts
 constexpr int   ROW_H     = 24;     // game-state row height
 constexpr DWORD TOAST_MS  = 6000;   // default toast lifetime
+constexpr DWORD IMAGE_MS  = 22000;  // image toasts linger longer than text
+constexpr int   IMAGE_MAX_H = 340;  // cap displayed image height
 
 // ---------------------------------------------------------------------------
 // Minimal JSON parser (objects/arrays/strings/numbers/bool/null) over wchar_t.
@@ -305,10 +314,24 @@ D2D1_COLOR_F Dim(float a)  { return D2D1::ColorF(0.62f, 0.66f, 0.74f, a * g_opac
 
 // ---- Widget content --------------------------------------------------------
 
+// Decoded image pixels handed from a download worker to the UI thread (32bpp PBGRA).
+struct ImageData {
+    std::vector<BYTE> pixels;
+    UINT width = 0, height = 0, stride = 0;
+    bool ok = false;
+};
+
+enum ImageState { ImgNone, ImgLoading, ImgReady, ImgFailed };
+
 struct Toast {
     std::wstring text;
-    std::wstring kind;   // "reply" | "reminder"
+    std::wstring kind;   // "reply" | "reminder" | "image"
     ULONGLONG    expire; // GetTickCount64() deadline
+    // Image toasts only:
+    bool         isImage = false;
+    int          imageId = 0;        // correlates the async download to this toast
+    ImageState   imgState = ImgNone;
+    std::shared_ptr<ImageData> image;
 };
 
 struct Panel {
@@ -326,6 +349,7 @@ LayeredWindow g_configWin;         // edit-mode appearance toolbar
 LayeredWindow g_bannerWin;         // startup fade-in/out hint
 ULONGLONG     g_bannerStart = 0;
 HANDLE        g_parentProcess = nullptr;  // Lykompanion's process; overlay self-exits if it dies
+int           g_nextImageId = 0;
 std::vector<Toast> g_toasts;
 Panel         g_panel;
 bool          g_editMode = false;
@@ -613,20 +637,47 @@ void RelayoutToasts() {
 
     const float innerW = TOAST_W - 2 * PAD;
 
-    // Measure each toast's wrapped body height.
+    // Per-toast layout plan (text height OR image display size).
+    struct Plan {
+        IDWriteTextLayout* layout = nullptr;  // text body, or image caption/status
+        float textH = 0;
+        bool  isImage = false;
+        float dispW = 0, dispH = 0;           // image display size (ImgReady)
+    };
+    std::vector<Plan> plans(g_toasts.size());
     std::vector<float> cardH(g_toasts.size());
-    std::vector<IDWriteTextLayout*> layouts(g_toasts.size(), nullptr);
     int total = 0;
+
     for (size_t i = 0; i < g_toasts.size(); ++i) {
-        float h = 0;
-        layouts[i] = MakeLayout(g_toasts[i].text, g_fmtBody, innerW, &h);
-        cardH[i] = (h + 2 * PAD < 44.0f) ? 44.0f : (h + 2 * PAD);
+        Toast& t = g_toasts[i];
+        Plan& p = plans[i];
+        if (t.isImage && t.imgState == ImgReady && t.image && t.image->ok) {
+            p.isImage = true;
+            float iw = (float)t.image->width, ih = (float)t.image->height;
+            float scale = innerW / iw;
+            if (ih * scale > IMAGE_MAX_H) scale = IMAGE_MAX_H / ih;
+            if (scale > 1.0f) scale = 1.0f;  // never upscale past native
+            p.dispW = iw * scale;
+            p.dispH = ih * scale;
+            if (!t.text.empty())  // optional caption below the image
+                p.layout = MakeLayout(t.text, g_fmtLabel, innerW, &p.textH);
+            cardH[i] = PAD + p.dispH + (p.layout ? 4.0f + p.textH : 0.0f) + PAD;
+        } else {
+            const wchar_t* status = nullptr;
+            if (t.isImage && t.imgState == ImgLoading) status = L"Loading image…";
+            else if (t.isImage && t.imgState == ImgFailed) status = L"[image unavailable]";
+            std::wstring body = status ? status : t.text;
+            p.layout = MakeLayout(body, g_fmtBody, innerW, &p.textH);
+            cardH[i] = (p.textH + 2 * PAD < 44.0f) ? 44.0f : (p.textH + 2 * PAD);
+        }
         total += (int)cardH[i];
         if (i + 1 < g_toasts.size()) total += TOAST_GAP;
     }
 
+    auto freePlans = [&]() { for (auto& p : plans) SafeRelease(&p.layout); };
+
     if (!EnsureSurface(g_toastWin, TOAST_W, total)) {
-        for (auto* l : layouts) SafeRelease(&l);
+        freePlans();
         return;
     }
 
@@ -639,12 +690,14 @@ void RelayoutToasts() {
 
     float y = 0;
     for (size_t i = 0; i < g_toasts.size(); ++i) {
-        bool reminder = (g_toasts[i].kind == L"reminder");
+        Toast& t = g_toasts[i];
+        Plan& p = plans[i];
+        bool reminder = (t.kind == L"reminder");
         ID2D1SolidColorBrush* bg = nullptr;
         ID2D1SolidColorBrush* border = nullptr;
         rt->CreateSolidColorBrush(Bg(0.92f), &bg);
         // Reminders keep a fixed warm border so they read as distinct; replies
-        // use the user-chosen accent.
+        // and images use the user-chosen accent.
         rt->CreateSolidColorBrush(reminder ? Warm(0.80f) : Acc(0.75f), &border);
 
         D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
@@ -652,8 +705,29 @@ void RelayoutToasts() {
         rt->FillRoundedRectangle(card, bg);
         rt->DrawRoundedRectangle(card, border, 1.3f);
 
-        if (layouts[i])
-            rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD), layouts[i], text);
+        if (p.isImage) {
+            // Build a device bitmap from the decoded pixels and draw it centered.
+            ID2D1Bitmap* bmp = nullptr;
+            D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            if (SUCCEEDED(rt->CreateBitmap(
+                    D2D1::SizeU(t.image->width, t.image->height),
+                    t.image->pixels.data(), t.image->stride, &bp, &bmp)) && bmp) {
+                float ix = PAD + (innerW - p.dispW) / 2.0f;
+                D2D1_RECT_F dst = D2D1::RectF(ix, y + PAD, ix + p.dispW, y + PAD + p.dispH);
+                rt->DrawBitmap(bmp, dst, 1.0f,
+                               D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                SafeRelease(&bmp);
+            }
+            if (p.layout) {
+                ID2D1SolidColorBrush* dim = nullptr;
+                rt->CreateSolidColorBrush(Dim(1.0f), &dim);
+                rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD + p.dispH + 4.0f), p.layout, dim);
+                SafeRelease(&dim);
+            }
+        } else if (p.layout) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD, y + PAD), p.layout, text);
+        }
 
         SafeRelease(&border);
         SafeRelease(&bg);
@@ -661,7 +735,7 @@ void RelayoutToasts() {
     }
 
     SafeRelease(&text);
-    for (auto* l : layouts) SafeRelease(&l);
+    freePlans();
 
     if (g_editMode) DrawEditDecoration(rt, TOAST_W, total);
 
@@ -678,6 +752,83 @@ void AddToast(const std::wstring& textStr, const std::wstring& kind) {
     t.kind = kind.empty() ? L"reply" : kind;
     t.expire = GetTickCount64() + TOAST_MS;
     g_toasts.push_back(std::move(t));
+    RelayoutToasts();
+}
+
+// Background: download an http(s) image, decode + downscale via WIC into raw
+// PBGRA pixels, and hand them to the UI thread. Runs on its own COM apartment
+// so nothing here touches the shared render state.
+void LoadImageWorker(std::wstring url, int id) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    ImageData* data = new ImageData();
+
+    IWICImagingFactory* wic = nullptr;
+    IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICBitmapScaler* scaler = nullptr;
+    IWICFormatConverter* conv = nullptr;
+    IWICBitmapSource* src = nullptr;
+    wchar_t cache[MAX_PATH] = {};
+
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
+        SUCCEEDED(URLDownloadToCacheFileW(nullptr, url.c_str(), cache, MAX_PATH, 0, nullptr)) &&
+        SUCCEEDED(wic->CreateDecoderFromFilename(cache, nullptr, GENERIC_READ,
+                                                 WICDecodeMetadataCacheOnLoad, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &frame))) {
+        UINT w = 0, h = 0;
+        frame->GetSize(&w, &h);
+        src = frame;
+        const UINT maxDim = 460;  // downscale big images before we copy pixels
+        if (w > maxDim || h > maxDim) {
+            double s = (double)maxDim / w;
+            if ((double)maxDim / h < s) s = (double)maxDim / h;
+            UINT nw = (UINT)(w * s), nh = (UINT)(h * s);
+            if (nw < 1) nw = 1;
+            if (nh < 1) nh = 1;
+            if (SUCCEEDED(wic->CreateBitmapScaler(&scaler)) &&
+                SUCCEEDED(scaler->Initialize(frame, nw, nh, WICBitmapInterpolationModeFant)))
+                src = scaler;
+        }
+        if (SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+            SUCCEEDED(conv->Initialize(src, GUID_WICPixelFormat32bppPBGRA,
+                                       WICBitmapDitherTypeNone, nullptr, 0.0,
+                                       WICBitmapPaletteTypeCustom))) {
+            UINT fw = 0, fh = 0;
+            conv->GetSize(&fw, &fh);
+            UINT stride = fw * 4;
+            data->pixels.resize((size_t)stride * fh);
+            if (SUCCEEDED(conv->CopyPixels(nullptr, stride, (UINT)data->pixels.size(),
+                                           data->pixels.data()))) {
+                data->width = fw;
+                data->height = fh;
+                data->stride = stride;
+                data->ok = true;
+            }
+        }
+    }
+
+    if (conv) conv->Release();
+    if (scaler) scaler->Release();
+    if (frame) frame->Release();
+    if (dec) dec->Release();
+    if (wic) wic->Release();
+    CoUninitialize();
+
+    if (!g_ctrl || !PostMessage(g_ctrl, WM_APP_IMAGE_READY, (WPARAM)id, (LPARAM)data))
+        delete data;
+}
+
+void AddImageToast(const std::wstring& url, const std::wstring& alt) {
+    Toast t;
+    t.kind = L"image";
+    t.isImage = true;
+    t.text = alt;  // caption
+    t.imgState = ImgLoading;
+    t.imageId = ++g_nextImageId;
+    t.expire = GetTickCount64() + IMAGE_MS;
+    g_toasts.push_back(std::move(t));
+    std::thread(LoadImageWorker, url, g_nextImageId).detach();
     RelayoutToasts();
 }
 
@@ -1030,6 +1181,11 @@ void HandleCommand(const std::wstring& line) {
         const JsonValue* kind = v.find(L"kind");
         if (text && text->type == JsonValue::Str && !text->str.empty())
             AddToast(text->str, kind ? kind->asStr() : L"reply");
+    } else if (type == L"image") {
+        const JsonValue* url = v.find(L"url");
+        const JsonValue* alt = v.find(L"alt");
+        if (url && url->type == JsonValue::Str && !url->str.empty())
+            AddImageToast(url->str, alt ? alt->asStr() : L"");
     } else if (type == L"game_state") {
         g_panel = Panel{};
         g_panel.valid = true;
@@ -1112,6 +1268,27 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 HandleCommand(line);
             }
+            return 0;
+        }
+        case WM_APP_IMAGE_READY: {
+            int id = (int)wParam;
+            ImageData* data = (ImageData*)lParam;
+            bool owned = false;
+            for (auto& t : g_toasts) {
+                if (t.isImage && t.imageId == id) {
+                    if (data && data->ok) {
+                        t.image.reset(data);  // toast takes ownership
+                        t.imgState = ImgReady;
+                        owned = true;
+                    } else {
+                        t.imgState = ImgFailed;
+                    }
+                    t.expire = GetTickCount64() + IMAGE_MS;  // count lifetime from load
+                    break;
+                }
+            }
+            if (data && !owned) delete data;  // toast gone, or decode failed
+            RelayoutToasts();
             return 0;
         }
         case WM_HOTKEY:
@@ -1201,6 +1378,9 @@ void InjectDemo() {
                   L"\"Hey! The boss room is just north of you \\u2014 watch the cliff edge.\"}");
     HandleCommand(L"{\"type\":\"toast\",\"kind\":\"reminder\",\"text\":"
                   L"\"Reminder: take a short break in 5 minutes.\"}");
+    // Image toast (needs network; shows "[image unavailable]" if offline).
+    HandleCommand(L"{\"type\":\"image\",\"alt\":\"Sample map image\","
+                  L"\"url\":\"https://picsum.photos/400/240\"}");
 }
 
 }  // namespace
@@ -1220,6 +1400,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
         }
         LocalFree(argv);
     }
+
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // for WIC / URL image downloads
 
     if (!CreateFactories()) return 1;
 
@@ -1288,6 +1470,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     DiscardSurface(g_configWin);
     DiscardSurface(g_bannerWin);
     if (g_parentProcess) CloseHandle(g_parentProcess);
+    CoUninitialize();
     SafeRelease(&g_dashStroke);
     SafeRelease(&g_fmtCenter);
     SafeRelease(&g_fmtSmall);
