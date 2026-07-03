@@ -30,19 +30,26 @@ function setupDesktopTitlebar() {
     if (min) min.addEventListener('click', () => api()?.window_minimize?.());
     if (close) close.addEventListener('click', () => api()?.window_close?.());
 
+    // All bounds we read (screenX/innerWidth/screen.avail*) are logical CSS px; pywebview's
+    // move/resize expect physical px, so scale by devicePixelRatio on the way out or the window
+    // drifts by the display scale factor on HiDPI screens.
+    const setBounds = (x, y, w, h) => {
+      const r = window.devicePixelRatio || 1;
+      api()?.window_set_bounds?.(Math.round(x * r), Math.round(y * r), Math.round(w * r), Math.round(h * r));
+    };
+
     // Maximize/restore: fit the screen work area (taskbar-aware via screen.avail*), remembering
     // the pre-maximize bounds. Any manual resize clears the memory, like a native window.
     let savedBounds = null;
     const toggleMaximize = () => {
-      const a = api();
-      if (!a?.window_set_bounds) return;
+      if (!api()?.window_set_bounds) return;
       if (savedBounds) {
         const b = savedBounds;
         savedBounds = null;
-        a.window_set_bounds(b.x, b.y, b.w, b.h);
+        setBounds(b.x, b.y, b.w, b.h);
       } else {
         savedBounds = { x: window.screenX, y: window.screenY, w: window.innerWidth, h: window.innerHeight };
-        a.window_set_bounds(screen.availLeft || 0, screen.availTop || 0, screen.availWidth, screen.availHeight);
+        setBounds(screen.availLeft || 0, screen.availTop || 0, screen.availWidth, screen.availHeight);
       }
     };
     const drag = document.querySelector('.titlebar-drag');
