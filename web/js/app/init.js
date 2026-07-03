@@ -82,23 +82,29 @@ function setupDesktopTitlebar() {
       // into a screen edge snaps: top = maximize, left/right = half. Moving = one bridge call/frame.
       drag.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || !api()?.window_set_bounds) return;
-        const sx = e.screenX, sy = e.screenY;
-        let start;
-        if (snapZone) {
-          // Un-snap: restore the floating size, keeping the cursor over the titlebar horizontally.
-          const size = restoreBounds || curBounds();
-          const fracX = e.clientX / window.innerWidth;
-          start = { x: Math.round(e.screenX - fracX * size.w), y: window.screenY, w: size.w, h: size.h };
-          snapZone = null; restoreBounds = null;
-        } else {
-          start = curBounds();
-        }
+        const sx = e.screenX, sy = e.screenY, downClientX = e.clientX;
+        // Capture the snap state at press time but DON'T un-snap yet — un-snapping happens on the
+        // first actual move. A press with no move (e.g. a double-click) must leave snapZone intact
+        // so the dblclick handler can see it (else the pointerdown would clear it first).
+        const wasSnapped = snapZone;
+        const snappedRestore = restoreBounds;
+        let start = null; // computed on first move
         drag.setPointerCapture(e.pointerId);
         const EDGE = 6;
         let raf = 0, pending = null, zone = null, moved = false;
         const flush = () => { raf = 0; if (pending) setBounds(pending.x, pending.y, pending.w, pending.h); };
         const onMove = (ev) => {
-          moved = true;
+          if (!moved) {
+            moved = true;
+            if (wasSnapped) {
+              // Un-snap: restore the floating size, cursor kept over the titlebar horizontally.
+              const size = snappedRestore || curBounds();
+              start = { x: Math.round(sx - (downClientX / window.innerWidth) * size.w), y: window.screenY, w: size.w, h: size.h };
+              snapZone = null; restoreBounds = null;
+            } else {
+              start = curBounds();
+            }
+          }
           pending = { x: Math.round(start.x + (ev.screenX - sx)), y: Math.round(start.y + (ev.screenY - sy)), w: start.w, h: start.h };
           const a = workArea();
           zone = ev.screenY <= a.y + EDGE ? 'max'
