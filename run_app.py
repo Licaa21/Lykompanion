@@ -202,6 +202,26 @@ class _MONITORINFO(ctypes.Structure):
     ]
 
 
+# Explicit signatures are mandatory: without them ctypes passes every argument as a 32-bit
+# c_int, which truncates 64-bit HWND/HMONITOR handles to garbage — the calls then no-op silently
+# on an invalid handle (the symptom of "resize/maximize do nothing at all").
+_user32.GetWindowLongW.restype = wintypes.LONG
+_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+_user32.SetWindowLongW.restype = wintypes.LONG
+_user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+_user32.SetWindowPos.restype = wintypes.BOOL
+_user32.SetWindowPos.argtypes = [
+    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, wintypes.UINT,
+]
+_user32.GetWindowRect.restype = wintypes.BOOL
+_user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+_user32.MonitorFromWindow.restype = ctypes.c_void_p
+_user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+_user32.GetMonitorInfoW.restype = wintypes.BOOL
+_user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_MONITORINFO)]
+
+
 def _hwnd_of(win) -> int | None:
     """WinForms form handle for a pywebview window (only valid once the window is realized)."""
     try:
