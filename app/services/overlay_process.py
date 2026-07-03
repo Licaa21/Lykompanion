@@ -143,13 +143,18 @@ def push_retry(command: dict, attempts: int = 30, delay: float = 0.2) -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
-def push_toast(text: str, kind: str = "reply") -> None:
+def push_toast(text: str, kind: str = "reply", duration_ms: int | None = None) -> None:
     text = (text or "").strip()
     if not text:
         return
     if len(text) > 240:  # toasts are glanceable; keep them short
         text = text[:237].rstrip() + "…"
-    push({"type": "toast", "text": text, "kind": kind})
+    command = {"type": "toast", "text": text, "kind": kind}
+    # A positive duration overrides the overlay's default toast lifetime — used when the frontend
+    # drives reply toasts in lockstep with narration so they stay up for the whole spoken sentence.
+    if duration_ms and duration_ms > 0:
+        command["duration_ms"] = int(duration_ms)
+    push(command)
 
 
 def push_image(url: str, alt: str = "") -> None:

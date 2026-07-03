@@ -305,7 +305,7 @@ async function sendMessage(text) {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chat.messages, include_screenshot: includeScreenshot }),
+      body: JSON.stringify({ messages: chat.messages, include_screenshot: includeScreenshot, client_overlay_toasts: narrateEnabled }),
       signal: chatAbortController.signal,
     });
 

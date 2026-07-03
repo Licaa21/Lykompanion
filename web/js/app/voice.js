@@ -74,6 +74,9 @@ async function sendDirectVoice(wavBlob) {
     formData.append("audio", wavBlob, "voice.wav");
     formData.append("history", historyJson);
     formData.append("include_screenshot", String(includeScreenshot));
+    // When narration is on, the frontend drives overlay reply toasts itself (timed to narration);
+    // tell the backend to skip its fixed-timer push so they don't double up.
+    formData.append("client_overlay_toasts", String(document.getElementById("cfg-narrate").checked));
 
     const response = await fetch("/api/chat/voice/stream", { method: "POST", body: formData });
 

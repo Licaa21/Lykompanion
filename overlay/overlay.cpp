@@ -848,11 +848,14 @@ void RelayoutToasts() {
     CommitWindow(g_toastWin, AnchorTopRight);
 }
 
-void AddToast(const std::wstring& textStr, const std::wstring& kind) {
+// durationMs = 0 uses the default TOAST_MS; a positive value (e.g. sent by the frontend to match
+// how long a sentence is narrated, at the current TTS speed) overrides it so the toast stays up
+// exactly as long as it's being spoken.
+void AddToast(const std::wstring& textStr, const std::wstring& kind, ULONGLONG durationMs = 0) {
     Toast t;
     t.text = textStr;
     t.kind = kind.empty() ? L"reply" : kind;
-    t.expire = GetTickCount64() + TOAST_MS;
+    t.expire = GetTickCount64() + (durationMs > 0 ? durationMs : TOAST_MS);
     g_toasts.push_back(std::move(t));
     RelayoutToasts();
 }
@@ -1384,8 +1387,11 @@ void HandleCommand(const std::wstring& line) {
     if (type == L"toast") {
         const JsonValue* text = v.find(L"text");
         const JsonValue* kind = v.find(L"kind");
+        const JsonValue* dur = v.find(L"duration_ms");
+        ULONGLONG durationMs = (dur && dur->type == JsonValue::Num && dur->num > 0)
+                                   ? (ULONGLONG)dur->num : 0;
         if (text && text->type == JsonValue::Str && !text->str.empty())
-            AddToast(text->str, kind ? kind->asStr() : L"reply");
+            AddToast(text->str, kind ? kind->asStr() : L"reply", durationMs);
     } else if (type == L"image") {
         const JsonValue* url = v.find(L"url");
         const JsonValue* alt = v.find(L"alt");

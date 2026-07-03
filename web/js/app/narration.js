@@ -56,9 +56,25 @@ function enqueueNarration(text) {
   if (!cleaned) return Promise.resolve();
   const promise = synthesizeSentence(cleaned);
   return new Promise((resolveItem) => {
-    ttsQueue.push({ promise, resolveItem });
+    ttsQueue.push({ promise, resolveItem, text: cleaned });
     processTtsQueue();
   });
+}
+
+// Push a reply sentence to the native overlay as it starts being narrated, timed to how long it
+// takes to speak at the current TTS speed, so the toast stays up for exactly the spoken sentence.
+// (The backend skips its own fixed-timer reply toasts when narration is on — see client_overlay_toasts.)
+function pushOverlayNarrationToast(text) {
+  if (!text) return;
+  const rate = narrationAudio.playbackRate || 1;
+  const seconds = Number.isFinite(narrationAudio.duration) ? narrationAudio.duration / rate : 0;
+  // A little padding so it lingers a touch past the last word instead of vanishing on the syllable.
+  const durationMs = seconds > 0 ? Math.round(seconds * 1000) + 500 : 0;
+  fetch("/api/overlay/toast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, kind: "reply", duration_ms: durationMs }),
+  }).catch(() => {});
 }
 
 // Whether the currently selected TTS path needs the browser to enforce
@@ -95,6 +111,14 @@ async function processTtsQueue() {
       await new Promise((resolve) => {
         pendingNarrationResolve = resolve;
         narrationAudio.onended = resolve;
+        // Once metadata is loaded the duration is known — push the overlay toast for this sentence
+        // timed to its spoken length. loadedmetadata may already have fired, so also try on play.
+        const pushToast = () => pushOverlayNarrationToast(item.text);
+        if (Number.isFinite(narrationAudio.duration) && narrationAudio.duration > 0) {
+          pushToast();
+        } else {
+          narrationAudio.addEventListener("loadedmetadata", pushToast, { once: true });
+        }
         narrationAudio.play();
       });
     }

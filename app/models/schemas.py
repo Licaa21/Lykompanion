@@ -11,6 +11,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     include_screenshot: bool = False
+    # When true (narration is on), the frontend pushes reply toasts to the overlay itself, timed to
+    # each narrated sentence — so the backend skips its own fixed-timer reply-toast push to avoid
+    # duplicates. See app/api/chat.py / web/js/app/narration.js.
+    client_overlay_toasts: bool = False
 
 
 class ChatResponse(BaseModel):

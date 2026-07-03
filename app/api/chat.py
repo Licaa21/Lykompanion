@@ -513,12 +513,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     continue
                 if event["type"] == "delta":
                     full_reply += event["text"]
-                    # Push completed sentences to the overlay as they stream (even mid
-                    # tool-loop, before the full reply lands) so it keeps pace with TTS.
-                    overlay_buf += event["text"]
-                    sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
-                    for sentence in sentences:
-                        overlay_process.push_toast(sentence, "reply")
+                    # Push completed sentences to the overlay as they stream (even mid tool-loop,
+                    # before the full reply lands). Skipped when the client drives toasts itself
+                    # (narration on) so it can time them to the spoken sentence at any TTS speed.
+                    if not request.client_overlay_toasts:
+                        overlay_buf += event["text"]
+                        sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
+                        for sentence in sentences:
+                            overlay_process.push_toast(sentence, "reply")
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "volume":
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
@@ -529,7 +531,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
-        if overlay_buf.strip():  # flush any trailing partial sentence
+        if overlay_buf.strip():  # flush any trailing partial sentence (backend-driven only)
             overlay_process.push_toast(overlay_buf, "reply")
         for img_url, img_alt in _extract_overlay_images(full_reply):
             overlay_process.push_image(img_url, img_alt)
@@ -595,6 +597,7 @@ async def chat_voice_stream(
     audio: UploadFile,
     history: str = Form("[]"),
     include_screenshot: bool = Form(False),
+    client_overlay_toasts: bool = Form(False),
 ) -> StreamingResponse:
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
     but emits SSE deltas so the reply types in live rather than appearing all at once."""
@@ -629,10 +632,12 @@ async def chat_voice_stream(
             async for event in _peel_transcript(_stream_chat_with_tools(messages, model=model, source="chat_voice_stream")):
                 if event["type"] == "delta":
                     full_reply += event["text"]
-                    overlay_buf += event["text"]
-                    sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
-                    for sentence in sentences:
-                        overlay_process.push_toast(sentence, "reply")
+                    # Skipped when the client drives toasts itself (narration on) — see /stream.
+                    if not client_overlay_toasts:
+                        overlay_buf += event["text"]
+                        sentences, overlay_buf = _extract_overlay_sentences(overlay_buf)
+                        for sentence in sentences:
+                            overlay_process.push_toast(sentence, "reply")
                     yield f"data: {json.dumps({'delta': event['text']})}\n\n"
                 elif event["type"] == "transcript":
                     # Raw-audio turns: peeled from the model's reply prefix. Delivered only in
