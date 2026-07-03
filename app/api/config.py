@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core.config import persist_env_values, settings
 from app.models.schemas import CompanionConfig
@@ -232,4 +232,30 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     persist_env_values(env_updates)
 
+    return await get_config()
+
+
+# Secret settings that can be cleared individually (the ✕ next to each key field), mapping the
+# settings-field name the frontend sends to its .env variable. Allowlisted so this endpoint can
+# only ever blank a known key, never arbitrary settings.
+_CLEARABLE_KEYS = {
+    "openrouter_api_key": "OPENROUTER_API_KEY",
+    "openrouter_management_key": "OPENROUTER_MANAGEMENT_KEY",
+    "google_ai_studio_api_key": "GOOGLE_AI_STUDIO_API_KEY",
+    "google_tts_api_key": "GOOGLE_TTS_API_KEY",
+    "custom_openai_api_key": "CUSTOM_OPENAI_API_KEY",
+    "igdb_client_secret": "IGDB_CLIENT_SECRET",
+    "steam_api_key": "STEAM_API_KEY",
+}
+
+
+@router.delete("/key/{field}", response_model=CompanionConfig)
+async def clear_key(field: str) -> CompanionConfig:
+    """Immediately clear one stored secret (its ✕ button), no full Save needed. Blanks the live
+    setting and persists the empty value to .env."""
+    env_var = _CLEARABLE_KEYS.get(field)
+    if env_var is None:
+        raise HTTPException(status_code=400, detail="Unknown or non-clearable key field.")
+    setattr(settings, field, "")
+    persist_env_values({env_var: ""})
     return await get_config()

@@ -690,6 +690,10 @@ async function saveSettings(saveButton) {
   }
   applyConfigToForm(updatedCfg);
   flashSaved(saveButton);
+  // Close the modal this Save lives in (Settings, or the Gaming Journal's Game Awareness tab)
+  // after a beat, so the "Saved" confirmation is visible before it dismisses.
+  const modal = saveButton.closest(".modal-overlay");
+  if (modal) setTimeout(() => closeModal(modal), 650);
 }
 
 document.getElementById("cfg-save").addEventListener("click", (event) => saveSettings(event.currentTarget));

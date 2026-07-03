@@ -221,12 +221,42 @@ function flashSaved(button) {
   }, 1000);
 }
 
-// Clear button for API key fields
-settingsModal.addEventListener("click", (e) => {
+// Clear (✕) button for API key fields. If a key is actually stored server-side (its box shows
+// the "(set)" placeholder and holds no freshly-typed text), confirm and delete it immediately —
+// no full "Save changes" needed. Otherwise just discard the unsaved typed text locally.
+const CLEARABLE_KEY_FIELDS = {
+  "cfg-api-key": "openrouter_api_key",
+  "cfg-management-key": "openrouter_management_key",
+  "cfg-google-ai-studio-key": "google_ai_studio_api_key",
+  "cfg-google-tts-api-key": "google_tts_api_key",
+  "cfg-custom-openai-key": "custom_openai_api_key",
+  "cfg-igdb-client-secret": "igdb_client_secret",
+  "cfg-steam-api-key": "steam_api_key",
+};
+
+settingsModal.addEventListener("click", async (e) => {
   const btn = e.target.closest(".clear-key-btn");
   if (!btn) return;
   const input = btn.closest(".key-field")?.querySelector("input");
   if (!input) return;
+
+  const field = CLEARABLE_KEY_FIELDS[input.id];
+  const isStored = input.placeholder.includes("(set)");
+
+  // A key that's actually saved: confirm, then delete it right away.
+  if (field && isStored && !input.value) {
+    if (!confirm("Delete this saved key? This takes effect immediately — no need to press Save changes.")) return;
+    const response = await fetch(`/api/config/key/${field}`, { method: "DELETE" });
+    if (!response.ok) return;
+    const cfg = await response.json();
+    input.value = "";
+    input.placeholder = "Not set";
+    delete input.dataset.cleared;
+    updateSetupBanner(cfg);  // the cleared key may have been the active provider's
+    return;
+  }
+
+  // Otherwise: just clear the unsaved typed text (a Save will persist the empty value).
   input.value = "";
   input.dataset.cleared = "true";
   input.dispatchEvent(new Event("change", { bubbles: true }));
