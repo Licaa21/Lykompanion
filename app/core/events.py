@@ -50,23 +50,24 @@ def publish_threadsafe(event: dict) -> None:
         _loop.call_soon_threadsafe(publish, event)
 
 
-# --- Native overlay window hook ---
-# The desktop launcher (run_app.py) runs the server in the same process and registers a
-# callable here so the layout editor can temporarily lift the overlay window's win32
-# click-through styles (JS alone can't - they're window styles, not CSS). Unregistered
-# (dev uvicorn, overlay open in a normal browser tab) it's a harmless no-op.
+# --- Native overlay window hooks ---
+# The desktop launcher (run_app.py) runs the server in the same process and registers one
+# callable per overlay widget window here so the layout editor can temporarily lift each
+# window's win32 click-through styles (JS alone can't - they're window styles, not CSS).
+# There is one small native window per widget (toasts, game-state panel) rather than a
+# single full-screen one - see CLAUDE.md's in-game overlay section for why. Unregistered
+# (dev uvicorn, an overlay page open in a normal browser tab) this is a harmless no-op.
 
-_overlay_click_through_setter = None
+_overlay_click_through_setters: list = []
 
 
 def register_overlay_click_through_setter(setter) -> None:
-    global _overlay_click_through_setter
-    _overlay_click_through_setter = setter
+    _overlay_click_through_setters.append(setter)
 
 
 def set_overlay_click_through(enabled: bool) -> None:
-    if _overlay_click_through_setter is not None:
-        _overlay_click_through_setter(enabled)
+    for setter in _overlay_click_through_setters:
+        setter(enabled)
 
 
 # --- Overlay edit-mode state ---

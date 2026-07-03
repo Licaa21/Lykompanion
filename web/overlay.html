@@ -3,13 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <title>Lykompanion Overlay</title>
-  <!-- Standalone page for the in-game overlay window (see run_app.py). Rendered inside a
-       transparent, click-through, always-on-top WebView2 window - everything here must keep
-       a fully transparent background. Normally nothing is interactive (clicks pass through
-       to the game); the layout editor (Settings → "Edit overlay layout") temporarily lifts
-       the click-through so the elements can be dragged into place. Deliberately NOT part of
-       the web/js/app/*.js chain: it shares no state with the main window and talks to the
-       server on its own (SSE + polling). -->
+  <!-- One instance of this page is loaded per overlay widget, each in its own small native
+       window sized and positioned by run_app.py (?widget=toasts or ?widget=game-state picks
+       which one to render) - NOT one shared full-screen window. A full-screen transparent
+       WebView2 window proved unreliable across several win32/DWM attempts (see CLAUDE.md's
+       in-game overlay section); small per-widget windows are a far more common, better-tested
+       case for real desktop transparency. Everything here must keep a fully transparent
+       background. Normally nothing is interactive (clicks pass through to the game); the
+       layout editor (Settings → "Edit layout", or Ctrl+Shift+O) temporarily lifts the
+       click-through so the whole widget window can be dragged to reposition it - dragging
+       moves the actual native window (via a Python-exposed move_overlay bridge) and saves on
+       release, there is no separate Save/Cancel step. Deliberately NOT part of the
+       web/js/app/*.js chain: it shares no state with the main window and talks to the server
+       on its own (SSE + polling). -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -21,20 +27,39 @@
       user-select: none;
       cursor: default;
     }
+    body.editing {
+      outline: 2px dashed #7aa2f7;
+      outline-offset: -2px;
+      background: rgba(122, 162, 247, 0.10);
+      cursor: move;
+    }
 
-    /* --- Toast stack (companion replies + fired reminders), bottom-right by default --- */
+    #edit-hint {
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      right: 8px;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #7aa2f7;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      display: none;
+      pointer-events: none;
+    }
+    body.editing #edit-hint { display: block; }
+
+    /* --- Toasts widget (companion replies + fired reminders) --- */
     #toast-stack {
-      position: fixed;
-      right: 24px;
-      bottom: 48px;
-      width: min(420px, 40vw);
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
       display: flex;
       flex-direction: column;
       gap: 10px;
-      align-items: flex-end;
     }
     .toast {
-      width: 100%;
       background: rgba(16, 18, 26, 0.82);
       border: 1px solid rgba(255, 255, 255, 0.14);
       border-left: 3px solid #7aa2f7;
@@ -63,13 +88,12 @@
       margin-bottom: 4px;
     }
 
-    /* --- Game-state mini panel, top-right by default --- */
+    /* --- Game-state widget --- */
     #gs-panel {
-      position: fixed;
-      top: 24px;
-      right: 24px;
-      min-width: 200px;
-      max-width: 320px;
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
       background: rgba(16, 18, 26, 0.75);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 10px;
@@ -93,58 +117,15 @@
     .gs-row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
     .gs-label { opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .gs-value { font-weight: 600; text-align: right; }
-
-    /* --- Layout editor --- */
-    body.editing .draggable {
-      outline: 2px dashed #7aa2f7;
-      outline-offset: 4px;
-      cursor: move;
-    }
-    #edit-toolbar {
-      position: fixed;
-      top: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: none;
-      align-items: center;
-      gap: 12px;
-      background: rgba(16, 18, 26, 0.92);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 10px;
-      padding: 10px 16px;
-      color: #e8eaf2;
-      font-size: 14px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-      z-index: 10;
-    }
-    body.editing #edit-toolbar { display: flex; }
-    #edit-toolbar button {
-      font: inherit;
-      color: #e8eaf2;
-      background: rgba(122, 162, 247, 0.25);
-      border: 1px solid rgba(122, 162, 247, 0.6);
-      border-radius: 6px;
-      padding: 5px 14px;
-      cursor: pointer;
-    }
-    #edit-toolbar button:hover { background: rgba(122, 162, 247, 0.4); }
-    #edit-toolbar #edit-cancel {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(255, 255, 255, 0.3);
-    }
   </style>
 </head>
 <body>
-  <div id="gs-panel" class="draggable" data-element-id="game-state">
+  <div id="edit-hint">Drag to move · Ctrl+Shift+O to finish</div>
+  <div id="gs-panel">
     <div id="gs-title"></div>
     <div id="gs-rows"></div>
   </div>
-  <div id="toast-stack" class="draggable" data-element-id="toasts"></div>
-  <div id="edit-toolbar">
-    <span id="edit-label"></span>
-    <button id="edit-save" type="button">Save layout</button>
-    <button id="edit-cancel" type="button">Cancel</button>
-  </div>
+  <div id="toast-stack"></div>
   <script src="js/overlay.js"></script>
 </body>
 </html>

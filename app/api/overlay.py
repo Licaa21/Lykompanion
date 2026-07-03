@@ -1,9 +1,11 @@
-"""SSE feed for the in-game overlay window (web/overlay.html).
+"""SSE feed + layout API for the in-game overlay (web/overlay.html, one small native window
+per widget - see CLAUDE.md's in-game overlay section).
 
-The overlay is a separate browser context from the main app window, so it can't see the
-chat stream directly - instead it subscribes here and receives events published to
-app.core.events: finished companion replies and fired reminders. Game state is not
-relayed through this bus - the overlay polls /api/game-state for it like the main UI does.
+The overlay windows are a separate browser context from the main app window, so they can't
+see the chat stream directly - instead each subscribes here and receives events published to
+app.core.events: finished companion replies, fired reminders, and edit-mode toggles. Game
+state is not relayed through this bus - the overlay polls /api/game-state for it like the
+main UI does.
 """
 
 import asyncio
@@ -18,8 +20,9 @@ from app.core import events, overlay_layouts
 router = APIRouter(prefix="/api/overlay", tags=["overlay"])
 
 
-class OverlayLayout(BaseModel):
-    layout: dict
+class OverlayElementPosition(BaseModel):
+    x: float
+    y: float
 
 
 class OverlayEditMode(BaseModel):
@@ -54,9 +57,12 @@ async def get_layout(process: str) -> dict:
     return {"layout": overlay_layouts.get_layout(process)}
 
 
-@router.put("/layout/{process}")
-async def put_layout(process: str, payload: OverlayLayout) -> dict:
-    return {"layout": overlay_layouts.save_layout(process, payload.layout)}
+@router.put("/layout/{process}/{element_id}")
+async def put_element_position(process: str, element_id: str, payload: OverlayElementPosition) -> dict:
+    """Saves one widget's position, merged into the process's stored layout - each widget
+    window (toasts, game-state panel) drags and saves independently, so this must not clobber
+    another widget's concurrently-saved position (see overlay_layouts.save_element_position)."""
+    return {"layout": overlay_layouts.save_element_position(process, element_id, payload.x, payload.y)}
 
 
 @router.post("/edit-mode")

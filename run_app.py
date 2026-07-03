@@ -187,6 +187,23 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+def _make_overlay_move_api(overlay_window):
+    """Return an object exposed to a single overlay widget window's JS (via win.expose()) so
+    the layout editor can move the whole native window as the user drags - each widget is its
+    own small window (see the module docstring above `main`'s overlay section), so
+    "repositioning an element" now means moving that window, not re-laying-out a shared canvas.
+    window.move() reaches into win32 SetWindowPos directly (see pywebview's winforms.py), which
+    is safe to call from the background thread pywebview runs exposed JS calls on."""
+
+    def move_overlay(x: int, y: int) -> None:
+        try:
+            overlay_window.move(int(x), int(y))
+        except Exception:
+            pass  # window already destroyed or mid-teardown - drag session is ending anyway
+
+    return move_overlay
+
+
 def _apply_overlay_base_styles(overlay_window) -> None:
     """One-time styles applied at window init, independent of click-through toggling:
     WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus, even
@@ -342,56 +359,84 @@ def main() -> None:
     win.expose(_make_download_api(win))
     win.events.loaded += lambda: _lock_down_webview(win)
 
-    # In-game overlay: a second, transparent, click-through, always-on-top window covering the
-    # primary screen (web/overlay.html renders replies/reminders/game state over the game).
-    # The server runs in this same process, so this reads the live Settings singleton - but
-    # only at launch: enabling the setting takes effect on the next start.
+    # In-game overlay: one small transparent, click-through, always-on-top window per widget
+    # (web/overlay.html?widget=<id> renders just that widget), rather than a single full-screen
+    # window - full-screen WebView2 transparency proved unreliable across several attempts at
+    # win32/DWM composition flags (see CLAUDE.md's in-game overlay section for the history);
+    # small windows are a far more common, better-tested case for this. The server runs in this
+    # same process, so this reads the live Settings singleton - but only at launch: enabling the
+    # setting takes effect on the next start.
     from app.core.config import settings as app_settings
     if app_settings.overlay_enabled:
-        overlay_win = webview.create_window(
-            "Lykompanion Overlay",
-            f"{URL}/overlay.html?token={API_TOKEN}",
-            x=0,
-            y=0,
-            width=ctypes.windll.user32.GetSystemMetrics(0),
-            height=ctypes.windll.user32.GetSystemMetrics(1),
-            frameless=True,
-            easy_drag=False,
-            on_top=True,
-            transparent=True,
-            focus=False,
-        )
-        _set_overlay_click_through = _make_overlay_click_through_setter(overlay_win)
-
-        def _init_overlay_styles() -> None:
-            # WS_EX_LAYERED must be set as early as possible, ideally before WebView2's first
-            # paint, so DWM engages per-pixel compositing from the start instead of showing an
-            # opaque white frame first - `shown` fires as soon as the native window appears,
-            # well before `loaded` (page content finished loading).
-            _apply_overlay_base_styles(overlay_win)
-            _set_overlay_click_through(True)
-            # WebView2 spawns its Chromium child windows asynchronously - a single pass right
-            # at `shown` can miss late arrivals, so sweep once more shortly after.
-            threading.Timer(2.0, lambda: _set_overlay_click_through(True)).start()
-
-        overlay_win.events.shown += _init_overlay_styles
-
-        # Let the layout-editor endpoint (POST /api/overlay/edit-mode) lift/restore the
-        # click-through styles - the server runs in this same process.
         from app.core import events as overlay_events
-        overlay_events.register_overlay_click_through_setter(_set_overlay_click_through)
+        from app.core import overlay_layouts
+
+        screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+        screen_h = ctypes.windll.user32.GetSystemMetrics(1)
+        saved_layout = overlay_layouts.get_layout(overlay_layouts.DEFAULT_KEY)
+
+        MARGIN = 24
+        # (element_id, width, height, default top-left in screen pixels)
+        OVERLAY_WIDGETS = [
+            ("toasts", 440, 520, (screen_w - 440 - MARGIN, screen_h - 520 - MARGIN)),
+            ("game-state", 340, 220, (screen_w - 340 - MARGIN, MARGIN)),
+        ]
+
+        overlay_windows: dict = {}
+
+        for element_id, width, height, default_pos in OVERLAY_WIDGETS:
+            saved = saved_layout.get(element_id)
+            if saved:
+                x, y = int(saved["x"] * screen_w), int(saved["y"] * screen_h)
+            else:
+                x, y = default_pos
+
+            widget_win = webview.create_window(
+                f"Lykompanion Overlay ({element_id})",
+                f"{URL}/overlay.html?token={API_TOKEN}&widget={element_id}",
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                frameless=True,
+                on_top=True,
+                transparent=True,
+                focus=False,
+            )
+            overlay_windows[element_id] = widget_win
+            widget_win.expose(_make_overlay_move_api(widget_win))
+
+            set_click_through = _make_overlay_click_through_setter(widget_win)
+
+            def _init_widget_styles(w=widget_win, sct=set_click_through) -> None:
+                # WS_EX_LAYERED must be set as early as possible, ideally before WebView2's
+                # first paint, so DWM engages per-pixel compositing from the start instead of
+                # showing an opaque frame first - `shown` fires as soon as the native window
+                # appears, well before `loaded` (page content finished loading).
+                _apply_overlay_base_styles(w)
+                sct(True)
+                # WebView2 spawns its Chromium child windows asynchronously - a single pass
+                # right at `shown` can miss late arrivals, so sweep once more shortly after.
+                threading.Timer(2.0, lambda: sct(True)).start()
+
+            widget_win.events.shown += _init_widget_styles
+
+            # Let the layout-editor endpoint (POST /api/overlay/edit-mode) lift/restore this
+            # widget's click-through styles - the server runs in this same process.
+            overlay_events.register_overlay_click_through_setter(set_click_through)
 
         _start_overlay_hotkey_listener()
 
-        def _close_overlay() -> None:
-            # Closing the main window must take the overlay with it - otherwise an invisible
-            # click-through window keeps the app alive with no way to close it.
-            try:
-                overlay_win.destroy()
-            except Exception:
-                pass
+        def _close_overlays() -> None:
+            # Closing the main window must take the overlay widgets with it - otherwise
+            # invisible click-through windows keep the app alive with no way to close it.
+            for widget_win in overlay_windows.values():
+                try:
+                    widget_win.destroy()
+                except Exception:
+                    pass
 
-        win.events.closed += _close_overlay
+        win.events.closed += _close_overlays
 
     # private_mode=False required — without it pywebview ignores storage_path and uses
     # an in-memory session, so permissions and download prefs are never written to disk.

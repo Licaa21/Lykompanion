@@ -1,11 +1,14 @@
-// In-game overlay logic (web/overlay.html). Runs in its own WebView2 window, isolated from
-// the main app - it gets companion replies and fired reminders over the /api/overlay/events
-// SSE bus and polls /api/game-state for the tracker snapshot. Normally display-only (the
-// window is click-through); the layout editor (triggered from the main window's Settings)
-// lifts the click-through so the elements can be dragged, then positions are saved per-game
-// via /api/overlay/layout.
+// In-game overlay logic (web/overlay.html), shared by both widget windows (toasts,
+// game-state) that run_app.py creates - each is its own small native window, isolated from
+// the main app and from each other. This script only acts on the widget named by the
+// ?widget= query param (see WIDGET below); everything else in the page stays hidden by CSS.
+// Data flow: SSE for companion replies/reminders/edit-mode toggles, polling for game state
+// and config. Layout editing moves the ACTUAL native window via a Python-exposed bridge
+// (window.pywebview.api.move_overlay) and saves the resulting position on drag release.
 
-const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const PARAMS = new URLSearchParams(location.search);
+const TOKEN = PARAMS.get("token") || "";
+const WIDGET = PARAMS.get("widget") || "";
 
 function api(path) {
   // EventSource can't set headers, and keeping one URL style everywhere is simpler - the
@@ -13,8 +16,9 @@ function api(path) {
   return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(TOKEN)}`;
 }
 
-// Live-disable: the launcher only creates this window when overlay_enabled is on, but the
-// user can turn the setting off mid-session - hide everything until the next launch.
+// Live-disable: the launcher only creates these windows when overlay_enabled is on, but the
+// user can turn the setting off mid-session - hide content (can't hide the native window
+// itself from here) until the next launch.
 let overlayEnabled = true;
 
 async function pollConfig() {
@@ -24,46 +28,51 @@ async function pollConfig() {
   } catch (err) {
     /* transient - keep last known state */
   }
-  document.body.style.display = overlayEnabled || editing ? "" : "none";
 }
 
 // --- Per-game layout ---
-// Positions live server-side (data/overlay_layouts.json) keyed by process, "default" when
-// no game is tracked. Values are the element's top-left corner as viewport fractions.
+// Positions live server-side (data/overlay_layouts.json) keyed by process, "default" when no
+// game is tracked - each entry is THIS widget's native window's top-left corner as a fraction
+// of the primary screen. Switching games moves the window via the Python bridge instead of
+// re-laying-out a shared canvas (there is no shared canvas anymore, one widget = one window).
 
-const DRAGGABLES = Array.from(document.querySelectorAll(".draggable"));
 let currentProcess = null; // lowercased tracked process, or null when not in a game
-let layoutKey = null; // process the currently applied layout was fetched for
+let appliedLayoutKey = null; // process the window's current position was last moved for
 
-function applyPosition(el, pos) {
-  if (pos) {
-    el.style.left = `${pos.x * window.innerWidth}px`;
-    el.style.top = `${pos.y * window.innerHeight}px`;
-    el.style.right = "auto";
-    el.style.bottom = "auto";
-  } else {
-    // No saved position - fall back to the stylesheet defaults.
-    el.style.left = "";
-    el.style.top = "";
-    el.style.right = "";
-    el.style.bottom = "";
-  }
+function moveWindow(x, y) {
+  window.pywebview?.api?.move_overlay(Math.round(x), Math.round(y));
 }
 
-async function loadLayout(force) {
+async function applyLayoutForProcess(force) {
   const key = currentProcess || "default";
-  if (!force && key === layoutKey) return;
+  if (!force && key === appliedLayoutKey) return;
   let layout;
   try {
     ({ layout } = await fetch(api(`/api/overlay/layout/${encodeURIComponent(key)}`)).then((r) => r.json()));
   } catch (err) {
-    return; // transient - retried on the next game-state tick via the layoutKey check
+    return; // transient - retried on the next game-state tick via the appliedLayoutKey check
   }
-  layoutKey = key;
-  for (const el of DRAGGABLES) applyPosition(el, layout[el.dataset.elementId]);
+  appliedLayoutKey = key;
+  const pos = layout[WIDGET];
+  if (pos) moveWindow(pos.x * screen.width, pos.y * screen.height);
 }
 
-// --- Toasts (replies + reminders) ---
+async function saveCurrentPosition() {
+  const key = currentProcess || "default";
+  const payload = { x: window.screenX / screen.width, y: window.screenY / screen.height };
+  try {
+    await fetch(api(`/api/overlay/layout/${encodeURIComponent(key)}/${encodeURIComponent(WIDGET)}`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    /* the drag itself already took effect visually - a failed save just means it reverts
+       next time this game's layout is (re-)applied, not silently corrupting anything */
+  }
+}
+
+// --- Toasts widget ---
 
 const toastStack = document.getElementById("toast-stack");
 const MAX_TOASTS = 4;
@@ -110,7 +119,7 @@ function showToast(text, kind) {
   }, lingerMs);
 }
 
-// --- Game-state mini panel ---
+// --- Game-state widget ---
 
 const gsPanel = document.getElementById("gs-panel");
 const gsTitle = document.getElementById("gs-title");
@@ -138,8 +147,10 @@ async function pollGameState() {
     return; // transient - next tick catches up
   }
   currentProcess = state.tracking && state.process ? state.process.toLowerCase() : null;
-  loadLayout(false);
-  if (editing) return; // editor owns the panel's visibility and content right now
+  // Don't auto-reposition mid-drag - the user is actively moving this window right now.
+  if (!editing) applyLayoutForProcess(false);
+
+  if (WIDGET !== "game-state" || editing) return; // editor owns visibility/content right now
 
   const tracking = overlayEnabled && state.enabled && state.tracking;
   gsPanel.classList.toggle("visible", Boolean(tracking));
@@ -154,32 +165,29 @@ async function pollGameState() {
 }
 
 // --- Layout editor ---
-// Entered via SSE edit_mode event (the main window POSTs /api/overlay/edit-mode, which also
-// lifts the native click-through). Elements get sample content so there is something to see
-// and drag even when idle, then Save PUTs the fractions for the current game (or "default").
+// Entered via SSE edit_mode event (Settings "Edit layout" button, or the Ctrl+Shift+O global
+// hotkey - both toggle click-through for every overlay widget window server-side). Dragging
+// moves the real native window via the Python bridge and saves on release - no Save/Cancel.
 
 let editing = false;
 let sampleToast = null;
+let drag = null;
 
 function enterEditMode() {
   if (editing) return;
   editing = true;
   document.body.classList.add("editing");
-  document.body.style.display = "";
 
-  document.getElementById("edit-label").textContent =
-    `Overlay layout — ${currentProcess || "default (no game)"} (Ctrl+Shift+O to exit)`;
-
-  // Sample content so both elements are visible and meaningfully sized while dragging.
-  sampleToast = buildToast("Companion replies and reminders will appear here.", "reply");
-  sampleToast.classList.add("visible");
-  toastStack.appendChild(sampleToast);
-  if (!gsPanel.classList.contains("visible")) {
+  if (WIDGET === "toasts") {
+    sampleToast = buildToast("Companion replies and reminders will appear here.", "reply");
+    sampleToast.classList.add("visible");
+    toastStack.appendChild(sampleToast);
+  } else if (WIDGET === "game-state") {
     gsTitle.textContent = currentProcess || "Game state";
     gsRows.innerHTML = "";
     renderGsRow("Example tracker", "42");
+    gsPanel.classList.add("visible");
   }
-  gsPanel.classList.add("visible");
 }
 
 function exitEditMode() {
@@ -190,77 +198,29 @@ function exitEditMode() {
     sampleToast.remove();
     sampleToast = null;
   }
-  gsPanel.classList.remove("visible");
-  // Re-fetch positions regardless of how editing ended (Save already persisted them server
-  // side, so this is a no-op; Cancel or exiting via the hotkey did not, so this discards any
-  // unsaved drags instead of leaving them applied only in this DOM).
-  loadLayout(true);
-  pollGameState(); // restore real panel visibility/content
-  pollConfig(); // re-hide everything if the overlay was live-disabled while editing
-}
-
-async function postEditMode(enabled) {
-  try {
-    await fetch(api("/api/overlay/edit-mode"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    });
-  } catch (err) {
-    /* the SSE echo won't come; leave current mode as-is */
+  if (WIDGET === "game-state") {
+    gsPanel.classList.remove("visible");
+    pollGameState(); // restore real content/visibility
   }
 }
 
-document.getElementById("edit-save").addEventListener("click", async () => {
-  const layout = {};
-  for (const el of DRAGGABLES) {
-    const rect = el.getBoundingClientRect();
-    layout[el.dataset.elementId] = {
-      x: rect.left / window.innerWidth,
-      y: rect.top / window.innerHeight,
-    };
-  }
-  const key = currentProcess || "default";
-  try {
-    await fetch(api(`/api/overlay/layout/${encodeURIComponent(key)}`), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layout }),
-    });
-    layoutKey = key;
-  } catch (err) {
-    /* keep editing; the user can retry Save */
-    return;
-  }
-  postEditMode(false);
+document.body.addEventListener("pointerdown", (e) => {
+  if (!editing) return;
+  drag = { grabScreenX: e.screenX, grabScreenY: e.screenY, winX: window.screenX, winY: window.screenY };
+  document.body.setPointerCapture(e.pointerId);
 });
-
-document.getElementById("edit-cancel").addEventListener("click", async () => {
-  await loadLayout(true); // discard unsaved drags by re-applying the stored layout
-  postEditMode(false);
+document.body.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  moveWindow(drag.winX + (e.screenX - drag.grabScreenX), drag.winY + (e.screenY - drag.grabScreenY));
 });
-
-// Dragging: plain pointer events, positions pinned to left/top in pixels while moving.
-for (const el of DRAGGABLES) {
-  let grab = null;
-  el.addEventListener("pointerdown", (e) => {
-    if (!editing) return;
-    const rect = el.getBoundingClientRect();
-    grab = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
-    el.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  el.addEventListener("pointermove", (e) => {
-    if (!grab) return;
-    const rect = el.getBoundingClientRect();
-    const x = Math.min(Math.max(e.clientX - grab.dx, 0), window.innerWidth - rect.width);
-    const y = Math.min(Math.max(e.clientY - grab.dy, 0), window.innerHeight - rect.height);
-    applyPosition(el, { x: x / window.innerWidth, y: y / window.innerHeight });
-  });
-  const release = () => { grab = null; };
-  el.addEventListener("pointerup", release);
-  el.addEventListener("pointercancel", release);
-}
+document.body.addEventListener("pointerup", () => {
+  if (!drag) return;
+  drag = null;
+  saveCurrentPosition();
+});
+document.body.addEventListener("pointercancel", () => {
+  drag = null;
+});
 
 // --- SSE event feed ---
 // EventSource auto-reconnects on drop, so no manual retry loop is needed.
@@ -279,7 +239,7 @@ function connectEvents() {
       else exitEditMode();
       return;
     }
-    if (!overlayEnabled) return;
+    if (!overlayEnabled || editing || WIDGET !== "toasts") return;
     if (event.type === "reply") showToast(event.text, "reply");
     else if (event.type === "reminder") showToast(event.text, "reminder");
   };

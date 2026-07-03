@@ -1,9 +1,11 @@
 """Per-game overlay element positions - data/overlay_layouts.json.
 
-Shape: {process: {element_id: {"x": 0.0-1.0, "y": 0.0-1.0}}} where x/y are the element's
-top-left corner as fractions of the overlay viewport (resolution-independent). The special
-process key "default" is used when no game is being tracked, and is the fallback for games
-without a saved layout of their own.
+Shape: {process: {element_id: {"x": 0.0-1.0, "y": 0.0-1.0}}} where x/y are a widget window's
+top-left corner as fractions of the primary screen's resolution (resolution-independent -
+each widget, e.g. "toasts" or "game-state", is its own small native window, not an element
+positioned within one shared full-screen overlay window; see CLAUDE.md's in-game overlay
+section for why). The special process key "default" is used when no game is being tracked,
+and is the fallback for games without a saved layout of their own.
 """
 
 import json
@@ -47,11 +49,30 @@ def get_layout(process: str) -> dict:
     return layouts.get(key) or layouts.get(DEFAULT_KEY) or {}
 
 
+def _write(layouts: dict) -> None:
+    LAYOUTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAYOUTS_PATH.write_text(json.dumps(layouts, indent=2), encoding="utf-8")
+
+
 def save_layout(process: str, layout: dict) -> dict:
     clean = _sanitize(layout)
     with _lock:
         layouts = _load_all()
         layouts[process.lower()] = clean
-        LAYOUTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        LAYOUTS_PATH.write_text(json.dumps(layouts, indent=2), encoding="utf-8")
+        _write(layouts)
     return clean
+
+
+def save_element_position(process: str, element_id: str, x: float, y: float) -> dict:
+    """Merges one widget's position into the process's stored layout, leaving any other
+    widget's saved position untouched - each widget window saves independently as the user
+    drags it, so a read-modify-write here (rather than always replacing the whole layout)
+    avoids one widget's save clobbering another's concurrent drag."""
+    with _lock:
+        layouts = _load_all()
+        key = process.lower()
+        layout = dict(layouts.get(key) or {})
+        layout[element_id] = {"x": min(max(float(x), 0.0), 1.0), "y": min(max(float(y), 0.0), 1.0)}
+        layouts[key] = layout
+        _write(layouts)
+    return layout
