@@ -508,6 +508,7 @@ function applyConfigToForm(cfg) {
 
   gameStateEnabledInput.checked = cfg.game_state_ocr_enabled;
   updateGameStateDependentVisibility();
+  document.getElementById("cfg-overlay-enabled").checked = cfg.overlay_enabled;
   document.getElementById("cfg-game-state-training-enabled").checked = cfg.game_state_training_enabled;
   document.getElementById("cfg-proactive-enabled").checked = cfg.proactive_messages_enabled;
   document.getElementById("cfg-proactive-interval").value = cfg.proactive_min_interval_minutes ?? 15;
@@ -651,6 +652,7 @@ async function saveSettings(saveButton) {
     igdb_client_secret: keyFieldValue("cfg-igdb-client-secret"),
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
+    overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),

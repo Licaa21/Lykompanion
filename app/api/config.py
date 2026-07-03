@@ -19,6 +19,7 @@ async def get_config() -> CompanionConfig:
         custom_openai_base_url=settings.custom_openai_base_url,
         custom_openai_api_key_set=bool(settings.custom_openai_api_key),
         memory_extraction_model=settings.memory_extraction_model or None,
+        overlay_enabled=settings.overlay_enabled,
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
@@ -125,6 +126,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.memory_extraction_model is not None:
         settings.memory_extraction_model = config.memory_extraction_model
         env_updates["MEMORY_EXTRACTION_MODEL"] = config.memory_extraction_model
+
+    settings.overlay_enabled = config.overlay_enabled
+    env_updates["OVERLAY_ENABLED"] = str(config.overlay_enabled)
 
     settings.game_state_ocr_enabled = config.game_state_ocr_enabled
     env_updates["GAME_STATE_OCR_ENABLED"] = str(config.game_state_ocr_enabled)

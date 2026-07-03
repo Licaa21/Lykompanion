@@ -59,14 +59,16 @@
     `SourceConstantAlpha`) announcing edit mode + hotkey. Persisted to
     `%LOCALAPPDATA%\Lykompanion\overlay_layout.json` (`toast`/`panel` positions + `opacity`/`accent`).
     Python is not involved in any of it.
-  - [ ] **Sprint C4 — Python as a thin client.** `app/services/overlay_process.py` does only two
-    things: (1) process lifecycle — launch `overlay/overlay.exe` when game-state tracking starts, ask
-    it to quit when tracking stops and on app exit; (2) push content — connect to the overlay's API
-    and post `toast`/`game_state` JSON (re-add the small in-process publish hook in the chat endpoints
-    for replies + reminders + game-state updates). No layout files, no rendering, no widget logic on
-    the Python side. Restore the `overlay_enabled` setting in the Settings UI. (Note: stale
-    `data/overlay_layouts.json` + `app/core/overlay_layouts.py` from the reverted attempt should be
-    deleted — layouts now live entirely in the C++ overlay.)
+  - [x] **Sprint C4 — Python as a thin client.** DONE (2026-07-03). `app/services/overlay_process.py`
+    is a best-effort thin client: process lifecycle (launch on `game_state.start_tracking`, quit on
+    stop + app-exit `lifespan`) and content push over the overlay's named pipe (persistent write
+    handle, reconnect-once). Hooks: reply toasts from both `/chat/stream` + `/chat/voice/stream` done
+    points; reminder toasts in `reminder_poller._fire`; `game_state` panel pushed on start-tracking
+    and after each extraction window (`_push_overlay_game_state`). `OVERLAY_ENABLED` setting wired
+    through `config.py` / `schemas.py` / `api/config.py` GET+PUT and the Game Awareness settings tab
+    (`#cfg-overlay-enabled`). Documented in README. All 61 tests pass.
+    TODO: delete stale `data/overlay_layouts.json` + any `app/core/overlay_layouts.py` (layouts now
+    live entirely in the C++ overlay). — not present in current tree; verify on cleanup.
   - [ ] **Sprint C5 — ship prebuilt exe.** Commit a prebuilt `overlay/overlay.exe` (plus `build.cmd`
     to rebuild) so users without VS Build Tools get the feature; graceful no-op if the exe is missing.
 

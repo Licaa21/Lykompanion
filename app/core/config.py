@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # in full. 0 = disabled (inject everything, the old behavior).
     memory_rag_limit: int = 30
 
+    # Native in-game overlay (overlay/overlay.exe) - spawned while a game is tracked, fed toasts
+    # and game-state over its named-pipe API. Opt-in, Windows only, needs the built exe.
+    overlay_enabled: bool = False
+
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90

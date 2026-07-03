@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
 from app.models.schemas import ChatMessage, ChatRequest, ChatResponse, ChatTitleRequest, ChatTitleResponse
+from app.services import overlay_process
 from app.services.llm.client import (
     chat_completion,
     chat_completion_message,
@@ -475,6 +476,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
         _schedule_memory_extraction(last_user_message, full_reply)
+        overlay_process.push_toast(full_reply, "reply")
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -590,6 +592,7 @@ async def chat_voice_stream(
         # <transcript> reply prefix - either way the extraction pass now has real user text.
         if transcript:
             _schedule_memory_extraction(transcript, full_reply)
+        overlay_process.push_toast(full_reply, "reply")
 
         yield f"data: {json.dumps({'done': True, 'narration_volume': settings.tts_volume, 'stop_listening': stop_listening, 'transcript': transcript})}\n\n"
 

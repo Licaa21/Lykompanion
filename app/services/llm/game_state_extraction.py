@@ -19,6 +19,7 @@ from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
 from app.services.llm.web_search_tool import execute_web_search
+from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
@@ -326,6 +327,7 @@ async def _capture_tick() -> None:
             _last_process = None
             _reset_window()
             game_state.stop_tracking()
+            overlay_process.stop()
         return
 
     process = foreground
@@ -336,6 +338,9 @@ async def _capture_tick() -> None:
         # right away if any exist, empty otherwise) instead of waiting a full poll window for the
         # first LLM call to populate anything.
         game_state.start_tracking(process)
+        # Spawn the native overlay for this session and show whatever we already have.
+        overlay_process.start()
+        _push_overlay_game_state(process)
         # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
         # seed game-specific trackers + starting training data (no-op if already done/customized).
         schedule_bootstrap(process)
@@ -407,6 +412,24 @@ async def _capture_tick() -> None:
         process,
     )
     await extract_and_apply_game_state(process, frames_to_send, first_b64, last_b64)
+    _push_overlay_game_state(process)
+
+
+def _push_overlay_game_state(process: str) -> None:
+    """Build the overlay panel (label/value rows) from the tracked values and push it.
+    Best-effort — never let an overlay hiccup disturb the poll loop."""
+    try:
+        trackers = game_state_trackers.get_trackers(process)
+        values = game_state.get_values(process)
+        rows: list[list[str]] = []
+        for tracker in trackers:
+            value = values.get(tracker["id"])
+            if value:
+                rows.append([tracker["label"], str(value)])
+        title = process.rsplit(".", 1)[0].replace("_", " ").title()
+        overlay_process.push_game_state(title, rows)
+    except Exception:
+        logger.debug("Overlay game-state push failed", exc_info=True)
 
 
 async def run_game_state_poller() -> None:

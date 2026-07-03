@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from app.core import reminders
+from app.services import overlay_process
 from app.services.system.processes import get_foreground_process_name
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ def _fire(entry: dict) -> None:
     of its own, so a recurring reminder never costs more than the one tool call that created it."""
     reminders.add_pending(entry["message"])
     reminders.mark_fired(entry)
+    overlay_process.push_toast(entry["message"], "reminder")
 
 
 async def _poll_tick() -> None:

@@ -48,6 +48,7 @@ class CompanionConfig(BaseModel):
     custom_openai_api_key: str | None = None
     custom_openai_api_key_set: bool = False
     memory_extraction_model: str | None = None
+    overlay_enabled: bool = False
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
