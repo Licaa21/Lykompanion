@@ -235,23 +235,24 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     simply does not exist anywhere else - no layers, no alpha, fully compatible with GPU
     rendering, and clicks outside the region fall through natively.
 
-    The region is applied through the WinForms `Form.Region` property, NOT raw
-    SetWindowRgn: WinForms tracks its own Region property and can re-assert it (null = no
-    region) over a region set behind its back with the raw API - the round-6a symptom where
-    the startup region didn't stick. Form.Region marshals to SetWindowRgn internally and
-    stays authoritative. Property writes happen on the WinForms UI thread via
-    Control.BeginInvoke."""
+    Regions are applied with raw SetWindowRgn ONLY. Two WinForms Form properties are now
+    confirmed to deadlock the whole app when set on a pywebview window hosting WebView2
+    (the single shared UI thread hangs, every window goes Not Responding at boot):
+    TransparencyKey (round 5 - its setter recreates the window handle) and Region (round 6b
+    - hung inside the property setter, last log line was the base-styles one right before
+    it). Never touch WinForms composition-related Form properties here - raw win32 via
+    ctypes only."""
     import ctypes
 
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    gdi32 = ctypes.windll.gdi32
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x80
     WS_EX_NOACTIVATE = 0x8000000
     SWP_FLAGS = 0x0002 | 0x0001 | 0x0004 | 0x0020  # NOMOVE | NOSIZE | NOZORDER | FRAMECHANGED
 
     try:
-        form = overlay_window.native
-        hwnd = form.Handle.ToInt32()
+        hwnd = overlay_window.native.Handle.ToInt32()
     except Exception as exc:
         _overlay_log(f"base styles: could not get native handle: {exc!r}")
         return
@@ -261,15 +262,17 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
     _overlay_log(f"base styles: hwnd={hwnd}, exstyle {current:#x} -> {user32.GetWindowLongW(hwnd, GWL_EXSTYLE):#x}")
 
-    try:
-        from System.Drawing import Region
-
-        empty = Region()
-        empty.MakeEmpty()
-        form.Region = empty
+    empty = gdi32.CreateRectRgn(0, 0, 0, 0)
+    ctypes.set_last_error(0)
+    result = user32.SetWindowRgn(hwnd, empty, True)
+    if result:
         _overlay_log(f"startup empty region applied to '{overlay_window.title}'")
-    except Exception as exc:
-        _overlay_log(f"startup empty region FAILED for '{overlay_window.title}': {exc!r}")
+    else:
+        gdi32.DeleteObject(empty)
+        _overlay_log(
+            f"startup empty region FAILED for '{overlay_window.title}': "
+            f"SetWindowRgn returned 0, GetLastError={ctypes.get_last_error()}"
+        )
 
 
 def _make_overlay_region_api(overlay_window):
@@ -277,50 +280,54 @@ def _make_overlay_region_api(overlay_window):
     window to the union of the given rounded rects ([{x, y, w, h, r}] in physical window
     pixels; empty list -> empty region -> invisible window). overlay.js calls it whenever
     its visible content changes (toast added/expired, game-state panel shown/hidden, edit
-    mode toggled). Runs on pywebview's JS-bridge thread, so the Form.Region write is
-    marshalled onto the WinForms UI thread with Control.BeginInvoke."""
+    mode toggled). Raw SetWindowRgn only - NEVER the WinForms Form.Region property, whose
+    setter deadlocks the app (see _apply_overlay_base_styles docstring); the raw API, like
+    the SetWindowPos behind window.move(), is safe from the JS-bridge thread."""
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    gdi32 = ctypes.windll.gdi32
+    RGN_OR = 2
 
     def set_overlay_regions(rects) -> None:
         try:
-            form = overlay_window.native
-            from System import Action
-            from System.Drawing import Rectangle, Region
-            from System.Drawing.Drawing2D import GraphicsPath
-
-            def apply() -> None:
-                try:
-                    region = Region()
-                    region.MakeEmpty()
-                    count = 0
-                    for rect in rects or []:
-                        try:
-                            x, y = int(rect["x"]), int(rect["y"])
-                            w, h = int(rect["w"]), int(rect["h"])
-                            radius = int(rect.get("r", 0))
-                        except (KeyError, TypeError, ValueError):
-                            continue
-                        if w <= 0 or h <= 0:
-                            continue
-                        path = GraphicsPath()
-                        d = min(radius * 2, w, h)
-                        if d > 0:
-                            path.AddArc(x, y, d, d, 180, 90)
-                            path.AddArc(x + w - d, y, d, d, 270, 90)
-                            path.AddArc(x + w - d, y + h - d, d, d, 0, 90)
-                            path.AddArc(x, y + h - d, d, d, 90, 90)
-                            path.CloseFigure()
-                        else:
-                            path.AddRectangle(Rectangle(x, y, w, h))
-                        region.Union(path)
-                        count += 1
-                    form.Region = region
-                    _overlay_log(f"region: {count} rect(s) applied to '{overlay_window.title}'")
-                except Exception as exc:
-                    _overlay_log(f"region apply FAILED for '{overlay_window.title}': {exc!r}")
-
-            form.BeginInvoke(Action(apply))
+            hwnd = overlay_window.native.Handle.ToInt32()
         except Exception as exc:
-            _overlay_log(f"set_overlay_regions FAILED for '{overlay_window.title}': {exc!r}")
+            _overlay_log(f"set_overlay_regions: could not get native handle: {exc!r}")
+            return
+
+        region = None
+        count = 0
+        for rect in rects or []:
+            try:
+                x, y = int(rect["x"]), int(rect["y"])
+                w, h = int(rect["w"]), int(rect["h"])
+                radius = int(rect.get("r", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if w <= 0 or h <= 0:
+                continue
+            # Right/bottom are exclusive; +1 keeps the last pixel row/column visible.
+            part = gdi32.CreateRoundRectRgn(x, y, x + w + 1, y + h + 1, radius * 2, radius * 2)
+            if region is None:
+                region = part
+            else:
+                gdi32.CombineRgn(region, region, part, RGN_OR)
+                gdi32.DeleteObject(part)
+            count += 1
+
+        if region is None:
+            region = gdi32.CreateRectRgn(0, 0, 0, 0)
+        ctypes.set_last_error(0)
+        result = user32.SetWindowRgn(hwnd, region, True)
+        if result:
+            _overlay_log(f"region: {count} rect(s) applied to '{overlay_window.title}'")
+        else:
+            gdi32.DeleteObject(region)
+            _overlay_log(
+                f"region: FAILED applying {count} rect(s) to '{overlay_window.title}': "
+                f"SetWindowRgn returned 0, GetLastError={ctypes.get_last_error()}"
+            )
 
     return set_overlay_regions
 
