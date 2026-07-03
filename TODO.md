@@ -69,8 +69,10 @@
     (`#cfg-overlay-enabled`). Documented in README. All 61 tests pass.
     TODO: delete stale `data/overlay_layouts.json` + any `app/core/overlay_layouts.py` (layouts now
     live entirely in the C++ overlay). — not present in current tree; verify on cleanup.
-  - [ ] **Sprint C5 — ship prebuilt exe.** Commit a prebuilt `overlay/overlay.exe` (plus `build.cmd`
-    to rebuild) so users without VS Build Tools get the feature; graceful no-op if the exe is missing.
+  - [x] **Sprint C5 — ship prebuilt exe.** DONE (2026-07-03). Prebuilt `overlay/overlay.exe`
+    committed (`.gitignore` force-tracks it while still ignoring `*.obj/*.pdb/*.ilk`); `build.cmd`
+    rebuilds it. Graceful no-op when missing already handled by `overlay_process.start()` (warns +
+    returns; pushes no-op). Added `overlay/README.md` (render approach, pipe API, edit mode, build).
 
   **Anti-cheat note:** layered windows compose entirely outside the game process (no injection, no
   memory/API hooking), so BattlEye/EAC have nothing to flag — the trade-off vs. Present-hooking is

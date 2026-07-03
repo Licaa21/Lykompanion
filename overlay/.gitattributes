@@ -2,3 +2,6 @@
 # (eats the first character of each line). Force it regardless of core.autocrlf.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# The shipped prebuilt binary — never touch its bytes.
+*.exe binary

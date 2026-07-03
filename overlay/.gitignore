@@ -1,5 +1,8 @@
-# Build artifacts. The prebuilt overlay.exe is committed later in Sprint C5.
+# Build artifacts. overlay.exe itself IS shipped (prebuilt, Sprint C5) so users
+# without VS Build Tools still get the overlay — it is force-tracked below.
 *.obj
 *.exe
 *.pdb
 *.ilk
+
+!overlay.exe
