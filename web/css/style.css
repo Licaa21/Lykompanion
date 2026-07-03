@@ -115,6 +115,18 @@ body.desktop-app .titlebar {
 .titlebar-btn:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
 .titlebar-btn-close:hover { background: #e2384d; color: #fff; }
 
+/* Resize grips — desktop app only; thin invisible strips on the window edges/corners. */
+.resize-grip { display: none; }
+body.desktop-app .resize-grip { display: block; position: fixed; z-index: 9999; }
+.rg-n  { top: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rg-s  { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rg-e  { top: 8px; bottom: 8px; right: 0; width: 5px; cursor: ew-resize; }
+.rg-w  { top: 8px; bottom: 8px; left: 0; width: 5px; cursor: ew-resize; }
+.rg-ne { top: 0; right: 0; width: 9px; height: 9px; cursor: nesw-resize; }
+.rg-nw { top: 0; left: 0; width: 9px; height: 9px; cursor: nwse-resize; }
+.rg-se { bottom: 0; right: 0; width: 9px; height: 9px; cursor: nwse-resize; }
+.rg-sw { bottom: 0; left: 0; width: 9px; height: 9px; cursor: nesw-resize; }
+
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: none; }
 input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
@@ -1093,7 +1105,8 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
    (e.g. the scrollable Settings modal body) or running off-screen. */
 .help-tooltip {
   position: fixed;
-  width: 230px;
+  width: max-content;
+  max-width: 230px;
   padding: 8px 10px;
   border-radius: var(--r2);
   background: #1c1d2a;
@@ -2097,3 +2110,191 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   color: var(--t3);
   font-style: italic;
 }
+
+/* ════════════════════════════════════════════════════
+   THEMED DIALOG — custom replacement for native alert()/confirm()
+════════════════════════════════════════════════════ */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3,4,10,0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 600; /* above modals (200) and help tooltip (500) */
+  padding: 16px;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.dialog-overlay.visible { opacity: 1; }
+.dialog {
+  width: 400px;
+  max-width: 100%;
+  background: rgba(14, 15, 25, 0.97);
+  border: 1px solid var(--glass-border);
+  border-top-color: var(--glass-bright);
+  border-radius: var(--r4);
+  box-shadow:
+    0 32px 80px rgba(0,0,0,0.7),
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 1px 0 rgba(255,255,255,0.08) inset;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transform: scale(0.94) translateY(16px);
+  transition: transform var(--ease-out);
+}
+.dialog-overlay.visible .dialog { transform: scale(1) translateY(0); }
+.dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--t1);
+  letter-spacing: -0.01em;
+}
+.dialog-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t2);
+  white-space: pre-wrap;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.dialog-btn {
+  padding: 8px 16px;
+  border-radius: var(--r2);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), color var(--ease), transform var(--ease);
+}
+.dialog-btn:hover { background: rgba(255,255,255,0.08); transform: translateY(-1px); }
+.dialog-btn--primary {
+  border-color: transparent;
+  background: var(--hero-grad);
+  color: #fff;
+  box-shadow: 0 2px 12px var(--accent-glow);
+}
+.dialog-btn--primary:hover { box-shadow: 0 4px 18px var(--accent-glow); }
+.dialog-btn--danger {
+  border-color: transparent;
+  background: linear-gradient(120deg, #c0392b, #e05c5c);
+  color: #fff;
+}
+.dialog-btn--danger:hover { box-shadow: 0 4px 18px rgba(224,92,92,0.4); }
+
+/* ════════════════════════════════════════════════════
+   CUSTOM SELECT — themed dropdown replacing the native <select> popup list.
+   The native <select> stays in the DOM (hidden) as the source of truth so all
+   existing .value / change-event / option-population JS keeps working.
+════════════════════════════════════════════════════ */
+.custom-select { position: relative; width: 100%; }
+.custom-select > select.cs-native {
+  /* Kept in the DOM & interactive-off; visually replaced by .cs-trigger. */
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  margin: 0;
+}
+.cs-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--r2);
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.cs-trigger:focus-visible,
+.custom-select.open .cs-trigger {
+  outline: none;
+  border-color: rgba(91,95,199,0.5);
+  box-shadow: 0 0 0 3px rgba(91,95,199,0.1);
+}
+.cs-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-trigger[data-placeholder="true"] .cs-trigger-label { color: var(--t3); }
+.cs-trigger-arrow {
+  flex-shrink: 0;
+  width: 10px; height: 6px;
+  transition: transform var(--ease);
+}
+.custom-select.open .cs-trigger-arrow { transform: rotate(180deg); }
+
+/* Panel is appended to <body> (fixed) so the modal's overflow:auto can't clip it. */
+.cs-panel {
+  position: fixed;
+  z-index: 650; /* above dialog(600) so a select inside a dialog still opens */
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--r2);
+  background: #16172099;
+  background: rgba(20, 21, 32, 0.98);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+.cs-panel.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.cs-option {
+  padding: 8px 10px;
+  border-radius: var(--r1, 6px);
+  font-size: 13px;
+  color: var(--t2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--ease), color var(--ease);
+}
+.cs-option:hover,
+.cs-option.active {
+  background: var(--accent-dim);
+  color: var(--t1);
+}
+.cs-option[aria-selected="true"] {
+  color: var(--t1);
+  font-weight: 600;
+}
+.cs-option[aria-selected="true"]::after {
+  content: "✓";
+  float: right;
+  color: var(--accent);
+  font-weight: 700;
+}
+.cs-option[data-disabled="true"] {
+  color: var(--t3);
+  cursor: default;
+  opacity: 0.6;
+}
+.cs-option[data-disabled="true"]:hover { background: transparent; color: var(--t3); }

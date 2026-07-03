@@ -158,9 +158,9 @@ function renderChatList() {
     deleteBtn.className = "chat-list-delete";
     deleteBtn.textContent = "×";
     deleteBtn.title = "Delete chat";
-    deleteBtn.addEventListener("click", (event) => {
+    deleteBtn.addEventListener("click", async (event) => {
       event.stopPropagation();
-      if (!confirm(`Delete "${chat.title}"? This can't be undone.`)) return;
+      if (!(await showConfirm(`Delete "${chat.title}"? This can't be undone.`, { title: "Delete chat", danger: true, confirmText: "Delete" }))) return;
       deleteChat(chat.id);
     });
 

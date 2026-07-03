@@ -28,6 +28,19 @@
     </div>
   </div>
 
+  <!-- Resize grips (desktop app only). Frameless windows have no OS resize border; these thin
+       edge/corner strips drive pywebview move/resize from JS. -->
+  <div class="resize-grips" aria-hidden="true">
+    <div class="resize-grip rg-n"  data-dir="n"></div>
+    <div class="resize-grip rg-s"  data-dir="s"></div>
+    <div class="resize-grip rg-e"  data-dir="e"></div>
+    <div class="resize-grip rg-w"  data-dir="w"></div>
+    <div class="resize-grip rg-ne" data-dir="ne"></div>
+    <div class="resize-grip rg-nw" data-dir="nw"></div>
+    <div class="resize-grip rg-se" data-dir="se"></div>
+    <div class="resize-grip rg-sw" data-dir="sw"></div>
+  </div>
+
   <div class="app-shell">
 
     <!-- ── SIDEBAR — glass, logo + chat list + tool dock ────────────── -->

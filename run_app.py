@@ -1,7 +1,6 @@
 """Desktop launcher — starts the FastAPI server in a background thread, then opens a
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
-import ctypes
 import faulthandler
 import json
 import os
@@ -10,7 +9,6 @@ import socket
 import sys
 import time
 import threading
-from ctypes import wintypes
 from pathlib import Path
 
 # The process has died silently (no traceback, straight to RUN.cmd's pause) during normal use -
@@ -177,69 +175,6 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
-# ── Frameless-window Win32 helpers ───────────────────────────────────────────────────────────
-# pywebview has no resize API for a frameless window, and its native maximize would cover the
-# taskbar. We reach the WinForms HWND directly: add WS_THICKFRAME back for OS-native edge-resize
-# (+ Windows 11 rounded corners) with no title bar, and "maximize" by fitting the monitor's work
-# area (taskbar-aware) with a manual restore.
-_user32 = ctypes.windll.user32
-_GWL_STYLE = -16
-_WS_THICKFRAME = 0x00040000
-_SWP_FRAMECHANGED = 0x0020
-_SWP_NOMOVE = 0x0002
-_SWP_NOSIZE = 0x0001
-_SWP_NOZORDER = 0x0004
-_SWP_NOACTIVATE = 0x0010
-_MONITOR_DEFAULTTONEAREST = 2
-
-
-class _MONITORINFO(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wintypes.DWORD),
-        ("rcMonitor", wintypes.RECT),
-        ("rcWork", wintypes.RECT),
-        ("dwFlags", wintypes.DWORD),
-    ]
-
-
-# Explicit signatures are mandatory: without them ctypes passes every argument as a 32-bit
-# c_int, which truncates 64-bit HWND/HMONITOR handles to garbage — the calls then no-op silently
-# on an invalid handle (the symptom of "resize/maximize do nothing at all").
-_user32.GetWindowLongW.restype = wintypes.LONG
-_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-_user32.SetWindowLongW.restype = wintypes.LONG
-_user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
-_user32.SetWindowPos.restype = wintypes.BOOL
-_user32.SetWindowPos.argtypes = [
-    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-    ctypes.c_int, ctypes.c_int, wintypes.UINT,
-]
-_user32.GetWindowRect.restype = wintypes.BOOL
-_user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-_user32.MonitorFromWindow.restype = ctypes.c_void_p
-_user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
-_user32.GetMonitorInfoW.restype = wintypes.BOOL
-_user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_MONITORINFO)]
-
-
-def _hwnd_of(win) -> int | None:
-    """WinForms form handle for a pywebview window (only valid once the window is realized)."""
-    try:
-        return int(win._window.Handle.ToInt64())
-    except Exception:
-        return None
-
-
-def _enable_native_resize(hwnd: int) -> None:
-    """Add WS_THICKFRAME so Windows handles edge/corner resizing itself — smooth, no JS."""
-    style = _user32.GetWindowLongW(hwnd, _GWL_STYLE)
-    _user32.SetWindowLongW(hwnd, _GWL_STYLE, style | _WS_THICKFRAME)
-    _user32.SetWindowPos(
-        hwnd, 0, 0, 0, 0, 0,
-        _SWP_FRAMECHANGED | _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOZORDER | _SWP_NOACTIVATE,
-    )
-
-
 def _run_tray(win, tray: dict, quit_fn) -> None:
     """Run the system-tray icon loop (blocking — call in a daemon thread).
 
@@ -317,45 +252,21 @@ def main() -> None:
     def window_close() -> None:
         _quit()
 
-    # Double-click-titlebar maximize/restore. "Maximize" = fit the monitor work area (taskbar
-    # stays visible), remembering the pre-maximize rect to restore to.
-    win_state = {"hwnd": None, "maximized": False, "restore_rect": None}
-
-    def window_toggle_maximize() -> None:
-        hwnd = win_state["hwnd"]
-        if not hwnd:
-            return
-        flags = _SWP_NOZORDER | _SWP_NOACTIVATE | _SWP_FRAMECHANGED
-        if win_state["maximized"]:
-            left, top, right, bottom = win_state["restore_rect"]
-            _user32.SetWindowPos(hwnd, 0, left, top, right - left, bottom - top, flags)
-            win_state["maximized"] = False
-        else:
-            rect = wintypes.RECT()
-            _user32.GetWindowRect(hwnd, ctypes.byref(rect))
-            win_state["restore_rect"] = (rect.left, rect.top, rect.right, rect.bottom)
-            mon = _user32.MonitorFromWindow(hwnd, _MONITOR_DEFAULTTONEAREST)
-            info = _MONITORINFO()
-            info.cbSize = ctypes.sizeof(_MONITORINFO)
-            _user32.GetMonitorInfoW(mon, ctypes.byref(info))
-            w = info.rcWork
-            _user32.SetWindowPos(hwnd, 0, w.left, w.top, w.right - w.left, w.bottom - w.top, flags)
-            win_state["maximized"] = True
-
-    def _on_loaded() -> None:
-        _lock_down_webview(win)
-        hwnd = _hwnd_of(win)
-        if hwnd:
-            win_state["hwnd"] = hwnd
-            try:
-                _enable_native_resize(hwnd)
-            except Exception:
-                pass
+    # Resize + maximize are driven from JS (the frontend's resize grips and titlebar double-click)
+    # through pywebview's own move/resize — NOT by mutating the window style, which fought the
+    # frameless drag and broke moving the window. One combined setter keeps it to a single bridge
+    # call per drag frame. min_size is enforced here as a backstop to the JS clamp.
+    def window_set_bounds(x: float, y: float, w: float, h: float) -> None:
+        try:
+            win.move(int(x), int(y))
+            win.resize(max(int(w), 800), max(int(h), 600))
+        except Exception:
+            pass
 
     win.expose(
-        _make_download_api(win), window_minimize, window_close, window_toggle_maximize,
+        _make_download_api(win), window_minimize, window_close, window_set_bounds,
     )
-    win.events.loaded += _on_loaded
+    win.events.loaded += lambda: _lock_down_webview(win)
 
     threading.Thread(target=_run_tray, args=(win, tray, _quit), daemon=True).start()
 

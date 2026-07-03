@@ -279,7 +279,7 @@ settingsModal.addEventListener("click", async (e) => {
 
   // A key that's actually saved: confirm, then delete it right away.
   if (field && isStored && !input.value) {
-    if (!confirm("Delete this saved key? This takes effect immediately — no need to press Save changes.")) return;
+    if (!(await showConfirm("Delete this saved key? This takes effect immediately — no need to press Save changes.", { title: "Delete key", danger: true, confirmText: "Delete" }))) return;
     const response = await fetch(`/api/config/key/${field}`, { method: "DELETE" });
     if (!response.ok) return;
     const cfg = await response.json();
@@ -304,7 +304,21 @@ const helpTooltipEl = document.createElement("div");
 helpTooltipEl.className = "help-tooltip";
 document.body.appendChild(helpTooltipEl);
 
+// Any element carrying a native `title` also gets the themed tooltip instead of the OS one:
+// on hover we migrate its title into data-tip and strip the attribute (re-migrated each hover so
+// dynamically-updated titles stay fresh) so the native browser tooltip never fires.
+const TIP_SELECTOR = ".cfg-help, [data-tip], [title]";
+function resolveTipTarget(node) {
+  const t = node && node.closest && node.closest(TIP_SELECTOR);
+  return t || null;
+}
+
 function showHelpTooltip(target) {
+  if (target.hasAttribute("title")) {
+    const t = target.getAttribute("title");
+    if (t) target.dataset.tip = t;
+    target.removeAttribute("title");
+  }
   const tip = target.dataset.tip;
   if (!tip) return;
   helpTooltipEl.textContent = tip;
@@ -330,22 +344,103 @@ function hideHelpTooltip() {
 }
 
 document.addEventListener("mouseover", (e) => {
-  const target = e.target.closest(".cfg-help");
+  const target = resolveTipTarget(e.target);
   if (target) showHelpTooltip(target);
 });
 document.addEventListener("mouseout", (e) => {
-  if (e.target.closest(".cfg-help")) hideHelpTooltip();
+  if (resolveTipTarget(e.target)) hideHelpTooltip();
 });
 document.addEventListener("focusin", (e) => {
-  const target = e.target.closest(".cfg-help");
+  const target = resolveTipTarget(e.target);
   if (target) showHelpTooltip(target);
 });
 document.addEventListener("focusout", (e) => {
-  if (e.target.closest(".cfg-help")) hideHelpTooltip();
+  if (resolveTipTarget(e.target)) hideHelpTooltip();
 });
 // Scroll position isn't tracked live (fixed tooltip would otherwise drift from its trigger as the
 // modal body scrolls underneath it) - just dismiss it instead.
 document.addEventListener("scroll", hideHelpTooltip, true);
+
+// --- Themed dialogs (custom replacements for native alert()/confirm()) ---
+// Both return a Promise: showConfirm resolves true/false, showAlert resolves when dismissed.
+// One reusable overlay is created lazily and reused across calls.
+let _dialogOverlay = null;
+function _ensureDialogOverlay() {
+  if (_dialogOverlay) return _dialogOverlay;
+  const overlay = document.createElement("div");
+  overlay.className = "dialog-overlay";
+  overlay.hidden = true;
+  overlay.innerHTML =
+    '<div class="dialog" role="dialog" aria-modal="true">' +
+    '<div class="dialog-title"></div>' +
+    '<div class="dialog-body"></div>' +
+    '<div class="dialog-actions"></div>' +
+    "</div>";
+  document.body.appendChild(overlay);
+  _dialogOverlay = overlay;
+  return overlay;
+}
+
+// opts: { title, body, confirmText, cancelText, danger, showCancel }
+function showDialog(opts) {
+  const overlay = _ensureDialogOverlay();
+  const titleEl = overlay.querySelector(".dialog-title");
+  const bodyEl = overlay.querySelector(".dialog-body");
+  const actionsEl = overlay.querySelector(".dialog-actions");
+
+  titleEl.textContent = opts.title || "";
+  titleEl.hidden = !opts.title;
+  bodyEl.textContent = opts.body || "";
+  actionsEl.innerHTML = "";
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const close = (result) => {
+      if (settled) return;
+      settled = true;
+      overlay.classList.remove("visible");
+      document.removeEventListener("keydown", onKey, true);
+      setTimeout(() => { overlay.hidden = true; }, 200);
+      resolve(result);
+    };
+
+    if (opts.showCancel !== false) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "dialog-btn";
+      cancelBtn.textContent = opts.cancelText || "Cancel";
+      cancelBtn.addEventListener("click", () => close(false));
+      actionsEl.appendChild(cancelBtn);
+    }
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "dialog-btn " + (opts.danger ? "dialog-btn--danger" : "dialog-btn--primary");
+    okBtn.textContent = opts.confirmText || "OK";
+    okBtn.addEventListener("click", () => close(true));
+    actionsEl.appendChild(okBtn);
+
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(opts.showCancel === false ? true : false); }
+      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    overlay.onclick = (e) => { if (e.target === overlay) close(opts.showCancel === false ? true : false); };
+
+    overlay.hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add("visible")));
+    requestAnimationFrame(() => okBtn.focus());
+  });
+}
+
+// Drop-in async replacements. `confirm()`/`alert()` were synchronous; every call site is (or is now)
+// awaited. Signature kept simple: message string, plus optional overrides.
+function showConfirm(message, opts = {}) {
+  return showDialog({ title: opts.title || "Please confirm", body: message, showCancel: true, ...opts });
+}
+function showAlert(message, opts = {}) {
+  return showDialog({ title: opts.title || "", body: message, showCancel: false, confirmText: opts.confirmText || "OK", ...opts });
+}
 
 function setVoiceStatus(text, variant) {
   voiceStatus.textContent = text;

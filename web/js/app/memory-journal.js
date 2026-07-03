@@ -113,7 +113,7 @@ memoryAddForm.addEventListener("submit", async (event) => {
 document.getElementById("memory-delete-all").addEventListener("click", async () => {
   const count = allMemories.filter((m) => (m.scope || "user") === "user").length;
   if (count === 0) return;
-  if (!confirm(`Delete all ${count} personal ${count === 1 ? "memory" : "memories"}? This can't be undone.`)) return;
+  if (!(await showConfirm(`Delete all ${count} personal ${count === 1 ? "memory" : "memories"}? This can't be undone.`, { title: "Delete personal memories", danger: true, confirmText: "Delete all" }))) return;
   await fetch("/api/memory?scope=user", { method: "DELETE" });
   await loadMemories();
 });
@@ -135,7 +135,7 @@ gamingJournalBtn.addEventListener("click", () => {
 });
 
 document.getElementById("journal-delete-all").addEventListener("click", async () => {
-  if (!confirm("Delete ALL game and playthrough memories across every game? Unconfirmed observations are left alone. This can't be undone.")) return;
+  if (!(await showConfirm("Delete ALL game and playthrough memories across every game? Unconfirmed observations are left alone. This can't be undone.", { title: "Delete game memories", danger: true, confirmText: "Delete all" }))) return;
   await fetch("/api/memory?scope=game&scope=session", { method: "DELETE" });
   await loadGamingJournal();
 });
@@ -258,7 +258,7 @@ function renderGamingJournal(games) {
       "Delete game",
       "Remove this game and everything tracked for it (profiles, memories, trackers, training, observations)",
       async () => {
-        if (!confirm(`Delete "${game.process}" and ALL its profiles, game/playthrough memories, trackers, training data, and observations? It will also be un-approved for OCR. This can't be undone.`)) return;
+        if (!(await showConfirm(`Delete "${game.process}" and ALL its profiles, game/playthrough memories, trackers, training data, and observations? It will also be un-approved for OCR. This can't be undone.`, { title: "Delete game", danger: true, confirmText: "Delete" }))) return;
         const response = await fetch(`/api/game-state/games/${encodeURIComponent(game.process)}`, { method: "DELETE" });
         if (response.ok) loadGamingJournal();
       },
@@ -319,7 +319,7 @@ function renderGamingJournal(games) {
         "Delete",
         "Delete this profile and its playthrough memories",
         async () => {
-          if (!confirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`)) return;
+          if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
           const response = await fetch(
             `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
             { method: "DELETE" },
