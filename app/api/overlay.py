@@ -61,9 +61,8 @@ async def put_layout(process: str, payload: OverlayLayout) -> dict:
 
 @router.post("/edit-mode")
 async def set_edit_mode(payload: OverlayEditMode) -> dict:
-    """Toggle the overlay's layout editor. Lifts (or restores) the native click-through
-    styles on the overlay window so its drag handles become interactive, and tells the
-    overlay page over the SSE bus to enter/leave editing UI."""
-    events.set_overlay_click_through(not payload.enabled)
-    events.publish({"type": "edit_mode", "enabled": payload.enabled})
-    return {"enabled": payload.enabled}
+    """Set the overlay's layout editor on/off (the Settings button always sends True; the
+    overlay's own Save/Cancel send False). Lifts/restores the native click-through styles
+    on the overlay window and tells the overlay page over the SSE bus to enter/leave editing
+    UI. Same state a global hotkey can toggle from run_app.py - see app.core.events."""
+    return {"enabled": events.set_overlay_edit_mode(payload.enabled)}

@@ -31,6 +31,25 @@ def unsubscribe(queue: asyncio.Queue) -> None:
     _subscribers.discard(queue)
 
 
+# --- Cross-thread publish ---
+# The global hotkey listener (run_app.py) runs on its own OS thread with a Win32 message
+# loop, not on the uvicorn server's asyncio loop - calling publish() (mutates asyncio.Queue
+# objects) directly from there is not thread-safe. The FastAPI lifespan registers the running
+# loop here at startup so cross-thread callers can hop onto it via call_soon_threadsafe.
+
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _loop
+    _loop = loop
+
+
+def publish_threadsafe(event: dict) -> None:
+    if _loop is not None:
+        _loop.call_soon_threadsafe(publish, event)
+
+
 # --- Native overlay window hook ---
 # The desktop launcher (run_app.py) runs the server in the same process and registers a
 # callable here so the layout editor can temporarily lift the overlay window's win32
@@ -48,3 +67,28 @@ def register_overlay_click_through_setter(setter) -> None:
 def set_overlay_click_through(enabled: bool) -> None:
     if _overlay_click_through_setter is not None:
         _overlay_click_through_setter(enabled)
+
+
+# --- Overlay edit-mode state ---
+# Single source of truth for whether the layout editor is open, so both the HTTP endpoint
+# (Settings button, always enabling) and the global hotkey (toggling, any thread) drive the
+# same state instead of duplicating the click-through + SSE broadcast logic.
+
+_overlay_editing = False
+
+
+def is_overlay_editing() -> bool:
+    return _overlay_editing
+
+
+def set_overlay_edit_mode(enabled: bool, *, threadsafe: bool = False) -> bool:
+    global _overlay_editing
+    _overlay_editing = enabled
+    set_overlay_click_through(not enabled)
+    event = {"type": "edit_mode", "enabled": enabled}
+    publish_threadsafe(event) if threadsafe else publish(event)
+    return enabled
+
+
+def toggle_overlay_edit_mode(*, threadsafe: bool = False) -> bool:
+    return set_overlay_edit_mode(not _overlay_editing, threadsafe=threadsafe)

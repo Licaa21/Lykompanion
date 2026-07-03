@@ -168,7 +168,7 @@ function enterEditMode() {
   document.body.style.display = "";
 
   document.getElementById("edit-label").textContent =
-    `Overlay layout — ${currentProcess || "default (no game)"}`;
+    `Overlay layout — ${currentProcess || "default (no game)"} (Ctrl+Shift+O to exit)`;
 
   // Sample content so both elements are visible and meaningfully sized while dragging.
   sampleToast = buildToast("Companion replies and reminders will appear here.", "reply");
@@ -191,6 +191,10 @@ function exitEditMode() {
     sampleToast = null;
   }
   gsPanel.classList.remove("visible");
+  // Re-fetch positions regardless of how editing ended (Save already persisted them server
+  // side, so this is a no-op; Cancel or exiting via the hotkey did not, so this discards any
+  // unsaved drags instead of leaving them applied only in this DOM).
+  loadLayout(true);
   pollGameState(); // restore real panel visibility/content
   pollConfig(); // re-hide everything if the overlay was live-disabled while editing
 }

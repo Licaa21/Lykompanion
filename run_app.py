@@ -224,6 +224,44 @@ def _make_overlay_click_through_setter(overlay_window):
     return set_click_through
 
 
+# Ctrl+Shift+O toggles the overlay layout editor - global (works while a game has focus,
+# since the overlay window is non-activating/click-through and can't receive key events
+# itself). "O" for Overlay; chosen to avoid common game bindings on the WASD/function-key
+# side of the keyboard.
+OVERLAY_HOTKEY_MODIFIERS = 0x0002 | 0x0004  # MOD_CONTROL | MOD_SHIFT
+OVERLAY_HOTKEY_VK = 0x4F  # 'O'
+
+
+def _start_overlay_hotkey_listener() -> None:
+    """Registers a system-wide hotkey and blocks handling WM_HOTKEY messages forever - run
+    this on its own daemon thread. RegisterHotKey ties the hotkey to the calling thread's
+    message queue, so registration and the GetMessage loop must happen on the same thread."""
+    import ctypes
+    from ctypes import wintypes
+
+    def _listen() -> None:
+        from app.core import events as overlay_events
+
+        user32 = ctypes.windll.user32
+        WM_HOTKEY = 0x0312
+        HOTKEY_ID = 1
+
+        if not user32.RegisterHotKey(None, HOTKEY_ID, OVERLAY_HOTKEY_MODIFIERS, OVERLAY_HOTKEY_VK):
+            # Likely already claimed by another app - the Settings "Edit layout" button still
+            # works, so this is a soft failure, not fatal to the overlay feature.
+            print("WARNING: could not register Ctrl+Shift+O overlay hotkey (already in use?)", file=sys.stderr)
+            return
+        try:
+            msg = wintypes.MSG()
+            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                if msg.message == WM_HOTKEY:
+                    overlay_events.toggle_overlay_edit_mode(threadsafe=True)
+        finally:
+            user32.UnregisterHotKey(None, HOTKEY_ID)
+
+    threading.Thread(target=_listen, daemon=True).start()
+
+
 def main() -> None:
     import webview
 
@@ -282,6 +320,8 @@ def main() -> None:
         # click-through styles - the server runs in this same process.
         from app.core import events as overlay_events
         overlay_events.register_overlay_click_through_setter(_set_overlay_click_through)
+
+        _start_overlay_hotkey_listener()
 
         def _close_overlay() -> None:
             # Closing the main window must take the overlay with it - otherwise an invisible

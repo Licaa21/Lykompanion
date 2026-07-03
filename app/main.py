@@ -33,6 +33,7 @@ from app.api import (
     usage,
     voice,
 )
+from app.core import events as overlay_events
 from app.core.chats import prune_empty_chats
 from app.services.llm.game_state_extraction import run_game_state_poller
 from app.services.llm.reminder_poller import run_reminder_poller
@@ -42,6 +43,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Lets cross-thread publishers (the overlay's global hotkey listener, a plain OS thread
+    # in run_app.py) hop onto this loop instead of touching asyncio.Queue objects directly.
+    overlay_events.set_loop(asyncio.get_running_loop())
     prune_empty_chats()
     poller_task = asyncio.create_task(run_game_state_poller())
     reminder_task = asyncio.create_task(run_reminder_poller())
