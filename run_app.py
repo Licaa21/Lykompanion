@@ -1,6 +1,7 @@
 """Desktop launcher — starts the FastAPI server in a background thread, then opens a
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
+import ctypes
 import faulthandler
 import json
 import os
@@ -9,6 +10,7 @@ import socket
 import sys
 import time
 import threading
+from ctypes import wintypes
 from pathlib import Path
 
 # The process has died silently (no traceback, straight to RUN.cmd's pause) during normal use -
@@ -175,6 +177,22 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+# Remove the Windows 11 window border/outline on the frameless window. This is a DWM attribute
+# (colour of the border), NOT a window style — so it's safe and can't affect the frameless drag
+# the way the reverted WS_THICKFRAME hack did. argtypes are set so the 64-bit HWND isn't
+# truncated to a 32-bit int (which would silently no-op).
+_DWMWA_BORDER_COLOR = 34          # Win11 22000+
+_DWMWA_COLOR_NONE = 0xFFFFFFFE
+_dwmapi = ctypes.windll.dwmapi
+_dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long  # HRESULT
+_dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+
+
+def _remove_window_border(hwnd: int) -> None:
+    color = ctypes.c_uint(_DWMWA_COLOR_NONE)
+    _dwmapi.DwmSetWindowAttribute(hwnd, _DWMWA_BORDER_COLOR, ctypes.byref(color), ctypes.sizeof(color))
+
+
 def _run_tray(win, tray: dict, quit_fn) -> None:
     """Run the system-tray icon loop (blocking — call in a daemon thread).
 
@@ -266,7 +284,15 @@ def main() -> None:
     win.expose(
         _make_download_api(win), window_minimize, window_close, window_set_bounds,
     )
-    win.events.loaded += lambda: _lock_down_webview(win)
+
+    def _on_loaded() -> None:
+        _lock_down_webview(win)
+        try:
+            _remove_window_border(int(win._window.Handle.ToInt64()))
+        except Exception:
+            pass
+
+    win.events.loaded += _on_loaded
 
     threading.Thread(target=_run_tray, args=(win, tray, _quit), daemon=True).start()
 
