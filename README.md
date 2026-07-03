@@ -156,7 +156,7 @@ app/
     ocr/                 Windows OCR (Windows.Media.Ocr) wrapper, used by passive game-state awareness
     system/              Process/system-info lookups
 web/
-  index.html, css/, js/app.js   Static frontend, no build step
+  index.html, css/, js/app/*.js   Static frontend, no build step (app/ = ordered classic scripts, one per concern)
 run_app.py              Desktop launcher - runs the server in a background thread, opens it in a pywebview window
 data/                   Runtime state (memory.json, usage.json, chats.json, custom_instructions.txt, voice/*.wav) - gitignored
 ```
@@ -307,6 +307,6 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 
 ## Development
 
-There's no build step for the frontend — edit `web/js/app.js`, `web/css/style.css`, or `web/index.html` directly and reload. The backend runs with `--reload`, so Python changes pick up automatically.
+There's no build step for the frontend — edit the files under `web/js/app/`, `web/css/style.css`, or `web/index.html` directly and reload. The backend runs with `--reload`, so Python changes pick up automatically.
 
 Prompts live in `app/prompts/*.md` as plain Markdown, loaded and cached at runtime (`app/core/prompts.py`) — edit them without touching Python code. `current_datetime_context()` is injected fresh on every request so the agent always knows the real current date/time, separate from the cached static prompt text. The currently focused application is injected the same way (it's only a few tokens), so the agent knows what's running without spending a tool round-trip on it.
