@@ -1,7 +1,8 @@
 # TODO
 
-- [ ] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
+- [~] **Smarter game detection** — replace the hardcoded `NON_GAME_PROCESSES` denylist heuristic
   with signals like fullscreen/borderless window style, GPU usage, or Steam/IGDB process lists.
+  - Done (window-style signal): auto-pending now requires the foreground window to be fullscreen/borderless (`is_foreground_window_fullscreen`), so random windowed apps stop nagging. Browsers kept off the denylist so browser games reach approval. GPU-usage / Steam / IGDB signals still open if more precision is wanted.
 - [ ] Updating the tickboxes for overlay and certain trackers dosen't take effect immediately live as it should, you need to restart application in order to make them reset or take effect.
   - Overlay enable/disable + per-tracker "show in overlay" now applied live (`game_state_extraction.apply_overlay_enabled` on config PUT; `_refresh_overlay_panel` on tracker PUT/reset). **Verify in-app**; if any *other* tickbox still needs a restart, note which here.
 - [ ] When I tested the overlay in Baldur's Gate 3, the overlay/game state/OCR stuck and wouldn't update no more, could you debug this ?

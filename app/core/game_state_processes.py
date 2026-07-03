@@ -18,9 +18,14 @@ PENDING_PATH = DATA_DIR / "game_state_pending.json"
 # outright) and memory tagging (never trusts an LLM-claimed game_specific=True for one of
 # these, since the model sometimes mismarks "mentioned a game" as "playing a game right now").
 # Best-effort heuristic, not exhaustive - see TODO.md for smarter detection ideas.
+#
+# Deliberately NOT here: web browsers (chrome.exe, firefox.exe, msedge.exe, opera.exe, ...).
+# People play browser games, so a browser must reach the normal pending-approval flow and let
+# the user decide (approve for OCR, or blacklist it themselves) rather than being hard-skipped.
+# Only msedgewebview2.exe is excluded, because that specific process IS Lykompanion's own shell.
 NON_GAME_PROCESSES = {
     "explorer.exe",
-    "msedgewebview2.exe",     # pywebview shell — this is Lykompanion itself
+    "msedgewebview2.exe",     # pywebview shell — this is Lykompanion itself (NOT a general browser)
     "discord.exe",
     "code.exe",
     "windowsterminal.exe",

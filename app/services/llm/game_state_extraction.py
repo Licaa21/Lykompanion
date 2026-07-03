@@ -23,7 +23,11 @@ from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
-from app.services.system.processes import get_foreground_process_name, is_process_running
+from app.services.system.processes import (
+    get_foreground_process_name,
+    is_foreground_window_fullscreen,
+    is_process_running,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +317,15 @@ async def _capture_tick() -> None:
         # alt-tab away mid-session (checking a guide, browsing) and shouldn't lose their snapshot
         # for it - only clear tracking once the tracked process actually exits.
         if is_game and not game_state_processes.is_whitelisted(foreground):
-            if game_state_processes.add_pending_process(foreground):
-                logger.info("Game-state poll: unfamiliar process=%r queued for user approval", foreground)
+            # Smarter detection: only nag for approval when the window actually looks like a game
+            # (covers the whole monitor, no title bar) — a borderless/fullscreen app. This stops
+            # every random windowed app that grabs focus from queuing as a "pending game." A
+            # windowed game can still be approved manually from the UI.
+            if is_foreground_window_fullscreen():
+                if game_state_processes.add_pending_process(foreground):
+                    logger.info("Game-state poll: unfamiliar fullscreen process=%r queued for user approval", foreground)
+            else:
+                logger.debug("Game-state poll: unfamiliar windowed process=%r not queued (not fullscreen)", foreground)
         elif not is_game:
             logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", foreground)
 
