@@ -190,19 +190,30 @@ def _make_download_api(win) -> object:
 def _apply_overlay_base_styles(overlay_window) -> None:
     """One-time styles applied at window init, independent of click-through toggling:
     WS_EX_TOOLWINDOW (hidden from Alt-Tab/taskbar), WS_EX_NOACTIVATE (never steals focus, even
-    while click-through is lifted for editing), and - the one that actually matters for the
-    "transparent" flag to work at all - WS_EX_LAYERED.
+    while click-through is lifted for editing), WS_EX_LAYERED, and DwmExtendFrameIntoClientArea
+    with full negative margins ("sheet of glass" over the whole client area) - the two
+    independent DWM mechanisms that can make a window's alpha channel actually show the desktop
+    through it, applied together since neither alone has reliably worked here across earlier
+    attempts (see the CLAUDE.md writeup on this feature for the history).
 
-    WS_EX_LAYERED here is NOT the classic "flat alpha bitmap" mechanism (that needs
-    SetLayeredWindowAttributes or UpdateLayeredWindow, and setting it up wrongly is worse than
-    not setting WS_EX_LAYERED at all - see the CLAUDE.md writeup on this feature): on Windows
-    8+, a DWM-composited top-level window that sets WS_EX_LAYERED but never calls either of
-    those legacy APIs gets its per-pixel alpha taken directly from its own GPU swap chain /
-    DirectComposition surface instead - which is exactly how WebView2 renders. Without
-    WS_EX_LAYERED at all, DWM never engages per-pixel compositing for this window regardless of
-    pywebview's `transparent=True`, and it just shows WebView2's default opaque white
-    background. This must never be paired with SetLayeredWindowAttributes/UpdateLayeredWindow."""
+    WS_EX_LAYERED must NEVER be paired with SetLayeredWindowAttributes or UpdateLayeredWindow -
+    that pairing forces legacy flat, non-per-pixel alpha blending and made the whole window
+    render as an opaque dark rectangle in an earlier attempt. Set bare, it instead lets DWM (on
+    Windows 8+) pull per-pixel alpha directly from the window's own GPU swap chain, which is how
+    WebView2 renders - but by itself this still wasn't sufficient. DwmExtendFrameIntoClientArea
+    is the older, more established "Aero glass" mechanism (Vista+) for telling DWM to composite
+    a region using the app's own rendered alpha instead of painting it opaque; pywebview itself
+    already uses this call (see ExtendFrameIntoClientArea in winforms.py) but only for the
+    window-shadow effect, with a 1px margin - never for full-window transparency."""
     import ctypes
+
+    class _Margins(ctypes.Structure):
+        _fields_ = [
+            ("cxLeftWidth", ctypes.c_int),
+            ("cxRightWidth", ctypes.c_int),
+            ("cyTopHeight", ctypes.c_int),
+            ("cyBottomHeight", ctypes.c_int),
+        ]
 
     user32 = ctypes.windll.user32
     GWL_EXSTYLE = -20
@@ -219,6 +230,9 @@ def _apply_overlay_base_styles(overlay_window) -> None:
     current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
+
+    full_glass = _Margins(-1, -1, -1, -1)
+    ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(full_glass))
 
 
 def _make_overlay_click_through_setter(overlay_window):

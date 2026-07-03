@@ -2,7 +2,7 @@
 
 ## Needs user verification
 
-- [ ] **Overlay transparency fix, round 3 (untested)** — went dark-tinted (WS_EX_LAYERED + SetLayeredWindowAttributes, wrong) → opaque white (dropped WS_EX_LAYERED entirely, also wrong) → now WS_EX_LAYERED alone with no legacy attribute/bitmap APIs, applied once at window `shown` before first paint (`_apply_overlay_base_styles` in `run_app.py`). This is the standard Windows 8+ technique for GPU-swap-chain-backed transparent windows and should be correct, but needs a real run to confirm the overlay is actually see-through now. Sizing fix (`SetProcessDPIAware()` at import time) is separate and still also unverified.
+- [ ] **Overlay transparency fix, round 4 (untested)** — three win32-flag attempts so far have all still shown a dark/opaque overlay instead of a transparent one (dark tint via `WS_EX_LAYERED`+`SetLayeredWindowAttributes` → opaque white via no `WS_EX_LAYERED` → dark tint again via `WS_EX_LAYERED` alone). Round 4 adds `DwmExtendFrameIntoClientArea` full-glass margins alongside bare `WS_EX_LAYERED` (`_apply_overlay_base_styles` in `run_app.py`). If this ALSO still isn't transparent, stop trying more exstyle permutations — see the "if win32 flag tweaking keeps failing" fallback plan in CLAUDE.md's in-game overlay section (small per-element windows instead of full-screen, or drop WebView2 for the overlay entirely in favor of raw GDI+/`UpdateLayeredWindow`). Sizing fix (`SetProcessDPIAware()` at import time, unrelated to transparency) still also unverified but much more likely to already be correct.
 
 ## Ideas / nice-to-have
 
