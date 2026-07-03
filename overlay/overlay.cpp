@@ -1584,8 +1584,14 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 HWND CreateLayeredHwnd(HINSTANCE hInst) {
     DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                     WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-    return CreateWindowEx(exStyle, kWinClass, L"", WS_POPUP,
-                          0, 0, TOAST_W, 64, nullptr, nullptr, hInst, nullptr);
+    HWND hwnd = CreateWindowEx(exStyle, kWinClass, L"", WS_POPUP,
+                               0, 0, TOAST_W, 64, nullptr, nullptr, hInst, nullptr);
+    // Exclude every overlay window from screen capture so the game-state OCR poller (which
+    // captures the whole monitor via Windows Graphics Capture) reads only the game, never the
+    // overlay's own panel/toasts — otherwise the companion would OCR its own output back in.
+    // WDA_EXCLUDEFROMCAPTURE (0x11) needs Win10 2004+; the call no-ops harmlessly on older builds.
+    if (hwnd) SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+    return hwnd;
 }
 
 void InjectDemo() {
