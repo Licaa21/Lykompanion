@@ -68,6 +68,12 @@ A `user`-scope fact stated before a game was ever tracked (e.g. playtime mention
 ### Frontend conventions
 Every `fetch()` in `app.js` must send the `x-lyko-token` header (or `?token=` for `<img>`/`<audio>` src URLs) or it breaks in the desktop app while appearing fine under dev uvicorn.
 
+### Sound effects (cosmetic, client-side only)
+`web/js/app.js` synthesizes short SFX via the Web Audio API (`playSfxNote`/`playSfxSweep` + `playSentSfx`/`playToolSfx`, near the pre-existing mic `beep()`/`playWakeChime()`) — no audio asset files. Gated by `sfx_enabled` (mirrors `narrate_enabled`: `Settings.sfx_enabled` → `app/api/config.py` GET/PUT → `#cfg-sfx-enabled` checkbox), unlike the mic beeps which are unconditional functional feedback. `_execute_parsed_tool_calls` (`app/api/chat.py`) appends a `{"type": "tool_sfx", "name": <tool name>}` side effect for **every** tool call (in addition to any real side effect like volume/stop_listening), forwarded as SSE `tool_sfx` in both `/stream` and `/voice/stream`; the frontend's `TOOL_SFX` map picks a specific sound (web search, memory save/delete) or falls back to a generic click. The non-streaming path ignores the unknown side-effect type harmlessly.
+
+### Backup / restore
+`app/api/backup.py`: `GET /api/backup/export` zips `data/` (excluding `webview_profile/`, `debug_log.json`, `crash_log.txt`) plus `.env` into a downloadable archive; `POST /api/backup/import` extracts one back over the project root (zip-slip guarded, only accepts `.env`/`data/*` entries). Settings from an imported `.env` only take effect after a restart — import does not touch the live `Settings` singleton.
+
 ## Gotchas
 
 - `.env` at repo root is the user's real config with live API keys — never overwrite it wholesale; settings changes go through `persist_env_values()`.

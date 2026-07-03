@@ -54,6 +54,8 @@ A typical turn looks like:
 - **Web search & game databases** — web search via OpenRouter's plugin or a self-hosted [SearXNG](https://github.com/searxng/searxng) instance, IGDB (structured game data), and Steam (store info + your own library/playtime) are all available as agent tools.
 - **Profile pictures & display name** — set your own name (shown on your messages in the sidebar) and an avatar image for yourself and the companion, uploaded via Settings.
 - **Configurable everything** — LLM model, context window size, TTS provider/voice/speed/volume (the agent can also adjust its own narration volume if you tell it it's too loud), wake word, live-mic sensitivity, screenshot quality, all from a Settings UI, persisted to `.env`. All API credentials live in a single dedicated **API Keys** tab with ✕ clear buttons so stored server-side keys can be wiped without re-entering them.
+- **Sound effects** — short synthesized cues (no audio files) for sending a message and for tool calls (a distinct sound for web search, memory saved, memory removed, plus a generic one for everything else), toggleable in Settings.
+- **Backup & restore** — one-click export/import of `data/` (chats, memories, sessions, reminders, voice recordings, profile pictures) plus `.env` as a single zip, for moving to another machine. In Settings → General → Backup.
 - **Cost tracking & debugging** — per-call usage records (tokens, cost, which feature triggered it) with time-range filtering and a per-feature breakdown, optional OpenRouter account balance display, and a Debug panel showing the last 10 raw LLM requests/responses for troubleshooting.
 - **Multiple chat sessions** — sidebar with per-chat history, auto-titled by the LLM after the first exchange. Persisted server-side (survives clearing browser data), along with replayable voice message recordings.
 - **Native desktop app** — `RUN.cmd` launches Lykompanion in its own window (via `pywebview`/EdgeWebView2) instead of a browser tab, with the server running invisibly underneath. See [Native desktop app](#native-desktop-app).
@@ -282,6 +284,8 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `POST /api/sessions/{process}` | Create a new session for a game process. |
 | `PUT /api/sessions/{process}/{id}/active` | Switch the active session for a process. |
 | `PATCH /api/sessions/{process}/{id}` | Rename a session. |
+| `GET /api/backup/export` | Downloads a zip of `data/` (chats, memories, sessions, reminders, voice recordings, profile pictures) plus `.env` for moving to another machine. |
+| `POST /api/backup/import` | Restores `data/` and `.env` from a zip produced by `/export`, overwriting current files. Restart required for imported settings to take effect. |
 
 ## Tools available to the agent
 

@@ -115,6 +115,7 @@
             <button type="button" class="subtab-btn active" data-subtab="core">Core</button>
             <button type="button" class="subtab-btn" data-subtab="vision">Vision</button>
             <button type="button" class="subtab-btn" data-subtab="web-search">Web Search</button>
+            <button type="button" class="subtab-btn" data-subtab="backup">Backup</button>
           </div>
 
           <div class="subtab-panel" data-subtab="core">
@@ -212,6 +213,20 @@
                 <input id="cfg-searxng-base-url" type="text" placeholder="http://localhost:8080" autocomplete="off" />
               </label>
             </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab="backup" hidden>
+            <p class="modal-hint">
+              Back up chats, memories, game sessions, reminders, voice recordings, profile
+              pictures, and settings (including API keys) into a single file for moving to
+              another machine.
+            </p>
+            <div class="cfg-avatar-actions">
+              <a id="backup-export-btn" class="secondary-btn" download>Export Backup</a>
+              <button type="button" id="backup-import-btn" class="secondary-btn">Import Backup…</button>
+              <input id="backup-import-input" type="file" accept=".zip" hidden />
+            </div>
+            <p class="modal-hint">Importing overwrites current data and settings. A restart is required afterward for imported settings to take effect.</p>
           </div>
         </section>
 
@@ -360,6 +375,11 @@
               <input id="cfg-narrate" type="checkbox" checked />
               Narrate replies (TTS)
               <button type="button" class="cfg-help" data-tip="Automatically read replies aloud using the selected TTS provider.">?</button>
+            </label>
+            <label class="checkbox">
+              <input id="cfg-sfx-enabled" type="checkbox" checked />
+              Sound effects
+              <button type="button" class="cfg-help" data-tip="Short synthesized sounds for sending a message, tool calls (web search, memory saved/removed, etc).">?</button>
             </label>
         </section>
 

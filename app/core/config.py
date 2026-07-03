@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Whether replies are narrated aloud at all - the checkbox used to be client-side only and
     # reset to checked on every restart.
     narrate_enabled: bool = True
+    # Short synthesized sound effects (message sent, tool calls, memory saved/removed) - purely
+    # cosmetic, client-side only, but persisted like every other toggle.
+    sfx_enabled: bool = True
 
     # "openrouter" (web-grounded chat completion, text-only) or "searxng" (self-hosted
     # metasearch with a real image-search endpoint).

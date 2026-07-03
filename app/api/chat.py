@@ -331,12 +331,15 @@ async def _execute_parsed_tool_calls(messages: list[dict], parsed: list[tuple[st
     results = await asyncio.gather(*[_execute_tool(name, args) for _, name, args in parsed])
 
     side_effects = []
-    for (tool_call_id, _, _), (result, extra_messages, side_effect) in zip(parsed, results):
+    for (tool_call_id, name, _), (result, extra_messages, side_effect) in zip(parsed, results):
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": result})
         if extra_messages:
             messages.extend(extra_messages)
         if side_effect:
             side_effects.append(side_effect)
+        # Lets the frontend play a per-tool sound effect the moment it runs, not just for the
+        # handful of tools with a "real" side effect above.
+        side_effects.append({"type": "tool_sfx", "name": name})
     return side_effects
 
 
@@ -466,6 +469,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     yield f"data: {json.dumps({'volume': event['value']})}\n\n"
                 elif event["type"] == "stop_listening":
                     yield f"data: {json.dumps({'stop_listening': True})}\n\n"
+                elif event["type"] == "tool_sfx":
+                    yield f"data: {json.dumps({'tool_sfx': event['name']})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
@@ -575,6 +580,8 @@ async def chat_voice_stream(
                 elif event["type"] == "stop_listening":
                     stop_listening = True
                     yield f"data: {json.dumps({'stop_listening': True})}\n\n"
+                elif event["type"] == "tool_sfx":
+                    yield f"data: {json.dumps({'tool_sfx': event['name']})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
             return

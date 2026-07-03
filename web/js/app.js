@@ -331,6 +331,93 @@ function playWakeChime() {
   }
 }
 
+// --- Cosmetic sound effects (message sent, tool calls) - synthesized the same way as the
+// mic beeps above, gated by the "Sound effects" setting since (unlike the mic beeps) they're
+// purely decorative rather than functional feedback. ---
+
+function sfxOn() {
+  return document.getElementById("cfg-sfx-enabled")?.checked !== false;
+}
+
+function playSfxNote(frequency, startTime, duration, peakGain, type) {
+  const oscillator = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  oscillator.type = type || "sine";
+  oscillator.frequency.setValueAtTime(frequency, startTime);
+  oscillator.connect(gain);
+  gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(peakGain, startTime + Math.min(0.015, duration / 3));
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  oscillator.start(startTime);
+  oscillator.stop(startTime + duration + 0.02);
+}
+
+function playSfxSweep(startFreq, endFreq, startTime, duration, peakGain) {
+  const oscillator = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  oscillator.type = "sawtooth";
+  oscillator.frequency.setValueAtTime(startFreq, startTime);
+  oscillator.frequency.linearRampToValueAtTime(endFreq, startTime + duration);
+  oscillator.connect(gain);
+  gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(peakGain, startTime + duration * 0.3);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  oscillator.start(startTime);
+  oscillator.stop(startTime + duration + 0.02);
+}
+
+// A message was sent to the LLM - three quiet "dots".
+function playSentSfx() {
+  if (!sfxOn()) return;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  for (let i = 0; i < 3; i++) {
+    playSfxNote(1100, audioCtx.currentTime + i * 0.11, 0.05, 0.06, "sine");
+  }
+}
+
+// A generic (unmapped) tool call - a single soft click.
+function playGenericToolSfx() {
+  playSfxNote(700, audioCtx.currentTime, 0.06, 0.05, "triangle");
+}
+
+// web_search - a low-to-high "flyby" sweep, like a plane passing overhead.
+function playWebSearchSfx() {
+  playSfxSweep(260, 1000, audioCtx.currentTime, 0.4, 0.08);
+}
+
+// A memory was saved - a short ascending, swelling arpeggio.
+function playMemorySaveSfx() {
+  const notes = [523, 659, 784];
+  notes.forEach((freq, i) => {
+    playSfxNote(freq, audioCtx.currentTime + i * 0.09, 0.16, 0.05 + i * 0.03, "sine");
+  });
+}
+
+// A memory was removed - a short descending, fading arpeggio.
+function playMemoryDeleteSfx() {
+  const notes = [659, 523, 392];
+  notes.forEach((freq, i) => {
+    playSfxNote(freq, audioCtx.currentTime + i * 0.09, 0.16, 0.14 - i * 0.04, "sine");
+  });
+}
+
+const TOOL_SFX = {
+  web_search: playWebSearchSfx,
+  save_user_memory: playMemorySaveSfx,
+  save_game_memory: playMemorySaveSfx,
+  save_session_memory: playMemorySaveSfx,
+  remove_memory: playMemoryDeleteSfx,
+  rollback_session_memories: playMemoryDeleteSfx,
+};
+
+function playToolSfx(toolName) {
+  if (!sfxOn()) return;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  (TOOL_SFX[toolName] || playGenericToolSfx)();
+}
+
 // --- Chat sessions (sidebar) ---
 // Multiple conversations, persisted server-side via /api/chats (data/chats.json). Each chat
 // holds its own messages array; "active" chat functions capture a direct
@@ -1105,6 +1192,7 @@ async function sendMessage(text) {
   stopNarration();
   appendMessage("user", text, null, true);
   addMessageToChat(chat, "user", text);
+  playSentSfx();
 
   const narrateEnabled = document.getElementById("cfg-narrate").checked;
   const assistantEl = appendMessage("assistant", "", null, true);
@@ -1164,6 +1252,10 @@ async function sendMessage(text) {
         }
         if (payload.stop_listening) {
           agentStopListening();
+          continue;
+        }
+        if (payload.tool_sfx) {
+          playToolSfx(payload.tool_sfx);
           continue;
         }
         if (payload.done) continue;
@@ -1305,6 +1397,7 @@ async function sendDirectVoice(wavBlob) {
     // Persist the voice turn immediately - the error paths below used to return before it was
     // ever added to chat.messages, making the bubble vanish on the next chat switch or reload.
     addMessageToChat(chat, "user", "🎤 (voice message)", audioId);
+    playSentSfx();
     const userMessage = chat.messages[chat.messages.length - 1];
     setVoiceStatus("Sending voice message...");
 
@@ -1375,6 +1468,7 @@ async function sendDirectVoice(wavBlob) {
         }
         if (payload.volume !== undefined) applyNarrationVolume(payload.volume);
         if (payload.stop_listening) { stopListening = true; agentStopListening(); }
+        if (payload.tool_sfx) playToolSfx(payload.tool_sfx);
         if (payload.done) {
           applyNarrationVolume(payload.narration_volume);
           transcript = payload.transcript || null;
@@ -2370,6 +2464,7 @@ function applyConfigToForm(cfg) {
 
   applyNarrationVolume(cfg.narration_volume);
   document.getElementById("cfg-narrate").checked = cfg.narrate_enabled !== false;
+  document.getElementById("cfg-sfx-enabled").checked = cfg.sfx_enabled !== false;
 
   contextWindowInput.value = cfg.context_window_messages;
   contextWindowValue.textContent = cfg.context_window_messages === 0 ? "all" : cfg.context_window_messages;
@@ -2516,6 +2611,7 @@ async function saveSettings(saveButton) {
     narration_speed: parseFloat(narrationSpeedInput.value),
     narration_volume: parseInt(narrationVolumeInput.value, 10) / 100,
     narrate_enabled: document.getElementById("cfg-narrate").checked,
+    sfx_enabled: document.getElementById("cfg-sfx-enabled").checked,
     context_window_messages: parseInt(contextWindowInput.value, 10),
     screenshot_max_width: parseInt(screenshotWidthInput.value, 10),
     screenshot_jpeg_quality: parseInt(screenshotQualityInput.value, 10),
@@ -3902,6 +3998,38 @@ usageClearBtn.addEventListener("click", async () => {
   await fetch("/api/usage", { method: "DELETE" });
   usageRecordsCache = [];
   renderUsageStats();
+});
+
+// --- Backup / restore (General > Backup tab) ---
+// A plain <a download> for export (needs the token as a query param, since it isn't a fetch()
+// call the auth patch above can intercept); a hidden file input + fetch for import.
+const backupExportBtn = document.getElementById("backup-export-btn");
+const backupImportBtn = document.getElementById("backup-import-btn");
+const backupImportInput = document.getElementById("backup-import-input");
+
+if (backupExportBtn) backupExportBtn.href = apiUrl("/api/backup/export");
+
+backupImportBtn?.addEventListener("click", () => backupImportInput.click());
+
+backupImportInput?.addEventListener("change", async () => {
+  const file = backupImportInput.files[0];
+  backupImportInput.value = "";
+  if (!file) return;
+  if (!confirm("Importing overwrites current chats, memories, and settings with the backup's contents. Continue?")) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const response = await fetch("/api/backup/import", { method: "POST", body: formData });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      alert(`Import failed: ${error.detail || "unknown error"}`);
+      return;
+    }
+    alert("Backup imported. Restart Lykompanion for the restored settings to take effect.");
+  } catch (err) {
+    alert("Import failed: connection error.");
+  }
 });
 
 // --- Debug tab (Usage & Debug modal) ---

@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
+    backup,
     chat,
     chats,
     config,
@@ -31,6 +32,7 @@ from app.api import (
     usage,
     voice,
 )
+from app.core.chats import prune_empty_chats
 from app.services.llm.game_state_extraction import run_game_state_poller
 from app.services.llm.reminder_poller import run_reminder_poller
 
@@ -39,6 +41,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    prune_empty_chats()
     poller_task = asyncio.create_task(run_game_state_poller())
     reminder_task = asyncio.create_task(run_reminder_poller())
     try:
@@ -86,6 +89,7 @@ app.include_router(gaming_journal.router)
 app.include_router(debug.router)
 app.include_router(profile.router)
 app.include_router(reminders.router)
+app.include_router(backup.router)
 
 _PROXY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

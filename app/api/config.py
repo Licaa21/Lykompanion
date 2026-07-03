@@ -43,6 +43,7 @@ async def get_config() -> CompanionConfig:
         narration_speed=settings.tts_speed,
         narration_volume=settings.tts_volume,
         narrate_enabled=settings.narrate_enabled,
+        sfx_enabled=settings.sfx_enabled,
         context_window_messages=settings.context_window_messages,
         wake_word_enabled=settings.wake_word_enabled,
         wake_word_phrase=settings.wake_word_phrase,
@@ -170,6 +171,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
 
     settings.narrate_enabled = config.narrate_enabled
     env_updates["NARRATE_ENABLED"] = str(config.narrate_enabled)
+
+    settings.sfx_enabled = config.sfx_enabled
+    env_updates["SFX_ENABLED"] = str(config.sfx_enabled)
 
     settings.context_window_messages = config.context_window_messages
     env_updates["CONTEXT_WINDOW_MESSAGES"] = str(config.context_window_messages)

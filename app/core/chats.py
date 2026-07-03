@@ -43,3 +43,16 @@ def delete_chat(chat_id: str) -> bool:
             return False
         save_chats(filtered)
         return True
+
+
+def prune_empty_chats() -> int:
+    """Removes chats with no messages - lazy chat creation persists a chat the moment it's
+    created, so one never sent a message (e.g. the app was closed right after) lingers in
+    chats.json forever otherwise. Returns the number pruned."""
+    with _lock:
+        chats = load_chats()
+        kept = [c for c in chats if c.get("messages")]
+        pruned = len(chats) - len(kept)
+        if pruned:
+            save_chats(kept)
+        return pruned
