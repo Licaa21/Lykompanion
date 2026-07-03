@@ -6,6 +6,11 @@ REM Command Prompt", or this script will try to locate and load vcvars64.bat.
 setlocal
 cd /d "%~dp0"
 
+REM A stray double-quote anywhere in PATH makes vcvars64.bat abort with a cryptic
+REM "... was unexpected at this time." Quotes are never valid inside PATH, so
+REM strip them here so a corrupted machine PATH can't break the build.
+set "PATH=%PATH:"=%"
+
 where cl.exe >nul 2>nul
 if %ERRORLEVEL%==0 goto :build
 

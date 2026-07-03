@@ -674,6 +674,19 @@ void RenderPlaceholder(LayeredWindow& lw, const wchar_t* label,
 // Toast widget
 // ---------------------------------------------------------------------------
 
+// Per-toast layout plan (namespace scope: MSVC rejects a default member
+// initializer referencing a function-local enum in the generated constructor).
+enum PlanKind { PkText, PkImage, PkMemory };
+struct ToastPlan {
+    PlanKind kind = PkText;
+    IDWriteTextLayout* layout = nullptr;  // text body / image caption / memory content
+    float textH = 0;
+    bool  avatar = false;                 // reply toast: draw the logo avatar
+    float dispW = 0, dispH = 0;           // image display size (ImgReady)
+    IDWriteTextLayout* header = nullptr;  // memory header line
+    float headerH = 0;
+};
+
 void RelayoutToasts() {
     if (g_toasts.empty()) {
         if (g_editMode) RenderPlaceholder(g_toastWin, L"Toasts appear here",
@@ -684,16 +697,7 @@ void RelayoutToasts() {
 
     const float innerW = TOAST_W - 2 * PAD;
 
-    enum PlanKind { PkText, PkImage, PkMemory };
-    struct Plan {
-        PlanKind kind = PkText;
-        IDWriteTextLayout* layout = nullptr;  // text body / image caption / memory content
-        float textH = 0;
-        bool  avatar = false;                 // reply toast: draw the logo avatar
-        float dispW = 0, dispH = 0;           // image display size (ImgReady)
-        IDWriteTextLayout* header = nullptr;  // memory header line
-        float headerH = 0;
-    };
+    using Plan = ToastPlan;
     std::vector<Plan> plans(g_toasts.size());
     std::vector<float> cardH(g_toasts.size());
     int total = 0;
