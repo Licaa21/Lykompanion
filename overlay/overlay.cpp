@@ -106,6 +106,7 @@ constexpr size_t MAX_TOASTS = 5;    // cap on g_toasts; oldest is dropped on ove
                                      // instead of falling behind on long, multi-sentence replies
 constexpr int   ROW_H     = 24;     // game-state row height
 constexpr DWORD TOAST_MS  = 6000;   // default toast lifetime
+constexpr DWORD MEMORY_TOAST_MS = TOAST_MS * 2;  // memory save/remove toasts stay up longer, easy to miss otherwise
 constexpr DWORD IMAGE_MS  = 22000;  // image toasts linger longer than text
 constexpr int   IMAGE_MAX_H = 340;  // cap displayed image height
 
@@ -1322,7 +1323,7 @@ void AddMemoryToast(const std::wstring& action, const std::wstring& scope,
     t.memAction = action;
     t.memScope = scope;
     t.text = content;
-    t.expire = GetTickCount64() + TOAST_MS;
+    t.expire = GetTickCount64() + MEMORY_TOAST_MS;
     g_memToasts.push_back(std::move(t));
     RelayoutMemories();
 }
