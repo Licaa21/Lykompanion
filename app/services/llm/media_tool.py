@@ -20,20 +20,32 @@ MEDIA_TOOLS = [
         "function": {
             "name": "play_on_youtube",
             "description": (
-                "Search YouTube for a song/video and start playing it in the browser. For a song, "
-                "this prefers the official-audio upload on YouTube Music over the official music "
-                "video. Use this when the user asks to play something 'on YouTube', or just says "
-                "'play <song>' with no platform named and Spotify isn't clearly implied."
+                "Search YouTube for a song OR a video (tutorial, walkthrough, guide, gameplay "
+                "footage, trailer, etc.) and start playing it directly in the browser - no need "
+                "to also call web_search first, this opens the actual video. Use this whenever the "
+                "user asks to play/watch/pull up/find something on YouTube, asks for a video guide "
+                "or tutorial, or just says 'play <song>' with no platform named and Spotify isn't "
+                "clearly implied."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "What to search for and play, e.g. 'Future - Mask Off'.",
+                        "description": "What to search for and play, e.g. 'Future - Mask Off' or 'Skyrim Bleak Falls Barrow dragon claw puzzle tutorial'.",
+                    },
+                    "prefer_audio": {
+                        "type": "boolean",
+                        "description": (
+                            "true if this is a song/music request - resolves the official-audio "
+                            "upload on YouTube Music instead of the official music video. false for "
+                            "anything else (tutorials, guides, gameplay, trailers) - a music-catalog "
+                            "search would otherwise return an irrelevant song-shaped result instead "
+                            "of the actual video the user wants."
+                        ),
                     },
                 },
-                "required": ["query"],
+                "required": ["query", "prefer_audio"],
             },
         },
     },
@@ -114,23 +126,27 @@ async def execute_play_on_youtube(arguments: dict) -> str:
     if not query:
         return "No song/video given to play."
 
-    # Prefer YouTube Music's "song" catalog (official audio, not the music video); fall back to a
-    # plain YouTube search if that's unavailable/finds nothing, so a request for e.g. a gameplay
-    # video or something not in the music catalog still works.
-    try:
-        song = await asyncio.to_thread(_search_youtube_music_sync, query)
-    except ImportError:
-        song = None
-    except Exception:
-        logger.exception("YouTube Music search failed for %r", query)
-        song = None
+    # Only try YouTube Music's "song" catalog when the model has told us this is actually a music
+    # request. ytmusicapi's filter="songs" doesn't return empty for a non-music query (a tutorial,
+    # a walkthrough, gameplay footage) - it returns its best-guess song match regardless, which
+    # would otherwise silently hijack e.g. "find me a Skyrim puzzle tutorial" into playing an
+    # unrelated song. prefer_audio is required in the tool schema so the model must decide.
+    prefer_audio = bool(arguments.get("prefer_audio"))
+    if prefer_audio:
+        try:
+            song = await asyncio.to_thread(_search_youtube_music_sync, query)
+        except ImportError:
+            song = None
+        except Exception:
+            logger.exception("YouTube Music search failed for %r", query)
+            song = None
 
-    if song and song.get("videoId"):
-        title = song.get("title") or query
-        artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
-        _open(f"https://music.youtube.com/watch?v={song['videoId']}")
-        label = f"'{title}'" + (f" by {artists}" if artists else "")
-        return f"Now playing {label} on YouTube Music."
+        if song and song.get("videoId"):
+            title = song.get("title") or query
+            artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
+            _open(f"https://music.youtube.com/watch?v={song['videoId']}")
+            label = f"'{title}'" + (f" by {artists}" if artists else "")
+            return f"Now playing {label} on YouTube Music."
 
     try:
         result = await asyncio.to_thread(_search_youtube_sync, query)
