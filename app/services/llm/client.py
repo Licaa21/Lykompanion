@@ -265,7 +265,7 @@ async def stream_chat_completion_deltas(
         _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
         raise
     full_text = ""
-    tool_call_fragments: dict[int, dict] = {}
+    tool_call_fragments: dict[int | str, dict] = {}
     usage = None
     async for chunk in _iter_with_timeout(stream, _STREAM_CHUNK_TIMEOUT_SECONDS):
         if chunk.usage:
@@ -276,7 +276,15 @@ async def stream_chat_completion_deltas(
                 full_text += delta.content
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    entry = tool_call_fragments.setdefault(tc.index, {"name": "", "arguments": ""})
+                    # See the matching comment in chat.py's _stream_chat_with_tools: some providers
+                    # reuse the same delta.index for distinct parallel tool calls, so fall back to id.
+                    key = tc.index
+                    existing = tool_call_fragments.get(key)
+                    if tc.id and existing and existing.get("id") and existing["id"] != tc.id:
+                        key = tc.id
+                    entry = tool_call_fragments.setdefault(key, {"id": tc.id, "name": "", "arguments": ""})
+                    if tc.id:
+                        entry["id"] = tc.id
                     if tc.function and tc.function.name:
                         entry["name"] += tc.function.name
                     if tc.function and tc.function.arguments:

@@ -538,7 +538,7 @@ async def _stream_chat_with_tools(
     changes something the frontend needs to react to immediately, rather than only after the
     full reply finishes."""
     for _ in range(MAX_TOOL_ITERATIONS):
-        tool_calls: dict[int, dict] = {}
+        tool_calls: dict[int | str, dict] = {}
         round_text = ""
 
         async for delta in stream_chat_completion_deltas(
@@ -549,7 +549,18 @@ async def _stream_chat_with_tools(
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    entry = tool_calls.setdefault(tc.index, {"id": tc.id, "name": "", "arguments": ""})
+                    key = tc.index
+                    existing = tool_calls.get(key)
+                    if tc.id and existing and existing.get("id") and existing["id"] != tc.id:
+                        # Gemini's OpenAI-compat streaming layer has been observed reusing the same
+                        # delta.index for two different parallel tool calls in one round (each still
+                        # carries its own id though) - keying strictly by index then smashes both
+                        # calls' name/arguments together into one malformed call (e.g.
+                        # "play_youtube_playlistshow_image" with two concatenated JSON arg blobs),
+                        # which the model never actually requested and which Gemini then rejects on
+                        # replay. Falling back to the call's own id as the key keeps them separate.
+                        key = tc.id
+                    entry = tool_calls.setdefault(key, {"id": tc.id, "name": "", "arguments": ""})
                     if tc.id:
                         entry["id"] = tc.id
                     if tc.function and tc.function.name:
