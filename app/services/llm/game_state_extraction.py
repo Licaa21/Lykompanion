@@ -86,6 +86,8 @@ def _proactive_allowed() -> bool:
 # right now - offering the field while it would be dropped just trains the model to waste it.
 _PROACTIVE_PROMPT_ADDON = """
 Additionally, you MAY include a **"proactive_message"** field: a short, natural, spoken-style message from the companion to the player, delivered unprompted into their chat (and read aloud). Use it ONLY when you have something genuinely worth interrupting the player for - a relevant tip for exactly the situation on screen, a warning about something they seem to have missed, or a brief comment on a real milestone. It must feel like a friend watching over their shoulder speaking up at the right moment, not a narrator or a coach spamming advice. The bar is high: most windows deserve none - set it to null unless the moment truly calls for it. Never use it to describe what's on screen back to the player (they can see it), never repeat something you (or the chat) already told them, and keep it to one or two conversational sentences.
+
+Lean on whatever real context you have about this exact situation - training data notes, a fact you looked up via "web_search_query" this pass or an earlier one, known facts about the player - instead of a generic reaction. "That's the Ashen Idol, it opens with a poison cloud - don't stand still" beats "careful, tough-looking boss" every time. If you don't actually know anything specific about what's on screen, don't manufacture false confidence - either use "web_search_query" to find out first, or say nothing this window.
 """
 
 
