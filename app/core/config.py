@@ -164,10 +164,9 @@ class Settings(BaseSettings):
     steam_api_key: str = ""
     steam_id: str = ""
 
-    # App-only (Client Credentials) Spotify auth - lets play_on_spotify search the catalog and
-    # hand off a spotify:track: URI to the user's local Spotify app. No user login/Premium needed.
+    # Registers the OAuth app with Spotify (see app/api/spotify_oauth.py) - PKCE means no Client
+    # Secret is needed anywhere in that flow, just this (non-secret) Client ID.
     spotify_client_id: str = ""
-    spotify_client_secret: str = ""
 
     # Gates app/core/debug_log.py recording - off by default so full, untruncated prompts/replies
     # (which can be large) aren't kept in memory unless the user is actively debugging.

@@ -108,8 +108,6 @@ class CompanionConfig(BaseModel):
     steam_id: str | None = None
 
     spotify_client_id: str | None = None
-    spotify_client_secret: str | None = None
-    spotify_client_secret_set: bool = False
     spotify_connected: bool = False
     spotify_display_name: str | None = None
 

@@ -68,7 +68,6 @@ async def get_config() -> CompanionConfig:
         steam_api_key_set=bool(settings.steam_api_key),
         steam_id=settings.steam_id,
         spotify_client_id=settings.spotify_client_id,
-        spotify_client_secret_set=bool(settings.spotify_client_secret),
         spotify_connected=spotify_auth.is_connected(),
         spotify_display_name=spotify_auth.get_display_name(),
         debug_mode_enabled=settings.debug_mode_enabled,
@@ -264,9 +263,6 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.spotify_client_id is not None:
         settings.spotify_client_id = config.spotify_client_id
         env_updates["SPOTIFY_CLIENT_ID"] = config.spotify_client_id
-    if config.spotify_client_secret is not None:
-        settings.spotify_client_secret = config.spotify_client_secret
-        env_updates["SPOTIFY_CLIENT_SECRET"] = config.spotify_client_secret
 
     settings.debug_mode_enabled = config.debug_mode_enabled
     env_updates["DEBUG_MODE_ENABLED"] = str(config.debug_mode_enabled)
@@ -287,7 +283,6 @@ _CLEARABLE_KEYS = {
     "custom_openai_api_key": "CUSTOM_OPENAI_API_KEY",
     "igdb_client_secret": "IGDB_CLIENT_SECRET",
     "steam_api_key": "STEAM_API_KEY",
-    "spotify_client_secret": "SPOTIFY_CLIENT_SECRET",
 }
 
 

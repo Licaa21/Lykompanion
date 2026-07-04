@@ -1,8 +1,10 @@
-"""Per-user Spotify OAuth token storage (Authorization Code grant) - separate from the app-level
-Client ID/Secret in Settings/.env, which only register the OAuth app with Spotify and are never
-sufficient on their own to act on a user's account. data/spotify_auth.json holds the refresh token
-(long-lived) plus a cached access token (short-lived, auto-refreshed here). Runtime state, not
-static config, so it lives in data/ like reminders/chats rather than .env."""
+"""Per-user Spotify OAuth token storage (Authorization Code + PKCE grant - see
+app/api/spotify_oauth.py) - separate from the app-level Client ID in Settings/.env, which only
+registers the OAuth app with Spotify and is never sufficient on its own to act on a user's
+account. data/spotify_auth.json holds the refresh token (long-lived) plus a cached access token
+(short-lived, auto-refreshed here). Runtime state, not static config, so it lives in data/ like
+reminders/chats rather than .env. PKCE means no Client Secret is needed anywhere in this flow,
+including here on refresh - just the (non-secret) Client ID."""
 
 import json
 import time
@@ -59,10 +61,10 @@ def save_from_authorization(
 
 async def get_valid_access_token() -> str | None:
     """Returns a currently-valid user access token, refreshing via the stored refresh_token if
-    expired. None if never connected, Client ID/Secret aren't set, or the refresh itself fails
-    (e.g. the user revoked access from Spotify's side) - in that last case the stored tokens are
-    cleared so Settings correctly reverts to "not connected" instead of a stale, permanently
-    broken state that never surfaces to the user."""
+    expired. None if never connected, the Client ID isn't set, or the refresh itself fails (e.g.
+    the user revoked access from Spotify's side) - in that last case the stored tokens are cleared
+    so Settings correctly reverts to "not connected" instead of a stale, permanently broken state
+    that never surfaces to the user."""
     data = _load()
     refresh_token = data.get("refresh_token")
     if not refresh_token:
@@ -71,14 +73,19 @@ async def get_valid_access_token() -> str | None:
     if data.get("access_token") and time.time() < data.get("expires_at", 0):
         return data["access_token"]
 
-    if not settings.spotify_client_id or not settings.spotify_client_secret:
+    if not settings.spotify_client_id:
         return None
 
+    # PKCE: no Client Secret / Basic auth here - client_id travels in the body instead, same as
+    # the original authorization_code exchange in app/api/spotify_oauth.py.
     async with httpx.AsyncClient(timeout=10) as http_client:
         response = await http_client.post(
             TOKEN_URL,
-            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
-            auth=(settings.spotify_client_id, settings.spotify_client_secret),
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": settings.spotify_client_id,
+            },
         )
     if response.status_code != 200:
         disconnect()
