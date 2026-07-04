@@ -1,6 +1,7 @@
 # TODO
 
 - [ ] `play_on_spotify` needs to be properly tested.
+- [ ] Add sort options to the Gaming Journal's My Games library grid: sort by last played, A-Z, date added, plus an ascending/descending toggle.
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 
