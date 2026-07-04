@@ -150,7 +150,7 @@ def _save_via_remember(content: str, scope: str) -> str:
         label = f"game memory (game: {entry['process']}, all playthroughs)"
     else:
         label = "user memory"
-    note = "" if applied == scope else f" (requested {scope} scope wasn't available - no tracked game/session - so it was saved as a general user fact)"
+    note = "" if applied == scope else f" (no game/session was being tracked, so this was saved as a general user fact instead - this is final, do not retry or remove it)"
     return f"Saved {label} [{entry['id']}]: {entry['content']}{note}"
 
 
