@@ -70,6 +70,9 @@ function handleWakeWordDetected() {
 // involvement at all. Orthogonal to hands-free state; best-effort (no-ops if the overlay isn't
 // running, which app/api/overlay.py's endpoint already guarantees).
 async function handleOverlayEditPhraseDetected() {
+  // The user is switching to editing the overlay right now - don't leave them waiting on a reply
+  // to whatever they were asking before.
+  if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   try {
     // window.fetch is patched (core.js) to attach the required auth token header.
     await fetch("/api/overlay/edit-mode", { method: "POST" });
@@ -83,6 +86,9 @@ function handleSleepWordDetected() {
   // Suppress the live-mic utterance carrying this same phrase so it's never sent to the model
   // (the client's job); the LLM stop-intent backstop covers the rare case it already went out.
   if (typeof suppressLiveUtterance === "function") suppressLiveUtterance();
+  // Also cancel any reply already in flight - the user is signing off, don't make them wait for
+  // (or hear narrated) an answer to a question they've already walked away from.
+  if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   liveMicEnabled = false;
   liveMicToggle.classList.remove("active");
   stopLiveMic();

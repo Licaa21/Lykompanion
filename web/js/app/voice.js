@@ -37,6 +37,18 @@ async function blobToWavBlob(blob) {
   return encodeWav(audioBuffer.getChannelData(0), audioBuffer.sampleRate);
 }
 
+let voiceAbortController = null;
+
+// Aborts whatever chat request (text or voice) is currently in flight. Called the instant the
+// sleep word or overlay-edit-phrase is detected, so the user isn't stuck waiting out a reply to
+// a question they've already moved on from. chatAbortController lives in chat-stream.js — safe to
+// reference here since classic <script> tags share one global scope (see CLAUDE.md).
+function cancelInFlightRequest() {
+  chatAbortController?.abort();
+  voiceAbortController?.abort();
+  stopNarration();
+}
+
 async function sendDirectVoice(wavBlob) {
   // Sleep word landed during finalize (after its own suppression check) — don't send. Reset
   // awaitingReply (finalize set it true) so a later hands-free session isn't left blocked.
@@ -56,6 +68,8 @@ async function sendDirectVoice(wavBlob) {
 
   stopNarration();
   awaitingReply = true;
+  let assistantEl = null;
+  let fullReply = "";
   try {
     // Snapshot the history BEFORE the new voice turn is added to it - the audio itself is what
     // carries this turn to the backend, so including a placeholder text message too would
@@ -85,7 +99,12 @@ async function sendDirectVoice(wavBlob) {
     formData.append("client_overlay_toasts", String(document.getElementById("cfg-narrate").checked));
     clearAttachedImage();
 
-    const response = await fetch("/api/chat/voice/stream", { method: "POST", body: formData });
+    voiceAbortController = new AbortController();
+    const response = await fetch("/api/chat/voice/stream", {
+      method: "POST",
+      body: formData,
+      signal: voiceAbortController.signal,
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -96,8 +115,7 @@ async function sendDirectVoice(wavBlob) {
       return;
     }
 
-    const assistantEl = appendMessage("assistant", "", null, true);
-    let fullReply = "";
+    assistantEl = appendMessage("assistant", "", null, true);
     let stopListening = false;
     let transcript = null;
     // Sentence-pipelined narration, same as the text path - narrating only after the full
@@ -180,9 +198,21 @@ async function sendDirectVoice(wavBlob) {
       await enqueueNarration(sentenceBuffer.trim());
     }
   } catch (err) {
-    setVoiceStatus("Voice chat failed", "error");
+    if (err.name === "AbortError") {
+      // Cancelled from cancelInFlightRequest() (sleep word / edit-overlay phrase) - persist
+      // whatever reply text had already streamed in, or drop the empty placeholder bubble.
+      if (fullReply) {
+        addMessageToChat(chat, "assistant", fullReply);
+      } else if (assistantEl) {
+        assistantEl.closest(".message")?.remove();
+      }
+      setVoiceStatus(liveMicEnabled ? "Listening..." : "");
+    } else {
+      setVoiceStatus("Voice chat failed", "error");
+    }
   } finally {
     awaitingReply = false;
+    voiceAbortController = null;
   }
 }
 
