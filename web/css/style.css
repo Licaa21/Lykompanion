@@ -2514,6 +2514,9 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   border-radius: var(--r2);
   color: var(--t1);
 }
+.journal-themed-card--training textarea {
+  min-height: 60vh;
+}
 
 /* The unified tab-card selector row: Universal Info and Training Data get the same tint as
    their matching content pane above, so the color ties the tab to what it shows. */
