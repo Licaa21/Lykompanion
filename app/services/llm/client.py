@@ -105,6 +105,12 @@ def _track(
     )
 
 
+def _record_error(source: str, model: str, messages: list[dict], tools: list[dict] | None, exc: Exception, duration_ms: float) -> None:
+    debug_log.record_error(
+        source=source, model=model, messages=messages, tools=_tool_names(tools), error=str(exc), duration_ms=duration_ms
+    )
+
+
 def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
     if not tool_calls:
         return None
@@ -129,12 +135,16 @@ async def chat_completion(
     client = get_client(provider)
     extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
-    response = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        response_format=response_format,
-        extra_body=extra_body,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
+        raise
     duration_ms = (time.monotonic() - start) * 1000
     content = response.choices[0].message.content or ""
     _track(
@@ -159,13 +169,17 @@ async def chat_completion_stream(
     client = get_client(provider)
     extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
-    stream = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-        extra_body=extra_body,
-    )
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
+        raise
     full_text = ""
     usage = None
     async for chunk in stream:
@@ -201,12 +215,16 @@ async def chat_completion_message(
     client = get_client(provider)
     extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
-    response = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        tools=tools,
-        extra_body=extra_body,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            tools=tools,
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
+        raise
     duration_ms = (time.monotonic() - start) * 1000
     message = response.choices[0].message
     _track(
@@ -234,14 +252,18 @@ async def stream_chat_completion_deltas(
     client = get_client(provider)
     extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
     start = time.monotonic()
-    stream = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        tools=tools,
-        stream=True,
-        stream_options={"include_usage": True},
-        extra_body=extra_body,
-    )
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            tools=tools,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
+        raise
     full_text = ""
     tool_call_fragments: dict[int, dict] = {}
     usage = None
