@@ -345,6 +345,19 @@
             </label>
           </div>
 
+          <h3>SteamGridDB</h3>
+          <p class="modal-hint">
+            Last-resort cover art fallback for the Gaming Journal's My Games library, when a game's box art
+            isn't found on Steam or IGDB. Get a free API key at
+            <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener noreferrer">steamgriddb.com/profile/preferences/api</a>.
+          </p>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">API Key <button type="button" class="cfg-help" data-tip="Free SteamGridDB API key, used only when Steam and IGDB both have no cover art for a tracked game.">?</button></span>
+              <span class="key-field"><input id="cfg-steamgriddb-api-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+
           <h3>Spotify</h3>
           <p class="modal-hint">
             Lets the companion actually control playback on your Spotify account by voice ("play X on Spotify") —

@@ -727,6 +727,7 @@ function applyConfigToForm(cfg) {
     : "Not set";
   document.getElementById("cfg-steam-api-key").placeholder = cfg.steam_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-steam-id").value = cfg.steam_id || "";
+  document.getElementById("cfg-steamgriddb-api-key").placeholder = cfg.steamgriddb_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-spotify-client-id").value = cfg.spotify_client_id || "";
   document.getElementById("cfg-spotify-account-status").textContent = cfg.spotify_connected
     ? `Connected${cfg.spotify_display_name ? " as " + cfg.spotify_display_name : ""}`
@@ -911,6 +912,7 @@ async function saveSettings(saveButton) {
     igdb_client_secret: keyFieldValue("cfg-igdb-client-secret"),
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
+    steamgriddb_api_key: keyFieldValue("cfg-steamgriddb-api-key"),
     spotify_client_id: document.getElementById("cfg-spotify-client-id").value,
     youtube_client_id: document.getElementById("cfg-youtube-client-id").value,
     youtube_client_secret: keyFieldValue("cfg-youtube-client-secret"),
@@ -949,7 +951,7 @@ async function saveSettings(saveButton) {
   const keyInputIds = [
     "cfg-api-key", "cfg-management-key", "cfg-google-ai-studio-key",
     "cfg-google-tts-api-key", "cfg-custom-openai-key",
-    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-youtube-client-secret",
+    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-steamgriddb-api-key", "cfg-youtube-client-secret",
   ];
   for (const id of keyInputIds) {
     const el = document.getElementById(id);

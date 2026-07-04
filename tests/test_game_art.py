@@ -1,9 +1,13 @@
 """Tests for app/core/game_art.py's disk-backed store and search-term cleanup - the
 network-dependent Steam/IGDB/LLM fetch paths aren't covered here (no live calls in tests)."""
 
+import asyncio
+
+import httpx
 import pytest
 
 from app.core import game_art
+from app.core.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -47,3 +51,23 @@ def test_delete_process_is_a_no_op_when_absent():
 ])
 def test_clean_search_term(process, expected):
     assert game_art._clean_search_term(process) == expected
+
+
+def test_fetch_steamgriddb_returns_none_without_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "steamgriddb_api_key", "")
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            return await game_art._fetch_steamgriddb(client, "some game")
+
+    assert asyncio.run(run()) is None
+
+
+def test_augment_with_cover_is_a_noop_when_already_covered():
+    existing = {"title": "Some Game", "cover_url": "https://example.com/cover.jpg", "source": "steam"}
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            return await game_art._augment_with_cover(client, existing, "some game")
+
+    assert asyncio.run(run()) is existing

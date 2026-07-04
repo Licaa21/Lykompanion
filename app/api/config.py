@@ -67,6 +67,7 @@ async def get_config() -> CompanionConfig:
         igdb_client_secret_set=bool(settings.igdb_client_secret),
         steam_api_key_set=bool(settings.steam_api_key),
         steam_id=settings.steam_id,
+        steamgriddb_api_key_set=bool(settings.steamgriddb_api_key),
         spotify_client_id=settings.spotify_client_id,
         spotify_connected=spotify_auth.is_connected(),
         spotify_display_name=spotify_auth.get_display_name(),
@@ -263,6 +264,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.steam_id is not None:
         settings.steam_id = config.steam_id
         env_updates["STEAM_ID"] = config.steam_id
+    if config.steamgriddb_api_key is not None:
+        settings.steamgriddb_api_key = config.steamgriddb_api_key
+        env_updates["STEAMGRIDDB_API_KEY"] = config.steamgriddb_api_key
 
     if config.spotify_client_id is not None:
         settings.spotify_client_id = config.spotify_client_id
@@ -295,6 +299,7 @@ _CLEARABLE_KEYS = {
     "igdb_client_secret": "IGDB_CLIENT_SECRET",
     "youtube_client_secret": "YOUTUBE_CLIENT_SECRET",
     "steam_api_key": "STEAM_API_KEY",
+    "steamgriddb_api_key": "STEAMGRIDDB_API_KEY",
 }
 
 

@@ -110,6 +110,8 @@ class CompanionConfig(BaseModel):
     steam_api_key: str | None = None
     steam_api_key_set: bool = False
     steam_id: str | None = None
+    steamgriddb_api_key: str | None = None
+    steamgriddb_api_key_set: bool = False
 
     spotify_client_id: str | None = None
     spotify_connected: bool = False

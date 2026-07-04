@@ -1,13 +1,15 @@
 """Per-process library art: title + cover image shown as a Steam-like library grid in the
 Gaming Journal's "My Games" tab. Looked up once per process and cached to disk (data/game_art.json)
 so the grid loads instantly after the first visit - Steam's public store-search (no API key needed)
-is tried first, falling back to IGDB (needs a configured Client ID/Secret) for non-Steam games.
+is tried first, falling back to IGDB (needs a configured Client ID/Secret), then SteamGridDB (also
+needs a configured API key) as a last resort for whatever still has no cover art.
 A user-corrected title (title_overridden=True) is never clobbered by a later re-fetch."""
 
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -21,6 +23,7 @@ STORE_SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
+STEAMGRIDDB_BASE_URL = "https://www.steamgriddb.com/api/v2"
 
 
 def _load_all() -> dict[str, dict]:
@@ -151,6 +154,65 @@ async def _fetch_igdb(http_client: httpx.AsyncClient, term: str) -> dict | None:
     return {"title": title, "cover_url": cover_url, "description": game.get("summary"), "source": "igdb"}
 
 
+async def _fetch_steamgriddb(http_client: httpx.AsyncClient, term: str) -> dict | None:
+    """Last-resort art-only source: a community-run grid image database, used only when both
+    Steam and IGDB have no cover for the game (e.g. an unreleased/delisted/obscure title).
+    Needs a free API key (settings.steamgriddb_api_key) - see steamgriddb.com/profile/preferences/api."""
+    if not settings.steamgriddb_api_key:
+        return None
+
+    headers = {"Authorization": f"Bearer {settings.steamgriddb_api_key}"}
+    search_response = await http_client.get(
+        f"{STEAMGRIDDB_BASE_URL}/search/autocomplete/{quote(term)}", headers=headers,
+    )
+    search_response.raise_for_status()
+    results = search_response.json().get("data") or []
+    if not results:
+        return None
+
+    game_id = results[0]["id"]
+    title = results[0].get("name") or term
+
+    # Prefer poster-shaped grids (matching the library card aspect ratio) but fall back to
+    # whatever's available if that exact size isn't - SteamGridDB doesn't have every dimension
+    # for every game.
+    grids_response = await http_client.get(
+        f"{STEAMGRIDDB_BASE_URL}/grids/game/{game_id}",
+        params={"dimensions": "600x900,342x482"},
+        headers=headers,
+    )
+    grids_response.raise_for_status()
+    grids = grids_response.json().get("data") or []
+    if not grids:
+        return None
+
+    return {"title": title, "cover_url": grids[0]["url"], "description": None, "source": "steamgriddb"}
+
+
+async def _augment_with_cover(http_client: httpx.AsyncClient, result: dict | None, term: str) -> dict | None:
+    """Fills in a missing cover (and description, if still missing) by trying IGDB then
+    SteamGridDB in turn, stopping as soon as one produces an image. No-op if `result` already
+    has a cover_url."""
+    if result and result.get("cover_url"):
+        return result
+
+    for fetcher in (_fetch_igdb, _fetch_steamgriddb):
+        try:
+            extra = await fetcher(http_client, term)
+        except httpx.HTTPError:
+            extra = None
+        if not extra:
+            continue
+        if result is None:
+            result = extra
+        else:
+            result["cover_url"] = result.get("cover_url") or extra.get("cover_url")
+            result["description"] = result.get("description") or extra.get("description")
+        if result.get("cover_url"):
+            break
+    return result
+
+
 async def _resolve_official_title(term: str) -> str | None:
     """Last-resort fallback when a process name doesn't match anything on Steam/IGDB (obscure,
     delisted, or a launcher/subprocess name that doesn't resemble the real title): ask an LLM
@@ -205,39 +267,33 @@ async def fetch_art(process: str, force: bool = False) -> dict:
             except httpx.HTTPError:
                 result = None
             # Steam matching the game doesn't mean it *has* cover art (e.g. an unreleased title
-            # with a store page but no library image yet) - try IGDB for art in that case too,
-            # rather than only when Steam found nothing at all.
-            if result is None or not result.get("cover_url"):
-                try:
-                    igdb_result = await _fetch_igdb(http_client, term)
-                except httpx.HTTPError:
-                    igdb_result = None
-                if igdb_result:
-                    if result is None:
-                        result = igdb_result
-                    else:
-                        result["cover_url"] = result.get("cover_url") or igdb_result.get("cover_url")
-                        result["description"] = result.get("description") or igdb_result.get("description")
+            # with a store page but no library image yet) - fall through to IGDB then
+            # SteamGridDB for art in that case too, not only when Steam found nothing at all.
+            result = await _augment_with_cover(http_client, result, term)
     except httpx.HTTPError:
         result = None
 
     official_title: str | None = None
-    if result is None:
+    if result is None or not result.get("cover_url"):
+        # Only worth the LLM+web-search round trip if we still don't have art (or nothing at
+        # all) - a resolved official title gives every source above a better shot at matching.
         official_title = await _resolve_official_title(term)
-        if official_title:
+        if official_title and official_title.lower() != term.lower():
             try:
                 async with httpx.AsyncClient(timeout=10) as http_client:
                     try:
-                        result = await _fetch_steam(http_client, official_title)
+                        retried = await _fetch_steam(http_client, official_title)
                     except httpx.HTTPError:
-                        result = None
-                    if result is None:
-                        try:
-                            result = await _fetch_igdb(http_client, official_title)
-                        except httpx.HTTPError:
-                            result = None
+                        retried = None
+                    retried = await _augment_with_cover(http_client, retried, official_title)
             except httpx.HTTPError:
-                result = None
+                retried = None
+            if retried:
+                if result is None:
+                    result = retried
+                else:
+                    result["cover_url"] = result.get("cover_url") or retried.get("cover_url")
+                    result["description"] = result.get("description") or retried.get("description")
 
     if result is None:
         result = {"title": official_title or term, "cover_url": None, "description": None, "source": None}

@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     # client-side by the same always-listening mechanism as wake_word/sleep_word, independent of
     # hands-free mic state. No-ops if the overlay isn't running.
     overlay_edit_phrase_enabled: bool = False
-    overlay_edit_phrase: str = "edit overlay"
+    overlay_edit_phrase: str = "Edit overlay"
 
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
@@ -163,6 +163,7 @@ class Settings(BaseSettings):
     igdb_client_secret: str = ""
     steam_api_key: str = ""
     steam_id: str = ""
+    steamgriddb_api_key: str = ""
 
     # Registers the OAuth app with Spotify (see app/api/spotify_oauth.py) - PKCE means no Client
     # Secret is needed anywhere in that flow, just this (non-secret) Client ID.

@@ -317,6 +317,7 @@ const CLEARABLE_KEY_FIELDS = {
   "cfg-custom-openai-key": "custom_openai_api_key",
   "cfg-igdb-client-secret": "igdb_client_secret",
   "cfg-steam-api-key": "steam_api_key",
+  "cfg-steamgriddb-api-key": "steamgriddb_api_key",
   "cfg-youtube-client-secret": "youtube_client_secret",
 };
 
