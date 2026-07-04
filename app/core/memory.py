@@ -32,6 +32,12 @@ SCOPES = ("user", "game", "session")
 # asyncio.gather) or a background extraction pass must not overwrite each other's entry.
 _lock = threading.Lock()
 
+# In-memory mirror of the file - every chat turn calls format_memories_for_prompt(), so a plain
+# disk read here would mean a synchronous file read on every single message. Populated on first
+# read, kept in sync by save_memories() on every write (there's no other writer of this file -
+# a restored backup only takes effect after a restart, same as Settings).
+_cache: list[dict] | None = None
+
 
 def _derive_scope(entry: dict) -> str:
     if entry.get("session_id"):
@@ -42,20 +48,27 @@ def _derive_scope(entry: dict) -> str:
 
 
 def load_memories() -> list[dict]:
+    global _cache
+    if _cache is not None:
+        return _cache
     if not MEMORY_PATH.exists():
-        return []
+        _cache = []
+        return _cache
     memories = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
     # Migrate pre-scope entries on read; the next write persists the migrated shape since every
     # mutation rewrites the whole file.
     for m in memories:
         if m.get("scope") not in SCOPES:
             m["scope"] = _derive_scope(m)
-    return memories
+    _cache = memories
+    return _cache
 
 
 def save_memories(memories: list[dict]) -> None:
+    global _cache
     MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     MEMORY_PATH.write_text(json.dumps(memories, indent=2), encoding="utf-8")
+    _cache = memories
 
 
 def remember(content: str, scope: str, process: str | None = None, session_id: str | None = None) -> dict | None:

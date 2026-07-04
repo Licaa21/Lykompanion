@@ -25,16 +25,29 @@ PROMPT_TAIL = 12
 
 _lock = threading.Lock()
 
+# In-memory mirror of the file - format_observations_for_prompt() runs on every chat turn while a
+# game is tracked, so a plain disk read here would mean a synchronous file read on every message.
+# Kept in sync by _save() on every write (no other writer of this file - a restored backup only
+# takes effect after a restart, same as Settings).
+_cache: list[dict] | None = None
+
 
 def _load() -> list[dict]:
+    global _cache
+    if _cache is not None:
+        return _cache
     if not OBSERVATIONS_PATH.exists():
-        return []
-    return json.loads(OBSERVATIONS_PATH.read_text(encoding="utf-8"))
+        _cache = []
+        return _cache
+    _cache = json.loads(OBSERVATIONS_PATH.read_text(encoding="utf-8"))
+    return _cache
 
 
 def _save(entries: list[dict]) -> None:
+    global _cache
     OBSERVATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     OBSERVATIONS_PATH.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    _cache = entries
 
 
 def add_observations(process: str, session_id: str | None, contents: list[tuple[str, float | None]]) -> list[dict]:

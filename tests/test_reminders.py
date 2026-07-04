@@ -12,6 +12,8 @@ from app.core import reminders
 def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr(reminders, "REMINDERS_PATH", tmp_path / "reminders.json")
     monkeypatch.setattr(reminders, "PENDING_PATH", tmp_path / "reminders_pending.json")
+    monkeypatch.setattr(reminders, "_entries_cache", None)
+    monkeypatch.setattr(reminders, "_pending_cache", None)
 
 
 def test_add_and_remove_reminder_roundtrip():

@@ -39,7 +39,9 @@ def get_client(provider: str) -> AsyncOpenAI:
     cached = _client_cache.get(cache_key)
     if cached is not None:
         return cached
-    fresh = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    # Without an explicit timeout the SDK falls back to httpx's default (600s) - a hung/stalled
+    # upstream response would hold a chat request open for minutes instead of failing fast.
+    fresh = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=45.0)
     # Evict only this provider's stale entries (credentials/URL changed) - clearing the whole
     # cache would make two configured providers evict each other on every alternating call.
     for key in [k for k in _client_cache if k[0] == provider]:

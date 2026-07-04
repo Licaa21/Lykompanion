@@ -246,17 +246,24 @@ def _retrieval_query(history: list[dict]) -> str:
 
 
 def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
-    system_content = load_prompt("system_companion")
+    # Split into a stable prefix (rarely changes turn-to-turn: base prompt, custom instructions,
+    # sleep-word backstop, monitor list) and a variable suffix (datetime, foreground app, memories,
+    # reminders, game state, observations - different on every single call). Sent as two separate
+    # content blocks with an explicit cache_control breakpoint on the stable one: providers that
+    # support prompt caching (e.g. Anthropic models via OpenRouter) can then reuse the cached
+    # prefix instead of reprocessing it every turn. Harmless elsewhere - an unrecognized
+    # "cache_control" key is just ignored JSON on providers that don't support it.
+    stable_content = load_prompt("system_companion")
 
     custom_instructions = load_custom_instructions().strip()
     if custom_instructions:
-        system_content += "\n\n" + custom_instructions
+        stable_content += "\n\n" + custom_instructions
 
     # LLM backstop for the client-side sleep word: if the browser's speech recognition misses the
     # phrase (or isn't available) and it reaches the model instead, treat it as a stop command
     # rather than a question to answer.
     if settings.sleep_word_enabled and settings.sleep_word_phrase.strip():
-        system_content += (
+        stable_content += (
             f'\n\n[Sleep word] If the user\'s message is essentially just "{settings.sleep_word_phrase.strip()}" '
             "(or a clear stop-listening request), treat it purely as a command to stop hands-free listening: "
             'call stop_listening and reply with exactly "Signing off..." and nothing else. Never answer it as a '
@@ -265,16 +272,16 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
 
     monitors = format_monitors_for_prompt()
     if monitors:
-        system_content += "\n\n" + monitors
+        stable_content += "\n\n" + monitors
 
-    # Variable content last — maximises cache hits on stable prefix above.
-    system_content += "\n\n" + current_datetime_context()
+    # Variable content from here on — kept out of the cached block above.
+    variable_content = current_datetime_context()
 
     # Injected instead of a fetch_active_process tool call — it's a few tokens, and having the
     # model fetch it doubled the LLM cost of every conversation that needed it.
     foreground = get_foreground_process_name()
     if foreground:
-        system_content += (
+        variable_content += (
             f"\n\n[Active application] The currently focused application is: {foreground} "
             "(if this is a browser or the companion app itself (python.exe), the player likely alt-tabbed away from their game or haven't started playing yet)."
         )
@@ -292,23 +299,27 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
         game_memory_limit=settings.memory_rag_limit,
     )
     if memories:
-        system_content += "\n\n" + memories
+        variable_content += "\n\n" + memories
 
     reminders_text = _format_reminders_for_prompt()
     if reminders_text:
-        system_content += "\n\n" + reminders_text
+        variable_content += "\n\n" + reminders_text
 
     game_state_text = game_state.format_game_state_for_prompt()
     divergence_warning = game_state.pop_pending_divergence(tracked_process) if tracked_process else None
     if game_state_text:
-        system_content += "\n\n" + game_state_text
+        variable_content += "\n\n" + game_state_text
     if tracked_process:
         observations_text = observations.format_observations_for_prompt(tracked_process, tracked_session)
         if observations_text:
-            system_content += "\n\n" + observations_text
+            variable_content += "\n\n" + observations_text
     if divergence_warning:
-        system_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
+        variable_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
 
+    system_content = [
+        {"type": "text", "text": stable_content, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": variable_content},
+    ]
     return [{"role": "system", "content": system_content}]
 
 

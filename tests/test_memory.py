@@ -9,6 +9,7 @@ from app.core import memory
 @pytest.fixture(autouse=True)
 def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "MEMORY_PATH", tmp_path / "memory.json")
+    monkeypatch.setattr(memory, "_cache", None)
 
 
 def test_add_update_remove_roundtrip():

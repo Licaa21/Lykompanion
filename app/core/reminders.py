@@ -11,20 +11,35 @@ PENDING_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reminde
 # firing while a tool mutates the same file must not overwrite each other's changes.
 _lock = threading.Lock()
 
+# In-memory mirrors of the two files - _format_reminders_for_prompt() runs on every chat turn, and
+# due_entries() runs on every reminders-poller tick, so plain disk reads here would mean a
+# synchronous file read on every message/tick. Kept in sync by the matching save_*() on every
+# write (no other writer of these files - a restored backup only takes effect after a restart,
+# same as Settings).
+_entries_cache: list[dict] | None = None
+_pending_cache: list[dict] | None = None
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def load_entries() -> list[dict]:
+    global _entries_cache
+    if _entries_cache is not None:
+        return _entries_cache
     if not REMINDERS_PATH.exists():
-        return []
-    return json.loads(REMINDERS_PATH.read_text(encoding="utf-8"))
+        _entries_cache = []
+        return _entries_cache
+    _entries_cache = json.loads(REMINDERS_PATH.read_text(encoding="utf-8"))
+    return _entries_cache
 
 
 def save_entries(entries: list[dict]) -> None:
+    global _entries_cache
     REMINDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     REMINDERS_PATH.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    _entries_cache = entries
 
 
 def list_reminders() -> list[dict]:
@@ -132,14 +147,21 @@ def mark_fired(entry: dict) -> None:
 
 
 def load_pending() -> list[dict]:
+    global _pending_cache
+    if _pending_cache is not None:
+        return _pending_cache
     if not PENDING_PATH.exists():
-        return []
-    return json.loads(PENDING_PATH.read_text(encoding="utf-8"))
+        _pending_cache = []
+        return _pending_cache
+    _pending_cache = json.loads(PENDING_PATH.read_text(encoding="utf-8"))
+    return _pending_cache
 
 
 def save_pending(pending: list[dict]) -> None:
+    global _pending_cache
     PENDING_PATH.parent.mkdir(parents=True, exist_ok=True)
     PENDING_PATH.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+    _pending_cache = pending
 
 
 def add_pending(text: str) -> dict:

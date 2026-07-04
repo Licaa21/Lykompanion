@@ -12,6 +12,18 @@ _SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 # Cached credentials — google-auth refreshes the token automatically when it expires.
 _credentials = None
 
+# One persistent keep-alive client instead of a fresh connection (TCP+TLS handshake) on every
+# synthesize() call - narration fires this once per sentence, so a multi-sentence reply used to
+# pay handshake cost repeatedly for a fixed remote host.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(base_url=_BASE_URL, timeout=30)
+    return _client
+
 
 def _get_access_token() -> str:
     try:
@@ -66,21 +78,20 @@ async def synthesize(text: str, voice: str | None = None, speed: float | None = 
     language_code = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else "en-US"
 
     headers, params = await _request_auth()
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-        response = await client.post(
-            "/v1/text:synthesize",
-            headers=headers,
-            params=params,
-            json={
-                "input": {"text": text},
-                "voice": {"languageCode": language_code, "name": voice_name},
-                "audioConfig": {
-                    "audioEncoding": "LINEAR16",
-                    "speakingRate": speed or settings.tts_speed,
-                },
+    response = await _get_client().post(
+        "/v1/text:synthesize",
+        headers=headers,
+        params=params,
+        json={
+            "input": {"text": text},
+            "voice": {"languageCode": language_code, "name": voice_name},
+            "audioConfig": {
+                "audioEncoding": "LINEAR16",
+                "speakingRate": speed or settings.tts_speed,
             },
-        )
-        response.raise_for_status()
+        },
+    )
+    response.raise_for_status()
 
     pcm_bytes = base64.b64decode(response.json()["audioContent"])
     # Chirp 3 HD returns 24000 Hz mono 16-bit PCM.

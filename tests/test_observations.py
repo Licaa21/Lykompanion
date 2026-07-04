@@ -8,6 +8,7 @@ from app.core import observations
 @pytest.fixture(autouse=True)
 def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr(observations, "OBSERVATIONS_PATH", tmp_path / "observations.json")
+    monkeypatch.setattr(observations, "_cache", None)
 
 
 def test_add_and_get_roundtrip():

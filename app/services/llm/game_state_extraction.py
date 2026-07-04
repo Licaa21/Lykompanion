@@ -112,7 +112,7 @@ def _frames_similar(a: str, b: str) -> bool:
 _VISUAL_DIFF_SIZE = (64, 64)
 
 
-def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
+def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
     """Coarse whole-frame visual difference between two images, as a 0-100 percent: both are
     downscaled to a tiny grayscale thumbnail (cheap, and blurs out compression/OCR-irrelevant
     noise) and compared via mean absolute pixel difference. Used only as a fallback signal when
@@ -122,6 +122,13 @@ def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
     b_thumb = b.convert("L").resize(_VISUAL_DIFF_SIZE)
     diff = ImageChops.difference(a_thumb, b_thumb)
     return (ImageStat.Stat(diff).mean[0] / 255) * 100
+
+
+async def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
+    # Off the event loop - this poller ticks every capture interval while a game is tracked, and
+    # PIL's resize/diff work is pure CPU, so running it inline would stall every other coroutine
+    # (including a concurrent foreground chat request) for its duration.
+    return await asyncio.to_thread(_visual_diff_percent_sync, a, b)
 
 
 def _format_frames(frames: list[tuple[float, str]]) -> str:
@@ -397,7 +404,8 @@ async def _capture_tick() -> None:
     if image is not None:
         if image.width > _OCR_MAX_WIDTH:
             ratio = _OCR_MAX_WIDTH / image.width
-            image = image.resize((_OCR_MAX_WIDTH, int(image.height * ratio)))
+            # Off the event loop - PIL resize is pure CPU and this runs every capture tick.
+            image = await asyncio.to_thread(image.resize, (_OCR_MAX_WIDTH, int(image.height * ratio)))
         # Tracked regardless of the OCR-text dedupe below - the visual-diff fallback needs the
         # window's true first/last frame, not just its first/last *kept* one.
         if _window_first_image is None:
@@ -413,7 +421,7 @@ async def _capture_tick() -> None:
             _last_kept_text = normalized
             # Keep the pixels too (downscaled per the screenshot settings) - the first and most
             # recent kept frames of the window get attached to the extraction call as images.
-            frame_b64 = image_to_b64(image)
+            frame_b64 = await asyncio.to_thread(image_to_b64, image)
             if _first_frame_b64 is None:
                 _first_frame_b64 = frame_b64
             _last_frame_b64 = frame_b64
@@ -454,7 +462,7 @@ async def _capture_tick() -> None:
             and window_last_image is not None
             and window_first_image is not window_last_image
         ):
-            diff_percent = _visual_diff_percent(window_first_image, window_last_image)
+            diff_percent = await _visual_diff_percent(window_first_image, window_last_image)
         if diff_percent is not None and diff_percent >= settings.game_state_visual_diff_threshold_percent:
             # OCR text never changed all window, but the actual pixels did (camera movement,
             # environment change) - a minimal-UI/textless gameplay moment, not a frozen screen.
@@ -467,8 +475,8 @@ async def _capture_tick() -> None:
                 process,
             )
             frames_to_send = [(time.time(), _last_kept_text or "(no on-screen text detected)")]
-            first_b64 = first_b64 or image_to_b64(window_first_image)
-            last_b64 = image_to_b64(window_last_image)
+            first_b64 = first_b64 or await asyncio.to_thread(image_to_b64, window_first_image)
+            last_b64 = await asyncio.to_thread(image_to_b64, window_last_image)
         else:
             logger.debug(
                 "Game-state poll: no changed frames captured for process=%r this window, skipping LLM pass",
