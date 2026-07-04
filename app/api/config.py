@@ -20,6 +20,9 @@ async def get_config() -> CompanionConfig:
         custom_openai_api_key_set=bool(settings.custom_openai_api_key),
         memory_extraction_model=settings.memory_extraction_model or None,
         overlay_enabled=settings.overlay_enabled,
+        overlay_edit_hotkey=settings.overlay_edit_hotkey,
+        overlay_edit_phrase_enabled=settings.overlay_edit_phrase_enabled,
+        overlay_edit_phrase=settings.overlay_edit_phrase,
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
@@ -139,6 +142,22 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         from app.services.llm import game_state_extraction
 
         game_state_extraction.apply_overlay_enabled(config.overlay_enabled)
+
+    hotkey_changed = settings.overlay_edit_hotkey != config.overlay_edit_hotkey
+    settings.overlay_edit_hotkey = config.overlay_edit_hotkey
+    env_updates["OVERLAY_EDIT_HOTKEY"] = config.overlay_edit_hotkey
+    if hotkey_changed:
+        from app.services import overlay_process
+
+        parts = [p.strip().lower() for p in config.overlay_edit_hotkey.split("+") if p.strip()]
+        mods, key = parts[:-1], (parts[-1] if parts else "o")
+        overlay_process.set_hotkey(mods, key)  # live: re-registers in an already-running overlay
+        overlay_process.write_hotkey_to_layout_file(mods, key)  # next launch also picks it up
+
+    settings.overlay_edit_phrase_enabled = config.overlay_edit_phrase_enabled
+    env_updates["OVERLAY_EDIT_PHRASE_ENABLED"] = str(config.overlay_edit_phrase_enabled)
+    settings.overlay_edit_phrase = config.overlay_edit_phrase
+    env_updates["OVERLAY_EDIT_PHRASE"] = config.overlay_edit_phrase
 
     settings.game_state_ocr_enabled = config.game_state_ocr_enabled
     env_updates["GAME_STATE_OCR_ENABLED"] = str(config.game_state_ocr_enabled)

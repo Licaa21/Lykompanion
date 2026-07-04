@@ -188,6 +188,36 @@ def set_edit_mode(enabled: bool) -> None:
     push({"type": "edit_mode", "enabled": bool(enabled)})
 
 
+_LAYOUT_PATH = (
+    Path(os.environ.get("LOCALAPPDATA", "."))
+    / "Lykompanion"
+    / "overlay_layout.json"
+)
+
+
+def set_hotkey(mods: list[str], key: str) -> None:
+    """Push a live hotkey change to an already-running overlay (re-registers the
+    global hotkey immediately). Best-effort; no-ops if the overlay isn't running."""
+    push({"type": "set_hotkey", "mods": mods, "key": key})
+
+
+def write_hotkey_to_layout_file(mods: list[str], key: str) -> None:
+    """Persist the hotkey into the overlay's own layout JSON so a FRESH overlay
+    launch (before any pipe round-trip — RegisterHotKey runs synchronously very
+    early in the exe's startup) also picks it up. The overlay owns this file's
+    schema; we only ever touch the two hotkey fields, never the presets array."""
+    try:
+        data: dict = {}
+        if _LAYOUT_PATH.exists():
+            data = json.loads(_LAYOUT_PATH.read_text(encoding="utf-8"))
+        data["hotkeyMods"] = mods
+        data["hotkeyKey"] = key
+        _LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _LAYOUT_PATH.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError):
+        logger.exception("Failed to write overlay hotkey to layout file")
+
+
 def stop() -> None:
     """Ask the overlay to quit (via its pipe), then ensure the process is gone."""
     global _proc

@@ -150,6 +150,15 @@ let wakeWordPhrase = "Hey Buddy";
 let sleepWordEnabled = false;
 let sleepWordPhrase = "Go to sleep";
 
+// "Edit overlay" phrase - opens the native overlay's edit mode directly, bypassing the LLM
+// entirely. Detected the same way as wake/sleep word, but independent of hands-free mic state.
+let overlayEditPhraseEnabled = false;
+let overlayEditPhrase = "edit overlay";
+
+// Configurable global hotkey (Ctrl+Shift+O by default) that toggles the native overlay's edit
+// mode; the display string shown/edited in Settings.
+let overlayEditHotkey = "Ctrl+Shift+O";
+
 // Toast manager — max 3 visible, queues the rest as "+N more", deduplicates by id.
 const _toasts = (() => {
   const MAX = 3;

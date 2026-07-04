@@ -103,6 +103,49 @@ document.getElementById("cfg-refresh-devices").addEventListener("click", populat
 // A device being plugged/unplugged while Settings is open re-syncs the lists.
 if (navigator.mediaDevices) navigator.mediaDevices.addEventListener?.("devicechange", populateAudioDevices);
 
+// --- Overlay edit hotkey capture ---
+// No native <select>/text-entry fits a key combo well, so this is a small self-contained
+// "press a key combo" recorder: one-shot keydown listener, builds a canonical string, rejects
+// combos with no modifier (so it never steals a plain letter the user might type elsewhere).
+const overlayHotkeyDisplay = document.getElementById("cfg-overlay-hotkey-display");
+const overlayHotkeyRecordBtn = document.getElementById("cfg-overlay-hotkey-record");
+
+function formatHotkeyEvent(event) {
+  const mods = [];
+  if (event.ctrlKey) mods.push("Ctrl");
+  if (event.shiftKey) mods.push("Shift");
+  if (event.altKey) mods.push("Alt");
+  if (event.metaKey) mods.push("Win");
+  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
+  return { mods, key, combo: [...mods, key].join("+") };
+}
+
+const HOTKEY_BARE_MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
+
+overlayHotkeyRecordBtn.addEventListener("click", () => {
+  overlayHotkeyDisplay.textContent = "Press a key combo…";
+  overlayHotkeyDisplay.classList.add("recording");
+  overlayHotkeyRecordBtn.disabled = true;
+
+  const onKeydown = (event) => {
+    if (HOTKEY_BARE_MODIFIERS.has(event.key)) return;  // wait for a real key
+    event.preventDefault();
+    document.removeEventListener("keydown", onKeydown, true);
+    overlayHotkeyRecordBtn.disabled = false;
+    overlayHotkeyDisplay.classList.remove("recording");
+
+    const { mods, combo } = formatHotkeyEvent(event);
+    if (mods.length === 0) {
+      // Reject combos with no modifier — display reverts, nothing is captured.
+      overlayHotkeyDisplay.textContent = overlayEditHotkey;
+      return;
+    }
+    overlayEditHotkey = combo;
+    overlayHotkeyDisplay.textContent = combo;
+  };
+  document.addEventListener("keydown", onKeydown, true);
+});
+
 function populateSelect(selectEl, options, selectedValue) {
   selectEl.innerHTML = "";
   for (const { value, label } of options) {
@@ -568,6 +611,8 @@ function applyConfigToForm(cfg) {
   gameStateEnabledInput.checked = cfg.game_state_ocr_enabled;
   updateGameStateDependentVisibility();
   document.getElementById("cfg-overlay-enabled").checked = cfg.overlay_enabled;
+  overlayEditHotkey = cfg.overlay_edit_hotkey || "Ctrl+Shift+O";
+  document.getElementById("cfg-overlay-hotkey-display").textContent = overlayEditHotkey;
   document.getElementById("cfg-game-state-training-enabled").checked = cfg.game_state_training_enabled;
   document.getElementById("cfg-proactive-enabled").checked = cfg.proactive_messages_enabled;
   document.getElementById("cfg-proactive-interval").value = cfg.proactive_min_interval_minutes ?? 15;
@@ -593,11 +638,15 @@ function applyConfigToForm(cfg) {
   wakeWordMaxFailuresValue.textContent = wakeWordMaxFailures;
   sleepWordEnabled = cfg.sleep_word_enabled;
   sleepWordPhrase = cfg.sleep_word_phrase || "Go to sleep";
+  overlayEditPhraseEnabled = cfg.overlay_edit_phrase_enabled;
+  overlayEditPhrase = cfg.overlay_edit_phrase || "edit overlay";
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
     sleepWordEnabledInput.checked = sleepWordEnabled;
     sleepWordPhraseInput.value = sleepWordPhrase;
+    overlayEditPhraseEnabledInput.checked = overlayEditPhraseEnabled;
+    overlayEditPhraseInput.value = overlayEditPhrase;
     updateWakeWordListenerState();
   }
 
@@ -718,6 +767,9 @@ async function saveSettings(saveButton) {
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
     overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
+    overlay_edit_hotkey: overlayEditHotkey || "Ctrl+Shift+O",
+    overlay_edit_phrase_enabled: overlayEditPhraseEnabledInput.checked,
+    overlay_edit_phrase: overlayEditPhraseInput.value.trim() || "edit overlay",
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),

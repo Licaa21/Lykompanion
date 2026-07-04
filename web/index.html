@@ -497,6 +497,20 @@
               </label>
             </div>
           </div>
+
+          <div id="overlay-edit-phrase-controls">
+            <label class="checkbox">
+              <input id="cfg-overlay-edit-phrase-enabled" type="checkbox" />
+              Enable "edit overlay" phrase
+              <button type="button" class="cfg-help" data-tip="Say this phrase to open the in-game overlay's edit mode directly — detected locally, never sent to the AI. No-ops if the overlay isn't running.">?</button>
+            </label>
+            <div id="overlay-edit-phrase-dependent">
+              <label>
+                <span class="cfg-label">Phrase <button type="button" class="cfg-help" data-tip="The phrase that opens overlay edit mode when spoken, regardless of hands-free state.">?</button></span>
+                <input id="cfg-overlay-edit-phrase" type="text" value="edit overlay" autocomplete="off" />
+              </label>
+            </div>
+          </div>
         </section>
 
         </div>
@@ -632,8 +646,17 @@
             <label class="checkbox">
               <input id="cfg-overlay-enabled" type="checkbox" />
               In-game overlay (Windows only) — show game-state + toasts over the game
-              <button type="button" class="cfg-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press Ctrl+Shift+O in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
+              <button type="button" class="cfg-help" id="cfg-overlay-enabled-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press the configured hotkey in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
             </label>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Overlay Edit Hotkey <button type="button" class="cfg-help" data-tip="The global key combo that toggles the overlay's edit mode in-game.">?</button></span>
+                <span class="hotkey-capture">
+                  <span id="cfg-overlay-hotkey-display" class="hotkey-display">Ctrl+Shift+O</span>
+                  <button type="button" id="cfg-overlay-hotkey-record" class="secondary-btn">Change…</button>
+                </span>
+              </label>
+            </div>
 
             <label class="checkbox">
               <input id="cfg-proactive-enabled" type="checkbox" />

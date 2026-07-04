@@ -27,8 +27,15 @@ just one client. Commands:
 {"type":"image","url":"https://...","alt":"caption"}
 {"type":"game_state","title":"...","rows":[["Label","Value"], ...]}
 {"type":"edit_mode","enabled":true}
+{"type":"set_hotkey","mods":["ctrl","shift"],"key":"o"}
 {"type":"quit"}
 ```
+
+`set_hotkey` re-registers the global edit-mode hotkey immediately in an
+already-running overlay (`mods` is any of `ctrl`/`shift`/`alt`/`win`); the same
+combo is also written into `overlay_layout.json` so a not-yet-running overlay
+picks it up at its next launch too (`RegisterHotKey` runs before the pipe
+server is guaranteed to be listening).
 
 `image` commands download the URL on a background thread (WIC decode + downscale)
 and render it as a toast with an optional caption — so companion replies that
@@ -47,14 +54,35 @@ $w.WriteLine('{"type":"toast","text":"hello from the pipe","kind":"reply"}')
 
 ## Edit mode
 
-Press **Ctrl+Shift+O** (a global hotkey the exe registers itself) to toggle edit
-mode: widgets become draggable, empty ones show a placeholder, and a top-center
-toolbar exposes **opacity**, **text size**, **font**, an **accent-color** picker,
-and per-area **show/hide** toggles (Chat = reply/reminder/image toasts, Memory =
-memory save/remove toasts, Panel = game-state panel, Mic = hands-free indicator).
-The memory toasts live in their **own draggable area** (bottom-right by default),
-separate from the reply/reminder toasts (top-right). Positions + appearance persist
-to `%LOCALAPPDATA%\Lykompanion\overlay_layout.json`.
+Press the configured hotkey (**Ctrl+Shift+O** by default, changeable in
+Settings — see below) to toggle edit mode: widgets become draggable, empty ones
+show a placeholder, and a top-center toolbar exposes **opacity**, **text
+size**, **font**, an **accent-color** picker, per-area **show/hide** toggles
+(Chat = reply/reminder/image toasts, Memory = memory save/remove toasts, Panel
+= game-state panel, Mic = hands-free indicator), a **presets** row, and
+**Save** / **Discard & Close** buttons. The memory toasts live in their **own
+draggable area** (bottom-right by default), separate from the reply/reminder
+toasts (top-right).
+
+Changes are no longer saved on every drag or toolbar click — only an explicit
+**Save** commits the current layout to the active preset. Pressing the hotkey
+again while something is unsaved opens a **Save & Exit / Discard & Exit / Keep
+Editing** prompt instead of guessing; **Discard & Close** always reverts to how
+things looked when edit mode was opened. **Presets** let you keep several named
+layouts (switch via the toolbar chips or a gamepad's LB/RB) and create/delete
+them (+ / × / a mouse-only, keyboard-typed rename — no on-screen keyboard).
+Everything persists to `%LOCALAPPDATA%\Lykompanion\overlay_layout.json`.
+
+A connected **Xbox-style gamepad** (via XInput) drives the whole editor
+alongside the mouse: D-pad/left-stick cycles the selected widget (shown with a
+solid accent ring, gamepad-only — mouse dragging has no "selected" concept),
+right-stick moves it, **A** = Save, **B** = Discard & Close, **X** = delete the
+active preset, **Y** = create a new one, **LB**/**RB** = switch presets. The
+on-screen hint line adapts to whichever input you used most recently.
+
+Saying a configured phrase (Settings → "edit overlay" phrase, off by default)
+also opens edit mode directly — detected locally in the browser, never sent to
+the AI; no-ops if the overlay isn't running.
 
 `Lykompanion-overlay.exe --demo` shows sample content for ~20s for a quick visual check.
 
