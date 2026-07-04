@@ -82,6 +82,12 @@ def _search_youtube_sync(query: str) -> dict | None:
         "noplaylist": True,
         "default_search": "ytsearch1",
         "skip_download": True,
+        # We only ever resolve search metadata here, never download a stream, so the JS-runtime
+        # challenge solver yt-dlp defaults to (tries "deno" on PATH) is both unneeded and, on a
+        # machine with an incompatible deno.exe on PATH, pops a blocking Windows "can't run this"
+        # dialog when yt-dlp tries to invoke it. Equivalent to the --no-js-runtimes CLI flag - the
+        # Python API takes the already-parsed form, an empty dict, not the CLI's list syntax.
+        "js_runtimes": {},
     }
     with YoutubeDL(options) as ydl:
         info = ydl.extract_info(query, download=False)
