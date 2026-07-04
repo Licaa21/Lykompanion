@@ -34,6 +34,7 @@ from app.api import (
     tts,
     usage,
     voice,
+    youtube_oauth,
 )
 from app.core.chats import prune_empty_chats
 from app.services import overlay_process
@@ -71,11 +72,12 @@ app = FastAPI(title="Lykompanion", lifespan=lifespan)
 # which can't send headers. Unset (dev server started directly via uvicorn) means no auth.
 API_TOKEN = os.environ.get("LYKO_API_TOKEN", "")
 
-# Spotify's OAuth redirect is a plain browser GET with no way to attach our custom header/query
-# token, so it must be exempt from the check below. Safe: the callback route validates its own
-# one-shot CSRF "state" param (see app/api/spotify_oauth.py), which is what actually prevents an
-# unrelated request from completing someone else's pending authorization.
-_TOKEN_EXEMPT_PATHS = {"/api/spotify/oauth/callback"}
+# Spotify/YouTube's OAuth redirects are plain browser GETs with no way to attach our custom
+# header/query token, so they must be exempt from the check below. Safe: each callback route
+# validates its own one-shot CSRF "state" param (see app/api/spotify_oauth.py /
+# app/api/youtube_oauth.py), which is what actually prevents an unrelated request from completing
+# someone else's pending authorization.
+_TOKEN_EXEMPT_PATHS = {"/api/spotify/oauth/callback", "/api/youtube/oauth/callback"}
 
 
 @app.middleware("http")
@@ -109,12 +111,16 @@ app.include_router(profile.router)
 app.include_router(reminders.router)
 app.include_router(backup.router)
 app.include_router(spotify_oauth.router)
+app.include_router(youtube_oauth.router)
 
+from app.services.llm.web_search_tool import SEARXNG_HEADERS
+
+# Must match the headers web_search_tool.py's _image_candidate_loads used to validate this same
+# URL - a Referer (e.g. google.com) trips some hosts' hotlink protection that a referer-less
+# request passes, so a candidate that validated fine could 403 here if the headers differed.
 _PROXY_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    **SEARXNG_HEADERS,
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.google.com/",
 }
 
 _PROXY_MAX_BYTES = 10 * 1024 * 1024
