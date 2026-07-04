@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. Keep this file current toward its two goals: no re-exploration after context loss, minimal token consumption.
 4. After finishing a task, update `TODO.md` — remove completed items, add newly found ones.
 5. After each task, commit and push to `main` (pre-authorized — don't ask).
-6. Never start servers, curl endpoints, or write one-off verification scripts — the user tests everything. Running `pytest tests` is allowed.
+6. Never start servers, curl endpoints, or write one-off verification scripts — the user tests everything. Running `pytest tests` is allowed. Never run `overlay/build.cmd` either — `RUN.cmd` already rebuilds the overlay automatically on every launch; leave it to the user.
 
 ## What this is
 
