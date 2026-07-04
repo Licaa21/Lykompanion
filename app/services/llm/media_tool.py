@@ -20,9 +20,10 @@ MEDIA_TOOLS = [
         "function": {
             "name": "play_on_youtube",
             "description": (
-                "Search YouTube for a song/video and start playing it in the browser. Use this "
-                "when the user asks to play something 'on YouTube', or just says 'play <song>' "
-                "with no platform named and Spotify isn't clearly implied."
+                "Search YouTube for a song/video and start playing it in the browser. For a song, "
+                "this prefers the official-audio upload on YouTube Music over the official music "
+                "video. Use this when the user asks to play something 'on YouTube', or just says "
+                "'play <song>' with no platform named and Spotify isn't clearly implied."
             ),
             "parameters": {
                 "type": "object",
@@ -90,10 +91,40 @@ def _search_youtube_sync(query: str) -> dict | None:
     return entries[0] if entries else info
 
 
+def _search_youtube_music_sync(query: str) -> dict | None:
+    """Top "song" match (filter="songs" scopes to YouTube Music's music catalog, which is
+    generally the official-audio/topic-channel upload, as opposed to filter=None or "videos"
+    which would surface the official music video instead). Anonymous - no login/API key needed
+    for public search, same as yt-dlp's scrape-based approach above."""
+    from ytmusicapi import YTMusic
+
+    yt = YTMusic()
+    results = yt.search(query, filter="songs", limit=1)
+    return results[0] if results else None
+
+
 async def execute_play_on_youtube(arguments: dict) -> str:
     query = (arguments.get("query") or "").strip()
     if not query:
         return "No song/video given to play."
+
+    # Prefer YouTube Music's "song" catalog (official audio, not the music video); fall back to a
+    # plain YouTube search if that's unavailable/finds nothing, so a request for e.g. a gameplay
+    # video or something not in the music catalog still works.
+    try:
+        song = await asyncio.to_thread(_search_youtube_music_sync, query)
+    except ImportError:
+        song = None
+    except Exception:
+        logger.exception("YouTube Music search failed for %r", query)
+        song = None
+
+    if song and song.get("videoId"):
+        title = song.get("title") or query
+        artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
+        _open(f"https://music.youtube.com/watch?v={song['videoId']}")
+        label = f"'{title}'" + (f" by {artists}" if artists else "")
+        return f"Now playing {label} on YouTube Music."
 
     try:
         result = await asyncio.to_thread(_search_youtube_sync, query)

@@ -37,6 +37,10 @@ pycaw
 # play_on_youtube tool.
 yt-dlp
 
+# YouTube Music search (unofficial, no login/API key needed for anonymous search) - lets
+# play_on_youtube prefer the official-audio "song" upload over the official music video.
+ytmusicapi
+
 
 # Dev only: unit tests (run with `python -m pytest tests`).
 pytest
