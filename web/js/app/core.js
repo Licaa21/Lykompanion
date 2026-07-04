@@ -56,8 +56,13 @@ function setSelectedMicId(id) { localStorage.setItem(MIC_DEVICE_KEY, id || ""); 
 function setSelectedOutputId(id) { localStorage.setItem(OUTPUT_DEVICE_KEY, id || ""); }
 
 // Base capture constraints plus the chosen input device (if the user picked one; empty = system default).
+// echoCancellation stays on - narration.js's barge-in logic depends on it to avoid speaker
+// bleed-through triggering a false interrupt. noiseSuppression/autoGainControl are deliberately
+// left OFF: Chromium's WebRTC audio processing module can gate/duck real speech through them,
+// producing intermittent mid-utterance dropouts that don't happen with unprocessed capture (e.g.
+// Windows' own mic test tool, which bypasses this pipeline entirely).
 function micAudioConstraints() {
-  const constraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const constraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
   const id = getSelectedMicId();
   if (id) constraints.deviceId = { exact: id };
   return constraints;
