@@ -29,6 +29,7 @@ from app.api import (
     profile,
     reminders,
     screenshot,
+    spotify_oauth,
     tts,
     usage,
     voice,
@@ -69,10 +70,20 @@ app = FastAPI(title="Lykompanion", lifespan=lifespan)
 # which can't send headers. Unset (dev server started directly via uvicorn) means no auth.
 API_TOKEN = os.environ.get("LYKO_API_TOKEN", "")
 
+# Spotify's OAuth redirect is a plain browser GET with no way to attach our custom header/query
+# token, so it must be exempt from the check below. Safe: the callback route validates its own
+# one-shot CSRF "state" param (see app/api/spotify_oauth.py), which is what actually prevents an
+# unrelated request from completing someone else's pending authorization.
+_TOKEN_EXEMPT_PATHS = {"/api/spotify/oauth/callback"}
+
 
 @app.middleware("http")
 async def _require_api_token(request: Request, call_next):
-    if API_TOKEN and request.url.path.startswith("/api/"):
+    if (
+        API_TOKEN
+        and request.url.path.startswith("/api/")
+        and request.url.path not in _TOKEN_EXEMPT_PATHS
+    ):
         supplied = request.headers.get("x-lyko-token") or request.query_params.get("token") or ""
         if not hmac.compare_digest(supplied, API_TOKEN):
             return Response(status_code=401)
@@ -95,6 +106,7 @@ app.include_router(debug.router)
 app.include_router(profile.router)
 app.include_router(reminders.router)
 app.include_router(backup.router)
+app.include_router(spotify_oauth.router)
 
 _PROXY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

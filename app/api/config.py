@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from app.core import spotify_auth
 from app.core.config import persist_env_values, settings
 from app.models.schemas import CompanionConfig
 
@@ -68,6 +69,8 @@ async def get_config() -> CompanionConfig:
         steam_id=settings.steam_id,
         spotify_client_id=settings.spotify_client_id,
         spotify_client_secret_set=bool(settings.spotify_client_secret),
+        spotify_connected=spotify_auth.is_connected(),
+        spotify_display_name=spotify_auth.get_display_name(),
         debug_mode_enabled=settings.debug_mode_enabled,
     )
 

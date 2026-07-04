@@ -1,18 +1,15 @@
 import asyncio
 import logging
-import os
-import sys
-import time
-import webbrowser
 
 import httpx
 
-from app.core.config import settings
+from app.core import spotify_auth
+from app.services.system.browser import open_url as _open
 
 logger = logging.getLogger(__name__)
 
-SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search"
+SPOTIFY_PLAY_URL = "https://api.spotify.com/v1/me/player/play"
 
 # Hard wall-clock cap on the YouTube/YouTube Music search thread, applied at the await site via
 # asyncio.wait_for. Both yt-dlp and ytmusicapi make blocking network calls with no reliable
@@ -61,8 +58,13 @@ MEDIA_TOOLS = [
         "function": {
             "name": "play_on_spotify",
             "description": (
-                "Search Spotify for a track and start playing it in the user's local Spotify app. "
-                "Use this when the user explicitly says 'on Spotify' or 'in Spotify'."
+                "Search Spotify for a track and start it playing on the user's currently active "
+                "Spotify device (phone, desktop app, web player) via their connected account - "
+                "genuine remote playback, not just opening a link. Falls back to opening the "
+                "track in the local Spotify app if no device is currently active. Use this when "
+                "the user explicitly says 'on Spotify' or 'in Spotify'. If the tool reports "
+                "Spotify isn't connected, tell the user and offer play_on_youtube instead rather "
+                "than failing silently."
             ),
             "parameters": {
                 "type": "object",
@@ -77,19 +79,6 @@ MEDIA_TOOLS = [
         },
     },
 ]
-
-
-def _open(url: str) -> None:
-    """Best-effort local launch. os.startfile handles custom protocol handlers (spotify:)
-    registered with Windows, which webbrowser.open cannot invoke reliably there; everywhere
-    else falls back to the standard library's browser opener."""
-    if sys.platform == "win32":
-        try:
-            os.startfile(url)
-            return
-        except OSError:
-            pass
-    webbrowser.open(url)
 
 
 def _search_youtube_sync(query: str) -> dict | None:
@@ -183,50 +172,17 @@ async def execute_play_on_youtube(arguments: dict) -> str:
     return f"Now playing '{title}' on YouTube."
 
 
-# Spotify app access tokens (Client Credentials grant - no user login/Premium needed, only lets us
-# search the public catalog) are valid for 1 hour; cached in-process rather than
-# re-authenticating on every call. Not persisted - refetched on restart. Mirrors igdb_tool.py's
-# Twitch token caching, the same OAuth shape.
-_cached_spotify_token: str | None = None
-_cached_spotify_token_expires_at: float = 0.0
-
-
-async def _get_spotify_token() -> str | None:
-    global _cached_spotify_token, _cached_spotify_token_expires_at
-
-    if not settings.spotify_client_id or not settings.spotify_client_secret:
-        return None
-
-    if _cached_spotify_token and time.monotonic() < _cached_spotify_token_expires_at:
-        return _cached_spotify_token
-
-    async with httpx.AsyncClient(timeout=10) as http_client:
-        response = await http_client.post(
-            SPOTIFY_TOKEN_URL,
-            data={"grant_type": "client_credentials"},
-            auth=(settings.spotify_client_id, settings.spotify_client_secret),
-        )
-        response.raise_for_status()
-        data = response.json()
-
-    _cached_spotify_token = data["access_token"]
-    # Refresh a minute early to avoid using a token that expires mid-request.
-    _cached_spotify_token_expires_at = time.monotonic() + data.get("expires_in", 0) - 60
-    return _cached_spotify_token
-
-
 async def execute_play_on_spotify(arguments: dict) -> str:
     query = (arguments.get("query") or "").strip()
     if not query:
         return "No song given to play."
 
-    try:
-        token = await _get_spotify_token()
-    except httpx.HTTPError as exc:
-        return f"Spotify authentication failed: {exc}"
-
+    token = await spotify_auth.get_valid_access_token()
     if not token:
-        return "Spotify playback isn't configured - no Client ID/Secret set in Settings."
+        return (
+            "Spotify isn't connected - the user needs to connect their account in "
+            "Settings → API Keys → Spotify first. Offer to play this on YouTube instead."
+        )
 
     try:
         async with httpx.AsyncClient(timeout=10) as http_client:
@@ -250,5 +206,23 @@ async def execute_play_on_spotify(arguments: dict) -> str:
 
     title = track.get("name") or query
     artists = ", ".join(a.get("name", "") for a in track.get("artists", []))
+    label = f"'{title}' by {artists}"
+
+    # Try genuine remote playback on whatever device the user's Spotify is already active on
+    # (requires Premium - Spotify's Web API player endpoints are Premium-only). No active device
+    # (common when nothing's currently open) falls back to the old deep-link, which launches the
+    # local desktop app directly - works without Premium, just can't target a specific device.
+    try:
+        async with httpx.AsyncClient(timeout=10) as http_client:
+            play_response = await http_client.put(
+                SPOTIFY_PLAY_URL,
+                json={"uris": [f"spotify:track:{track_id}"]},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if play_response.status_code in (200, 202, 204):
+            return f"Now playing {label} on Spotify."
+    except httpx.HTTPError:
+        pass  # fall through to the deep-link below
+
     _open(f"spotify:track:{track_id}")
-    return f"Now playing '{title}' by {artists} on Spotify."
+    return f"Opened {label} in the Spotify app (no active device to play it on remotely)."

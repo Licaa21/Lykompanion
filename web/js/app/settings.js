@@ -730,9 +730,54 @@ function applyConfigToForm(cfg) {
   document.getElementById("cfg-spotify-client-secret").placeholder = cfg.spotify_client_secret_set
     ? "•••••••• (set)"
     : "Not set";
+  document.getElementById("cfg-spotify-account-status").textContent = cfg.spotify_connected
+    ? `Connected${cfg.spotify_display_name ? " as " + cfg.spotify_display_name : ""}`
+    : "Not connected";
+  document.getElementById("cfg-spotify-connect").hidden = cfg.spotify_connected;
+  document.getElementById("cfg-spotify-disconnect").hidden = !cfg.spotify_connected;
 
   updateSetupBanner(cfg);
 }
+
+// --- Spotify account connect/disconnect (OAuth) ---
+// The Connect button asks the backend to open the user's real browser to Spotify's consent
+// screen (never inside the desktop app's embedded webview - Spotify's login page refuses to load
+// there). We have no way to know the moment they finish in that separate browser tab, so poll
+// /api/config briefly afterward and refresh the form the instant spotify_connected flips true.
+let spotifyConnectPoll = null;
+
+document.getElementById("cfg-spotify-connect").addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  try {
+    const response = await fetch("/api/spotify/oauth/start", { method: "POST" });
+    const result = await response.json();
+    if (result.ok === false) {
+      alert(result.error || "Couldn't start Spotify connection.");
+      return;
+    }
+  } catch (err) {
+    alert("Couldn't reach the server to start Spotify connection.");
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+
+  clearInterval(spotifyConnectPoll);
+  let attempts = 0;
+  spotifyConnectPoll = setInterval(async () => {
+    attempts += 1;
+    const cfg = await loadConfig();
+    if ((cfg && cfg.spotify_connected) || attempts >= 60) {  // ~2 minutes at 2s intervals
+      clearInterval(spotifyConnectPoll);
+    }
+  }, 2000);
+});
+
+document.getElementById("cfg-spotify-disconnect").addEventListener("click", async () => {
+  await fetch("/api/spotify/oauth/disconnect", { method: "POST" });
+  await loadConfig();
+});
 
 async function loadConfig() {
   let cfg;

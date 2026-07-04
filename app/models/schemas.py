@@ -110,6 +110,8 @@ class CompanionConfig(BaseModel):
     spotify_client_id: str | None = None
     spotify_client_secret: str | None = None
     spotify_client_secret_set: bool = False
+    spotify_connected: bool = False
+    spotify_display_name: str | None = None
 
     debug_mode_enabled: bool = False
 

@@ -343,19 +343,30 @@
 
           <h3>Spotify</h3>
           <p class="modal-hint">
-            Lets the companion play a song on Spotify by voice ("play X on Spotify"). Create a free app at
-            <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a>
-            to get a Client ID and Secret — no Spotify Premium or account login required, it only searches the
-            catalog and hands off to your local Spotify app.
+            Lets the companion actually control playback on your Spotify account by voice ("play X on Spotify") —
+            starts the track on whatever device you're already using (phone, desktop app, web player), not just a
+            link. Requires <strong>Spotify Premium</strong> (Spotify's playback-control API is Premium-only) and a
+            free app from <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a> —
+            add a Redirect URI of <code>http://127.0.0.1:6692/api/spotify/oauth/callback</code> (adjust the port if
+            you run the server on a different one) in that app's settings, then paste its Client ID/Secret below and
+            click Connect.
           </p>
           <div class="cfg-key-row">
             <label>
-              <span class="cfg-label">Client ID <button type="button" class="cfg-help" data-tip="Spotify application Client ID, used to search the catalog for play_on_spotify.">?</button></span>
+              <span class="cfg-label">Client ID <button type="button" class="cfg-help" data-tip="Spotify application Client ID, from developer.spotify.com/dashboard.">?</button></span>
               <input id="cfg-spotify-client-id" type="text" placeholder="Not set" autocomplete="off" />
             </label>
             <label>
               <span class="cfg-label">Client Secret <button type="button" class="cfg-help" data-tip="Spotify application Client Secret, paired with the Client ID above.">?</button></span>
               <span class="key-field"><input id="cfg-spotify-client-secret" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Account <button type="button" class="cfg-help" data-tip="Connects your actual Spotify account (OAuth) so the companion can start/control playback, separate from the app Client ID/Secret above which only register the integration with Spotify.">?</button></span>
+              <span id="cfg-spotify-account-status" class="hotkey-display">Not connected</span>
+              <button type="button" id="cfg-spotify-connect" class="secondary-btn">Connect</button>
+              <button type="button" id="cfg-spotify-disconnect" class="secondary-btn secondary-btn--danger" hidden>Disconnect</button>
             </label>
           </div>
         </section>

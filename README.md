@@ -313,7 +313,7 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `lookup_steam_game` | Steam store page details. | No |
 | `fetch_steam_library` | User's owned games / playtime. | Steam API key + SteamID64 |
 | `play_on_youtube` | Search YouTube Music (via `ytmusicapi`, no API key) for the official-audio track and open it — falls back to a plain YouTube search (via `yt-dlp`) if no music-catalog match is found. | No |
-| `play_on_spotify` | Search Spotify's catalog and hand off a `spotify:track:` URI to the local Spotify app, which starts playing immediately. | Spotify app Client ID/Secret (free, no Premium/login needed) |
+| `play_on_spotify` | Search Spotify's catalog and start the track playing on whatever device the connected account is already active on (falls back to a `spotify:track:` deep-link into the local app if no device is active). | Spotify OAuth connection (Settings → API Keys → Spotify) + Spotify Premium for remote playback |
 
 ## Development
 
