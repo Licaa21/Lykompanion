@@ -134,10 +134,11 @@ const journalDetailContent = document.getElementById("journal-detail-content");
 const journalDetailBack = document.getElementById("journal-detail-back");
 
 let allJournalGames = [];
-// Which game/profile the detail view currently has open - reset only when a *different* game
-// is opened, so re-renders triggered by refreshJournalDetail() keep the user's selection.
+// Which game's detail view is open, and which single tab-card is selected in it - one of
+// "universal" (game-scope memories), "training", or a profile's session_id. Reset only when a
+// *different* game is opened, so re-renders triggered by refreshJournalDetail() keep the place.
 let journalSelectedProcess = null;
-let journalSelectedProfileId = null;
+let journalSelectedTab = "universal";
 let journalShowingCreateProfileForm = false;
 
 gamingJournalBtn.addEventListener("click", () => {
@@ -332,12 +333,13 @@ function openGameDetail(game) {
 
   if (journalSelectedProcess !== game.process) {
     journalSelectedProcess = game.process;
-    journalSelectedProfileId = (game.sessions.find((s) => s.active) || {}).session_id || null;
+    // Default to the universal (game-scope) memories, not whichever profile happens to be active.
+    journalSelectedTab = "universal";
     journalShowingCreateProfileForm = false;
   }
-  // The selected profile may have just been deleted - fall back to no selection.
-  if (journalSelectedProfileId && !game.sessions.some((s) => s.session_id === journalSelectedProfileId)) {
-    journalSelectedProfileId = null;
+  // The selected profile may have just been deleted - fall back to universal.
+  if (journalSelectedTab !== "universal" && journalSelectedTab !== "training" && !game.sessions.some((s) => s.session_id === journalSelectedTab)) {
+    journalSelectedTab = "universal";
   }
 
   const header = document.createElement("div");
@@ -432,110 +434,145 @@ function openGameDetail(game) {
 
   journalDetailContent.appendChild(buildSeparator());
 
-  // Memories card: shows the selected profile's playthrough memories (+ its unconfirmed
-  // observations) if one is selected, otherwise the universal game-scope memories that hold
-  // across every playthrough. Only ever one memory list visible at a time, not both stacked.
-  const selectedSession = game.sessions.find((s) => s.session_id === journalSelectedProfileId);
-  const memoriesCard = document.createElement("div");
-  memoriesCard.className = "journal-themed-card journal-themed-card--memories";
+  // Content pane: whichever single tab-card is selected below - universal game memories, one
+  // profile's memories + observations, or the training data textbox. Never more than one at once.
+  const selectedSession = journalSelectedTab !== "universal" && journalSelectedTab !== "training"
+    ? game.sessions.find((s) => s.session_id === journalSelectedTab)
+    : null;
 
-  const memHeader = document.createElement("div");
-  memHeader.className = "journal-game-header";
-  const memTitle = document.createElement("span");
-  memTitle.className = "journal-profile-title";
-  memTitle.textContent = selectedSession ? `Profile memories: ${selectedSession.name}` : "Universal game memories";
-  memHeader.appendChild(memTitle);
-  if (selectedSession) {
-    if (selectedSession.active) {
-      const badge = document.createElement("span");
-      badge.className = "journal-badge journal-badge--active";
-      badge.textContent = "active";
-      badge.title = "The profile new playthrough facts currently go to";
-      memHeader.appendChild(badge);
-    } else {
-      memHeader.appendChild(buildJournalActionBtn(
-        "Make active",
-        "Switch to this profile — new playthrough facts will go here",
-        async () => {
-          const response = await fetch(
-            `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}/active`,
-            { method: "PUT" },
-          );
+  if (journalSelectedTab === "training") {
+    // Training data: the living reference document the Game-State Model self-maintains for
+    // this process (see app/core/game_state_training_data.py), editable directly.
+    const trainingCard = document.createElement("div");
+    trainingCard.className = "journal-themed-card journal-themed-card--training";
+    trainingCard.appendChild(buildSectionLabel("Training data"));
+    const trainingTextarea = document.createElement("textarea");
+    trainingTextarea.rows = 12;
+    trainingTextarea.placeholder = "No training data yet - the Game-State Model writes it automatically as it learns this game's UI (requires self-training to be enabled).";
+    trainingCard.appendChild(trainingTextarea);
+    journalDetailContent.appendChild(trainingCard);
+
+    let currentTrainingContent = "";
+    fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        currentTrainingContent = data.content || "";
+        trainingTextarea.value = currentTrainingContent;
+      })
+      .catch(() => {});
+
+    trainingTextarea.addEventListener("blur", async () => {
+      const content = trainingTextarea.value;
+      if (content === currentTrainingContent) return;
+      const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      }).then((r) => r.json());
+      currentTrainingContent = data.content;
+    });
+  } else {
+    const memoriesCard = document.createElement("div");
+    memoriesCard.className = "journal-themed-card " + (selectedSession ? "journal-themed-card--profile" : "journal-themed-card--memories");
+
+    const memHeader = document.createElement("div");
+    memHeader.className = "journal-game-header";
+    const memTitle = document.createElement("span");
+    memTitle.className = "journal-profile-title";
+    memTitle.textContent = selectedSession ? `Profile memories: ${selectedSession.name}` : "Universal game memories";
+    memHeader.appendChild(memTitle);
+    if (selectedSession) {
+      if (selectedSession.active) {
+        const badge = document.createElement("span");
+        badge.className = "journal-badge journal-badge--active";
+        badge.textContent = "active";
+        badge.title = "The profile new playthrough facts currently go to";
+        memHeader.appendChild(badge);
+      } else {
+        memHeader.appendChild(buildJournalActionBtn(
+          "Make active",
+          "Switch to this profile — new playthrough facts will go here",
+          async () => {
+            const response = await fetch(
+              `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}/active`,
+              { method: "PUT" },
+            );
+            if (response.ok) await refreshJournalDetail(game.process);
+          },
+        ));
+      }
+    }
+    memoriesCard.appendChild(memHeader);
+
+    const memList = document.createElement("div");
+    memList.className = "memory-list";
+    const activeMemories = selectedSession ? selectedSession.memories : game.memories;
+    if (activeMemories.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "memory-empty-hint";
+      hint.textContent = selectedSession ? "Nothing saved for this playthrough yet." : "Nothing saved for this game yet.";
+      memList.appendChild(hint);
+    }
+    for (const entry of activeMemories) {
+      memList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
+    }
+    memoriesCard.appendChild(memList);
+    memoriesCard.appendChild(buildJournalAddForm(
+      selectedSession ? "Add a playthrough memory…" : "Add a game memory (true across playthroughs)…",
+      selectedSession
+        ? (content) => ({ content, scope: "session", process: game.process, session_id: selectedSession.session_id })
+        : (content) => ({ content, scope: "game", process: game.process })
+    ));
+
+    if (selectedSession && selectedSession.observations.length > 0) {
+      memoriesCard.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
+      const obsList = document.createElement("div");
+      obsList.className = "memory-list";
+      for (const obs of selectedSession.observations) {
+        const item = document.createElement("div");
+        item.className = "memory-item journal-observation";
+        const text = document.createElement("div");
+        text.className = "memory-item-text";
+        text.textContent = obs.content;
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "memory-item-delete";
+        deleteBtn.textContent = "×";
+        deleteBtn.title = "Discard observation";
+        deleteBtn.addEventListener("click", async () => {
+          const response = await fetch(`/api/observations/${obs.id}`, { method: "DELETE" });
           if (response.ok) await refreshJournalDetail(game.process);
-        },
-      ));
+        });
+        item.appendChild(text);
+        item.appendChild(deleteBtn);
+        obsList.appendChild(item);
+      }
+      memoriesCard.appendChild(obsList);
     }
+    journalDetailContent.appendChild(memoriesCard);
   }
-  memoriesCard.appendChild(memHeader);
-
-  const memList = document.createElement("div");
-  memList.className = "memory-list";
-  const activeMemories = selectedSession ? selectedSession.memories : game.memories;
-  if (activeMemories.length === 0) {
-    const hint = document.createElement("div");
-    hint.className = "memory-empty-hint";
-    hint.textContent = selectedSession ? "Nothing saved for this playthrough yet." : "Nothing saved for this game yet.";
-    memList.appendChild(hint);
-  }
-  for (const entry of activeMemories) {
-    memList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
-  }
-  memoriesCard.appendChild(memList);
-  memoriesCard.appendChild(buildJournalAddForm(
-    selectedSession ? "Add a playthrough memory…" : "Add a game memory (true across playthroughs)…",
-    selectedSession
-      ? (content) => ({ content, scope: "session", process: game.process, session_id: selectedSession.session_id })
-      : (content) => ({ content, scope: "game", process: game.process })
-  ));
-
-  if (selectedSession && selectedSession.observations.length > 0) {
-    memoriesCard.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
-    const obsList = document.createElement("div");
-    obsList.className = "memory-list";
-    for (const obs of selectedSession.observations) {
-      const item = document.createElement("div");
-      item.className = "memory-item journal-observation";
-      const text = document.createElement("div");
-      text.className = "memory-item-text";
-      text.textContent = obs.content;
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "memory-item-delete";
-      deleteBtn.textContent = "×";
-      deleteBtn.title = "Discard observation";
-      deleteBtn.addEventListener("click", async () => {
-        const response = await fetch(`/api/observations/${obs.id}`, { method: "DELETE" });
-        if (response.ok) await refreshJournalDetail(game.process);
-      });
-      item.appendChild(text);
-      item.appendChild(deleteBtn);
-      obsList.appendChild(item);
-    }
-    memoriesCard.appendChild(obsList);
-  }
-  journalDetailContent.appendChild(memoriesCard);
 
   journalDetailContent.appendChild(buildSeparator());
 
-  // My Profiles: clickable cards (playthroughs) - selecting one swaps the memories card above
-  // to that profile's memories. Clicking the selected card again deselects back to universal.
-  journalDetailContent.appendChild(buildSectionLabel("My Profiles"));
-  const profilesRow = document.createElement("div");
-  profilesRow.className = "journal-profiles-row";
+  // Tab-cards row: Universal Info, one card per profile, + New Profile, and Training Data -
+  // a single selector row instead of separate stacked sections. Clicking a card swaps the
+  // content pane above to match.
+  const tabsRow = document.createElement("div");
+  tabsRow.className = "journal-profiles-row";
 
-  const createCard = document.createElement("button");
-  createCard.type = "button";
-  createCard.className = "journal-profile-card journal-profile-card--create";
-  createCard.textContent = "+ New Profile";
-  createCard.addEventListener("click", () => {
-    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
+  const universalCard = document.createElement("button");
+  universalCard.type = "button";
+  universalCard.className = "journal-profile-card journal-profile-card--universal" + (journalSelectedTab === "universal" ? " journal-profile-card--selected" : "");
+  universalCard.textContent = "Universal Info";
+  universalCard.addEventListener("click", () => {
+    journalSelectedTab = "universal";
     openGameDetail(game);
   });
-  profilesRow.appendChild(createCard);
+  tabsRow.appendChild(universalCard);
 
   for (const session of game.sessions) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "journal-profile-card" + (session.session_id === journalSelectedProfileId ? " journal-profile-card--selected" : "");
+    card.className = "journal-profile-card" + (session.session_id === journalSelectedTab ? " journal-profile-card--selected" : "");
     const label = document.createElement("span");
     label.textContent = session.name + (session.active ? " ★" : "");
     if (session.active) label.title = "The profile new playthrough facts currently go to";
@@ -558,56 +595,37 @@ function openGameDetail(game) {
     card.appendChild(removeBtn);
 
     card.addEventListener("click", () => {
-      journalSelectedProfileId = journalSelectedProfileId === session.session_id ? null : session.session_id;
+      journalSelectedTab = session.session_id;
       openGameDetail(game);
     });
-    profilesRow.appendChild(card);
+    tabsRow.appendChild(card);
   }
-  journalDetailContent.appendChild(profilesRow);
+
+  const createCard = document.createElement("button");
+  createCard.type = "button";
+  createCard.className = "journal-profile-card journal-profile-card--create";
+  createCard.textContent = "+ New Profile";
+  createCard.addEventListener("click", () => {
+    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(createCard);
+
+  const trainingCardTab = document.createElement("button");
+  trainingCardTab.type = "button";
+  trainingCardTab.className = "journal-profile-card journal-profile-card--training" + (journalSelectedTab === "training" ? " journal-profile-card--selected" : "");
+  trainingCardTab.textContent = "Training Data";
+  trainingCardTab.addEventListener("click", () => {
+    journalSelectedTab = "training";
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(trainingCardTab);
+
+  journalDetailContent.appendChild(tabsRow);
 
   if (journalShowingCreateProfileForm) {
     journalDetailContent.appendChild(buildProfileAddForm(game.process));
   }
-
-  if (game.sessions.length === 0) {
-    const hint = document.createElement("div");
-    hint.className = "memory-empty-hint";
-    hint.textContent = "No profiles yet - create one above.";
-    journalDetailContent.appendChild(hint);
-  }
-
-  journalDetailContent.appendChild(buildSeparator());
-
-  // Training data: the living reference document the Game-State Model self-maintains for this
-  // process (see app/core/game_state_training_data.py), editable directly.
-  const trainingCard = document.createElement("div");
-  trainingCard.className = "journal-themed-card journal-themed-card--training";
-  trainingCard.appendChild(buildSectionLabel("Training data"));
-  const trainingTextarea = document.createElement("textarea");
-  trainingTextarea.rows = 8;
-  trainingTextarea.placeholder = "No training data yet - the Game-State Model writes it automatically as it learns this game's UI (requires self-training to be enabled).";
-  trainingCard.appendChild(trainingTextarea);
-  journalDetailContent.appendChild(trainingCard);
-
-  let currentTrainingContent = "";
-  fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`)
-    .then((r) => r.json())
-    .then((data) => {
-      currentTrainingContent = data.content || "";
-      trainingTextarea.value = currentTrainingContent;
-    })
-    .catch(() => {});
-
-  trainingTextarea.addEventListener("blur", async () => {
-    const content = trainingTextarea.value;
-    if (content === currentTrainingContent) return;
-    const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    }).then((r) => r.json());
-    currentTrainingContent = data.content;
-  });
 }
 
 function buildSeparator() {

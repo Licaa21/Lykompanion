@@ -2462,22 +2462,55 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   margin: 2px 0;
 }
 
-/* Themed cards for the two always-distinct sections in a game's detail view - a tinted
-   background instead of another plain box, so scanning the (long) view stays orientable. */
+/* Content pane for the currently-selected tab-card below it - a clearly tinted background
+   (not just another plain box) so which "mode" is showing is obvious at a glance. */
 .journal-themed-card {
   border-radius: var(--r3);
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border-width: 1px;
+  border-style: solid;
 }
 .journal-themed-card--memories {
-  background: rgba(91,95,199,0.08);
-  border: 1px solid rgba(91,95,199,0.25);
+  background: rgba(91,95,199,0.12);
+  border-color: rgba(91,95,199,0.4);
+}
+.journal-themed-card--profile {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--glass-border);
 }
 .journal-themed-card--training {
-  background: rgba(74,222,128,0.06);
-  border: 1px solid rgba(74,222,128,0.2);
+  background: rgba(74,222,128,0.1);
+  border-color: rgba(74,222,128,0.35);
+}
+/* The textarea shouldn't draw its own competing native border/background - it should read as
+   part of the tinted card around it, not a separate plain box sitting inside it. */
+.journal-themed-card textarea {
+  background: rgba(0,0,0,0.15);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--r2);
+  color: var(--t1);
+}
+
+/* The unified tab-card selector row: Universal Info and Training Data get the same tint as
+   their matching content pane above, so the color ties the tab to what it shows. */
+.journal-profile-card--universal {
+  border-color: rgba(91,95,199,0.4);
+  background: rgba(91,95,199,0.1);
+}
+.journal-profile-card--training {
+  border-color: rgba(74,222,128,0.35);
+  background: rgba(74,222,128,0.08);
+}
+.journal-profile-card--universal.journal-profile-card--selected {
+  background: rgba(91,95,199,0.22);
+  border-color: rgba(91,95,199,0.7);
+}
+.journal-profile-card--training.journal-profile-card--selected {
+  background: rgba(74,222,128,0.2);
+  border-color: rgba(74,222,128,0.6);
 }
 
 #journal-detail-view:not([hidden]) {
