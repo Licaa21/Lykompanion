@@ -576,6 +576,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
+        except TimeoutError:
+            # A stalled provider response (see client.py's _iter_with_timeout) - without this the
+            # frontend is left showing "..." forever, since an unhandled exception here just kills
+            # the connection with no terminal SSE event to clear the typing indicator.
+            yield f"data: {json.dumps({'error': 'LLM request timed out - try again.'})}\n\n"
+            return
         if overlay_buf.strip():  # flush any trailing partial sentence (backend-driven only)
             overlay_process.push_toast(overlay_buf, "reply")
         for img_url, img_alt in _extract_overlay_images(full_reply):
@@ -698,6 +704,11 @@ async def chat_voice_stream(
                     yield f"data: {json.dumps({'tool_sfx': event['name']})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
+            return
+        except TimeoutError:
+            # See /stream's identical handler - a stalled provider response would otherwise leave
+            # the frontend showing "..." forever with no terminal SSE event.
+            yield f"data: {json.dumps({'error': 'Voice LLM request timed out - try again.'})}\n\n"
             return
 
         # Transcription mode transcribes up front; raw-audio turns get theirs from the model's

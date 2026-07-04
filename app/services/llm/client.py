@@ -1,3 +1,4 @@
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
 
@@ -48,6 +49,24 @@ def get_client(provider: str) -> AsyncOpenAI:
         del _client_cache[key]
     _client_cache[cache_key] = fresh
     return fresh
+
+
+# Re-arms on every chunk instead of capping the whole stream, so a legitimately long reply never
+# trips this as long as chunks keep arriving - only a genuine stall between chunks does. The
+# client's own timeout=45.0 (get_client above) covers the initial request; this is a backstop for
+# mid-stream stalls, which some providers don't reliably bound on their own once the response has
+# already started, unlike a plain non-streaming request.
+_STREAM_CHUNK_TIMEOUT_SECONDS = 45.0
+
+
+async def _iter_with_timeout(aiter, timeout: float):
+    it = aiter.__aiter__()
+    while True:
+        try:
+            item = await asyncio.wait_for(it.__anext__(), timeout)
+        except StopAsyncIteration:
+            return
+        yield item
 
 
 def _tool_names(tools: list[dict] | None) -> list[str] | None:
@@ -226,7 +245,7 @@ async def stream_chat_completion_deltas(
     full_text = ""
     tool_call_fragments: dict[int, dict] = {}
     usage = None
-    async for chunk in stream:
+    async for chunk in _iter_with_timeout(stream, _STREAM_CHUNK_TIMEOUT_SECONDS):
         if chunk.usage:
             usage = chunk.usage
         if chunk.choices:
