@@ -448,6 +448,7 @@ function openGameDetail(game) {
     openGameDetail(game);
   });
   tabsRow.appendChild(universalCard);
+  tabsRow.appendChild(buildVerticalSeparator());
 
   const profilesLabel = document.createElement("span");
   profilesLabel.className = "journal-profiles-row-label";
@@ -495,6 +496,7 @@ function openGameDetail(game) {
     openGameDetail(game);
   });
   tabsRow.appendChild(createCard);
+  tabsRow.appendChild(buildVerticalSeparator());
 
   const trainingCardTab = document.createElement("button");
   trainingCardTab.type = "button";
@@ -636,6 +638,13 @@ function buildSeparator() {
   const hr = document.createElement("div");
   hr.className = "journal-detail-separator";
   return hr;
+}
+
+// Vertical divider between the three groups in the tab-cards row (Universal Info | Profiles | Training Data).
+function buildVerticalSeparator() {
+  const sep = document.createElement("div");
+  sep.className = "journal-tabs-vsep";
+  return sep;
 }
 
 // --- Reminders & Alarms modal ---

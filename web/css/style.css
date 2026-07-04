@@ -2415,6 +2415,12 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   letter-spacing: 0.05em;
   color: var(--t3);
 }
+/* Vertical dividers between the three groups in the tab-cards row (Universal Info | Profiles | Training Data). */
+.journal-tabs-vsep {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255,255,255,0.16);
+}
 .journal-profile-card {
   position: relative;
   padding: 10px 14px;
