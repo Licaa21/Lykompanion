@@ -378,6 +378,7 @@ struct Panel {
 // ---- Global state ----------------------------------------------------------
 
 HWND          g_ctrl = nullptr;    // message-only controller window
+HWND          g_prevForeground = nullptr;  // foreground window before edit mode stole focus
 LayeredWindow g_toastWin;
 LayeredWindow g_memWin;            // memory save/remove toasts (separate area)
 LayeredWindow g_panelWin;
@@ -446,7 +447,7 @@ constexpr float GAMEPAD_MOVE_SPEED = 480.0f;  // px/sec at full stick deflection
 
 // Config-toolbar hit rects (window coords), filled in by RenderConfig().
 constexpr int CONFIG_W = 340;
-constexpr int CONFIG_H = 324;
+constexpr int CONFIG_H = 444;
 D2D1_RECT_F   g_rcOpacMinus = {};
 D2D1_RECT_F   g_rcOpacPlus  = {};
 D2D1_RECT_F   g_rcTextMinus = {};
@@ -868,6 +869,18 @@ void SetClickThrough(LayeredWindow& lw, bool through) {
     SetWindowLong(lw.hwnd, GWL_EXSTYLE, ex);
 }
 
+// Every overlay window is created WS_EX_NOACTIVATE so it never steals focus
+// from the game during normal play. Edit mode is the one exception: toggling
+// this off lets the toolbar actually become the foreground/focused window (see
+// ApplyEditMode), so the game stops receiving keyboard/mouse input while the
+// user is editing instead of both windows processing it at once.
+void SetActivatable(LayeredWindow& lw, bool activatable) {
+    LONG ex = GetWindowLong(lw.hwnd, GWL_EXSTYLE);
+    if (activatable) ex &= ~WS_EX_NOACTIVATE;
+    else             ex |= WS_EX_NOACTIVATE;
+    SetWindowLong(lw.hwnd, GWL_EXSTYLE, ex);
+}
+
 // Dashed outline drawn over a widget while in edit mode.
 void DrawEditDecoration(ID2D1RenderTarget* rt, int w, int h) {
     if (!g_dashStroke) return;
@@ -959,31 +972,29 @@ std::wstring EditHintText() {
 }
 
 // While editing, an empty widget still shows a draggable placeholder card.
+// Control hints live in one place — the editor toolbar (RenderConfig) — not
+// repeated on every widget.
 void RenderPlaceholder(LayeredWindow& lw, const wchar_t* label,
                        Anchor anchor, int width) {
-    const int h = 64;
+    const int h = 44;
     if (!EnsureSurface(lw, width, h)) return;
     ID2D1RenderTarget* rt = lw.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr, *dim = nullptr;
+    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr;
     rt->CreateSolidColorBrush(Bg(0.80f), &bg);            // previews live opacity
     rt->CreateSolidColorBrush(Txt(1.0f), &white);
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.55f, 0.85f, 0.60f, 0.95f), &dim);  // edit green
 
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
         D2D1::RectF(1.5f, 1.5f, width - 1.5f, h - 1.5f), 12.0f, 12.0f);
     rt->FillRoundedRectangle(card, bg);
     rt->DrawText(label, (UINT32)wcslen(label), g_fmtBody,
                  D2D1::RectF(PAD, 12, width - PAD, 34), white);
-    std::wstring hint = EditHintText();
-    rt->DrawText(hint.c_str(), (UINT32)hint.size(), g_fmtLabel,
-                 D2D1::RectF(PAD, 36, width - PAD, 58), dim);
     DrawEditDecoration(rt, width, h);
     if (IsGamepadSelected(lw)) DrawSelectionRing(rt, width, h);
 
-    SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+    SafeRelease(&white); SafeRelease(&bg);
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(lw); return; }
     CommitWindow(lw, anchor);
 }
@@ -1538,6 +1549,9 @@ void SetHandsFree(bool active) {
 
 // The "unsaved changes" prompt, drawn INSTEAD of the normal toolbar contents
 // while g_showExitConfirm is true (see RequestExit()).
+void DrawButtonGlyph(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const wchar_t* letter,
+                     D2D1_COLOR_F fill, bool pill);  // defined below, near RenderActionRow
+
 void RenderExitConfirm(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bg, ID2D1SolidColorBrush* white,
                        ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc) {
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
@@ -1562,15 +1576,22 @@ void RenderExitConfirm(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bg, ID2D1Sol
     y += bh + gap;
     g_rcConfirmKeep = D2D1::RectF(PAD, y, PAD + bw, y + bh);
 
-    auto drawBtn = [&](const D2D1_RECT_F& r, const wchar_t* label, bool filled) {
+    bool gamepad = (g_lastModality == ModalityGamepad);
+    auto drawBtn = [&](const D2D1_RECT_F& r, const wchar_t* label, bool filled,
+                       const wchar_t* glyphLetter, D2D1_COLOR_F glyphColor) {
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 8, 8);
         if (filled) rt->FillRoundedRectangle(rr, acc);
         else        rt->DrawRoundedRectangle(rr, dim, 1.2f);
         rt->DrawText(label, (UINT32)wcslen(label), g_fmtCenter, r, white);
+        if (gamepad) {
+            D2D1_RECT_F badge = D2D1::RectF(r.left + 8, r.top + (r.bottom - r.top - 22) / 2,
+                                            r.left + 8 + 22, r.top + (r.bottom - r.top - 22) / 2 + 22);
+            DrawButtonGlyph(rt, badge, glyphLetter, glyphColor, false);
+        }
     };
-    drawBtn(g_rcConfirmSave, L"Save & Exit  (A)", true);
-    drawBtn(g_rcConfirmDiscard, L"Discard & Exit  (X)", false);
-    drawBtn(g_rcConfirmKeep, L"Keep Editing  (B)", false);
+    drawBtn(g_rcConfirmSave, L"Save & Exit", true, L"A", D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f));
+    drawBtn(g_rcConfirmDiscard, L"Discard & Exit", false, L"X", D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f));
+    drawBtn(g_rcConfirmKeep, L"Keep Editing", false, L"B", D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f));
 }
 
 // One preset "chip" row (click/LB/RB switch, +/×/pencil new/delete/rename) plus
@@ -1620,13 +1641,79 @@ void RenderActionRow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
 
     D2D1_ROUNDED_RECT saveR = D2D1::RoundedRect(g_rcSave, 8, 8);
     rt->FillRoundedRectangle(saveR, acc);
-    const wchar_t* saveLabel = g_lastModality == ModalityGamepad ? L"Save  (A)" : L"Save";
-    rt->DrawText(saveLabel, (UINT32)wcslen(saveLabel), g_fmtCenter, g_rcSave, white);
+    rt->DrawText(L"Save", 4, g_fmtCenter, g_rcSave, white);
 
     D2D1_ROUNDED_RECT discR = D2D1::RoundedRect(g_rcDiscardClose, 8, 8);
     rt->DrawRoundedRectangle(discR, dim, 1.2f);
-    const wchar_t* discLabel = g_lastModality == ModalityGamepad ? L"Discard & Close  (B)" : L"Discard & Close";
-    rt->DrawText(discLabel, (UINT32)wcslen(discLabel), g_fmtCenter, g_rcDiscardClose, white);
+    rt->DrawText(L"Discard & Close", 15, g_fmtCenter, g_rcDiscardClose, white);
+}
+
+// A real Xbox-style button glyph (colored circle for A/B/X/Y, a neutral pill
+// for the shoulder buttons) rather than plain "(A)"/"(B)" text.
+void DrawButtonGlyph(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const wchar_t* letter,
+                     D2D1_COLOR_F fill, bool pill) {
+    ID2D1SolidColorBrush* b = nullptr;
+    rt->CreateSolidColorBrush(fill, &b);
+    if (pill) {
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, (r.bottom - r.top) / 2.0f, (r.bottom - r.top) / 2.0f);
+        rt->FillRoundedRectangle(rr, b);
+    } else {
+        D2D1_ELLIPSE e = D2D1::Ellipse(
+            D2D1::Point2F((r.left + r.right) / 2.0f, (r.top + r.bottom) / 2.0f),
+            (r.right - r.left) / 2.0f, (r.bottom - r.top) / 2.0f);
+        rt->FillEllipse(e, b);
+    }
+    SafeRelease(&b);
+    ID2D1SolidColorBrush* white = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &white);
+    rt->DrawText(letter, (UINT32)wcslen(letter), g_fmtCenter, r, white);
+    SafeRelease(&white);
+}
+
+// One "[badge] Label" pair, badge at (x,y), label following it.
+void DrawGlyphChip(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white, float x, float y,
+                   const wchar_t* letter, D2D1_COLOR_F color, bool pill, float badgeW,
+                   const wchar_t* label) {
+    D2D1_RECT_F badge = D2D1::RectF(x, y, x + badgeW, y + 22.0f);
+    DrawButtonGlyph(rt, badge, letter, color, pill);
+    rt->DrawText(label, (UINT32)wcslen(label), g_fmtLabel,
+                 D2D1::RectF(x + badgeW + 6.0f, y + 2.0f, x + badgeW + 140.0f, y + 22.0f), white);
+}
+
+// Single hint area at the bottom of the toolbar — the ONLY place edit-mode
+// controls are explained (no longer repeated on every widget). Mouse modality
+// shows the configured hotkey; gamepad modality shows real button glyphs.
+void RenderControlsHint(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
+                        ID2D1SolidColorBrush* dim, float y) {
+    if (g_lastModality != ModalityGamepad) {
+        std::wstring hint = EditHintText();
+        IDWriteTextLayout* layout = MakeLayout(hint, g_fmtLabel, CONFIG_W - 2 * PAD, nullptr);
+        if (layout) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD, y + 8.0f), layout, dim);
+            SafeRelease(&layout);
+        }
+        return;
+    }
+
+    const D2D1_COLOR_F kA = D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f);
+    const D2D1_COLOR_F kB = D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f);
+    const D2D1_COLOR_F kX = D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f);
+    const D2D1_COLOR_F kY = D2D1::ColorF(0.90f, 0.75f, 0.10f, 1.0f);
+    const D2D1_COLOR_F kNeutral = D2D1::ColorF(0.40f, 0.42f, 0.48f, 1.0f);
+
+    const float col1 = PAD, col2 = PAD + 160.0f;
+    float row = y + 4.0f;
+    DrawGlyphChip(rt, white, col1, row, L"LS", kNeutral, true, 30.0f, L"Select widget");
+    DrawGlyphChip(rt, white, col2, row, L"RS", kNeutral, true, 30.0f, L"Move it");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"A", kA, false, 22.0f, L"Save");
+    DrawGlyphChip(rt, white, col2, row, L"B", kB, false, 22.0f, L"Discard/Exit");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"X", kX, false, 22.0f, L"Delete preset");
+    DrawGlyphChip(rt, white, col2, row, L"Y", kY, false, 22.0f, L"New preset");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"LB", kNeutral, true, 30.0f, L"Prev preset");
+    DrawGlyphChip(rt, white, col2, row, L"RB", kNeutral, true, 30.0f, L"Next preset");
 }
 
 void RenderConfig() {
@@ -1744,6 +1831,7 @@ void RenderConfig() {
 
     RenderPresetRow(rt, white, dim, acc, 214.0f);
     RenderActionRow(rt, white, dim, acc, 284.0f);
+    RenderControlsHint(rt, white, dim, 324.0f);
 
     SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_configWin); return; }
@@ -1926,6 +2014,12 @@ void ApplyEditMode(bool on) {
     SetClickThrough(g_panelWin, !on);
     SetClickThrough(g_configWin, !on);
     SetClickThrough(g_handsfreeWin, !on);
+    // The toolbar is normally WS_EX_NOACTIVATE (never steals focus from the
+    // game). Edit mode is the exception: taking foreground/focus stops the
+    // game's own window from receiving keyboard/mouse input while editing
+    // (best-effort — a game reading raw/exclusive input ignores this, same
+    // caveat as everything else in this overlay).
+    SetActivatable(g_configWin, on);
     if (on) {
         g_editSnapshot = CaptureSnapshot();
         g_dirty = false;
@@ -1933,6 +2027,7 @@ void ApplyEditMode(bool on) {
         g_renamingPreset = false;
         g_selectedWidgetIdx = 0;
         g_prevButtons = 0;
+        g_prevForeground = GetForegroundWindow();
         SetTimer(g_ctrl, TIMER_GAMEPAD, 33, nullptr);
     } else {
         KillTimer(g_ctrl, TIMER_GAMEPAD);
@@ -1943,8 +2038,15 @@ void ApplyEditMode(bool on) {
     RelayoutMemories();
     RenderPanel();
     RenderHandsFree();  // shows a positionable placeholder in edit mode
-    if (on) RenderConfig();
-    else    HideWindow(g_configWin);
+    if (on) {
+        RenderConfig();
+        SetForegroundWindow(g_configWin.hwnd);
+        SetFocus(g_configWin.hwnd);
+    } else {
+        HideWindow(g_configWin);
+        if (g_prevForeground && IsWindow(g_prevForeground)) SetForegroundWindow(g_prevForeground);
+        g_prevForeground = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------

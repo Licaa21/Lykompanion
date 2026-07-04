@@ -77,8 +77,16 @@ A connected **Xbox-style gamepad** (via XInput) drives the whole editor
 alongside the mouse: D-pad/left-stick cycles the selected widget (shown with a
 solid accent ring, gamepad-only — mouse dragging has no "selected" concept),
 right-stick moves it, **A** = Save, **B** = Discard & Close, **X** = delete the
-active preset, **Y** = create a new one, **LB**/**RB** = switch presets. The
-on-screen hint line adapts to whichever input you used most recently.
+active preset, **Y** = create a new one, **LB**/**RB** = switch presets.
+
+Control hints live in ONE place — a row at the bottom of the toolbar — not
+repeated on every widget. It shows the configured hotkey text when you're using
+the mouse, or real controller-button glyphs (colored A/B/X/Y circles, gray
+LS/RS/LB/RB pills) when a gamepad is active, adapting to whichever input you
+used most recently. Entering edit mode also takes OS focus away from the game
+(best-effort — a game reading raw/exclusive input won't notice), so it stops
+processing keyboard/mouse input while you're dragging widgets around; focus
+returns to the game automatically on exit.
 
 Saying a configured phrase (Settings → "edit overlay" phrase, off by default)
 also opens edit mode directly — detected locally in the browser, never sent to
