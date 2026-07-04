@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -7,6 +8,13 @@ from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
 
 logger = logging.getLogger(__name__)
+
+# Chat turns fire this as a background task per turn without awaiting the previous one - two
+# quick consecutive turns could otherwise both read known_facts before either had written its
+# save, so both save the same fact worded slightly differently (the exact-string dedup in
+# remember() only catches identical wording). Serializing here guarantees each pass's
+# known_facts reflects every earlier turn's completed writes.
+_lock = asyncio.Lock()
 
 
 async def extract_and_apply_memory(user_message: str, assistant_message: str) -> None:
@@ -19,6 +27,11 @@ async def extract_and_apply_memory(user_message: str, assistant_message: str) ->
     handling the conversation. Runs as a fire-and-forget background task, so failures here
     must never raise into the caller.
     """
+    async with _lock:
+        await _extract_and_apply_memory_locked(user_message, assistant_message)
+
+
+async def _extract_and_apply_memory_locked(user_message: str, assistant_message: str) -> None:
     # Filter to current session so the extraction LLM only sees facts relevant here — without
     # this, it could see level-20 memories from another BG3 session and "fix" them based on
     # what it sees in the current conversation, corrupting the other session's facts.

@@ -242,25 +242,31 @@ def format_memories_for_prompt(
     Background extraction passes must NOT pass these - they need every fact to dedupe/remove
     correctly."""
     memories = load_memories()
-    if active_process is not None:
-        def _include(m: dict) -> bool:
-            m_process = m.get("process")
-            m_session = m.get("session_id")
-            if not m_process:
-                # Global memory (no process, no session) — always include
-                return True
-            if m_process.lower() != active_process.lower():
-                # Different game — exclude
-                return False
-            if not m_session:
-                # Process-level memory (same game, no session) — include for all sessions
-                return True
-            if not active_session_id:
-                # No active session context — include all memories for this process
-                return True
-            # Session-specific — only include when the session matches
-            return m_session == active_session_id
-        memories = [m for m in memories if _include(m)]
+
+    def _include(m: dict) -> bool:
+        m_process = m.get("process")
+        m_session = m.get("session_id")
+        if not m_process:
+            # Global memory (no process, no session) — always include
+            return True
+        if active_process is None:
+            # No game currently tracked — every game/session-scoped memory is excluded,
+            # not just ones for a different game (this used to be skipped entirely when
+            # active_process was None, leaking every game's memories all the time).
+            return False
+        if m_process.lower() != active_process.lower():
+            # Different game — exclude
+            return False
+        if not m_session:
+            # Process-level memory (same game, no session) — include for all sessions
+            return True
+        if not active_session_id:
+            # No active session context — include all memories for this process
+            return True
+        # Session-specific — only include when the session matches
+        return m_session == active_session_id
+
+    memories = [m for m in memories if _include(m)]
     if game_memory_limit > 0 and retrieval_query is not None:
         from app.core.memory_retrieval import select_relevant
 

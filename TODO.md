@@ -1,9 +1,6 @@
 # TODO
 
 - [ ] The speech toasts in the overlay don't work too well with very long responses, because some toasts appear too late. Idea: We should keep 5 maximum speech toasts in the chat widget, and if new ones are detected, we should push older ones out, regardless if the narration finished or not. The main point is that what the user currently hears through narration to be displayed in the overlay.
-- [ ] Game specific memories are being fed to the LLM even when that game is not running.
-- [ ] Game specific memories are being saved in the personal data general memoreis still. Not related to the above.
-- [x] Fixed (2026-07-04): images failed whenever web_search_provider was `openrouter` ("I couldn't pull a picture for you this time") because `execute_show_image`/`execute_image_search` were gated on `web_search_provider == "searxng"`. SearXNG is the only image-capable path, so that gate is now removed — image search always uses SearXNG (via `searxng_base_url`) regardless of the text-search provider, degrading gracefully to "no picture found" if SearXNG is unreachable. Text search still uses whichever provider is configured. 
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 - - [ ] Real TTS network streaming (audio starts playing before synthesis fully completes) was deliberately NOT implemented in the 2026-07-04 latency pass — it requires switching narration.js off fetch()+blob() to an `<audio src>`-based GET stream (plus a WAV-header trick or MSE for the PCM-wrapping providers), which touches the working narration/overlay-toast-timing/barge-in logic and can't be verified without running the app. Done instead: persistent HTTP client reuse per TTS call (removes per-sentence connection setup) — see kokoro.py/chirp3.py `_get_client()`. If ever revisited, read the reasoning in that session before starting.

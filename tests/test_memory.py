@@ -28,12 +28,12 @@ def test_add_update_remove_roundtrip():
     assert memory.remove_memory(entry["id"]) is False
 
 
-def test_prompt_includes_all_when_no_active_process():
+def test_prompt_excludes_game_memories_when_no_active_process():
     memory.add_memory("global fact")
     memory.add_memory("game fact", process="bg3.exe")
     text = memory.format_memories_for_prompt(None, None)
     assert "global fact" in text
-    assert "game fact" in text
+    assert "game fact" not in text
 
 
 def test_prompt_filters_by_process_and_session():
