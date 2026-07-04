@@ -854,11 +854,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .screenshot-indicator {
   font-size: 11px;
   color: #6fa8ff;
+  margin-bottom: 5px;
+}
+.screenshot-indicator:not([hidden]) {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 5px;
 }
 
 .attached-image-thumb {
