@@ -88,10 +88,12 @@ async def _fetch_steam(http_client: httpx.AsyncClient, term: str) -> dict | None
 
     for filename in ("library_600x900.jpg", "header.jpg"):
         url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/{filename}"
+        # A HEAD request isn't reliably honored by this CDN (some zones 405/misbehave on it even
+        # for assets that exist) - stream a GET instead and bail before the body downloads.
         try:
-            head = await http_client.head(url)
-            if head.status_code == 200:
-                return {"title": title, "cover_url": url, "description": description, "source": "steam"}
+            async with http_client.stream("GET", url) as response:
+                if response.status_code == 200 and response.headers.get("content-type", "").startswith("image/"):
+                    return {"title": title, "cover_url": url, "description": description, "source": "steam"}
         except httpx.HTTPError:
             continue
     return {"title": title, "cover_url": None, "description": description, "source": "steam"}
@@ -186,9 +188,12 @@ async def fetch_art(process: str, force: bool = False) -> dict:
     data = _load_all()
     key = process.lower()
     existing = data.get(key)
-    # A record saved before the "description" field existed is treated as stale so it gets
-    # backfilled once, rather than permanently missing a description it was never fetched with.
-    if existing and not force and "description" in existing:
+    # A record saved before the "description" field existed, or one that matched a Steam/IGDB
+    # game but came away with no cover art (e.g. the old HEAD-request check against Steam's CDN
+    # produced false negatives), is treated as stale so it gets refetched once instead of being
+    # permanently stuck.
+    is_fresh = existing and "description" in existing and (existing.get("cover_url") or existing.get("source") is None)
+    if existing and not force and is_fresh:
         return existing
 
     term = _clean_search_term(process)

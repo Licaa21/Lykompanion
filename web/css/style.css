@@ -2379,6 +2379,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   top: 6px;
   right: 6px;
   z-index: 1;
+  /* Cover art can be any brightness/color underneath - an opaque chip + shadow keeps this
+     legible instead of the translucent tint that disappears against light/busy art. */
+  background: rgba(10,10,20,0.85);
+  border-color: rgba(255,255,255,0.25);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
 }
 
 .journal-detail-info-row {
