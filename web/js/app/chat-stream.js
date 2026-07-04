@@ -362,7 +362,7 @@ async function sendMessage(text) {
           continue;
         }
         if (payload.youtube_control) {
-          window.controlYoutubePlayer(payload.youtube_control);
+          window.controlYoutubePlayer(payload.youtube_control.action, payload.youtube_control.volume);
           continue;
         }
         if (payload.done) continue;

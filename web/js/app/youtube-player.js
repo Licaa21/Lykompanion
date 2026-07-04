@@ -70,15 +70,21 @@ window.loadYoutubeVideo = function (videoId, title) {
 
 // Called from chat-stream.js for control_youtube_player tool calls (SSE `youtube_control` event /
 // non-streaming `youtube_control` response field) and by the panel's own buttons.
-window.controlYoutubePlayer = function (action) {
+window.controlYoutubePlayer = function (action, volume) {
+  const currentTitle = ytQueueIndex >= 0 ? ytQueue[ytQueueIndex].title : undefined;
   switch (action) {
     case "play":
+      // "stop" hides the panel and fully unloads the player - resuming (which, per the YouTube
+      // IFrame API, restarts a stopped video from 0:00 since stopVideo() doesn't just pause) must
+      // re-show it, or the video plays audibly with no panel visible anywhere.
+      if (ytPlayer) showYoutubePanel(currentTitle);
       if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
       break;
     case "pause":
       if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
       break;
     case "restart":
+      if (ytPlayer) showYoutubePanel(currentTitle);
       if (ytPlayer && ytPlayer.seekTo) {
         ytPlayer.seekTo(0, true);
         ytPlayer.playVideo();
@@ -101,6 +107,11 @@ window.controlYoutubePlayer = function (action) {
     case "stop":
       if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
       hideYoutubePanel();
+      break;
+    case "set_volume":
+      if (ytPlayer && ytPlayer.setVolume && Number.isFinite(volume)) {
+        ytPlayer.setVolume(Math.min(100, Math.max(0, volume)));
+      }
       break;
   }
 };

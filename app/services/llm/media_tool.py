@@ -86,21 +86,29 @@ MEDIA_TOOLS = [
             "description": (
                 "Control the in-app YouTube player that play_on_youtube already opened - pause, "
                 "resume, restart the current video from the beginning, skip to the next/previous "
-                "video played this session, or stop and close the player. Only call this after a "
-                "video has actually been played this session; if nothing has played yet, use "
-                "play_on_youtube instead."
+                "video played this session, set its playback volume, or stop and close the player. "
+                "Only call this after a video has actually been played this session; if nothing "
+                "has played yet, use play_on_youtube instead. IMPORTANT: 'set_volume' controls the "
+                "YouTube video/music playback volume - a request like 'play that quieter' or 'at "
+                "half volume' when referring to a song/video means this, NOT set_narration_volume "
+                "(which only ever adjusts your own spoken voice, never played media)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["play", "pause", "restart", "next", "previous", "stop"],
+                        "enum": ["play", "pause", "restart", "next", "previous", "stop", "set_volume"],
                         "description": (
-                            "'play' resumes a paused video, 'pause' pauses, 'restart' seeks the "
-                            "current video back to 0:00, 'next'/'previous' move through this "
-                            "session's play history, 'stop' closes the player entirely."
+                            "'play' resumes a paused/stopped video, 'pause' pauses, 'restart' seeks "
+                            "the current video back to 0:00, 'next'/'previous' move through this "
+                            "session's play history, 'stop' closes the player entirely, 'set_volume' "
+                            "sets the player's own volume (requires the volume argument)."
                         ),
+                    },
+                    "volume": {
+                        "type": "integer",
+                        "description": "0-100 - only used with action='set_volume', e.g. 50 for 'half volume'.",
                     },
                 },
                 "required": ["action"],
@@ -109,7 +117,7 @@ MEDIA_TOOLS = [
     },
 ]
 
-_PLAYER_ACTIONS = {"play", "pause", "restart", "next", "previous", "stop"}
+_PLAYER_ACTIONS = {"play", "pause", "restart", "next", "previous", "stop", "set_volume"}
 _PLAYER_ACTION_MESSAGES = {
     "play": "Resuming the video.",
     "pause": "Paused.",
@@ -211,14 +219,23 @@ async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
     return f"Now playing '{title}' on YouTube.", {"video_id": video_id, "title": title}
 
 
-async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | None]:
-    """Returns (tool_message, action). action (or None if invalid/unrecognized) is relayed to the
-    frontend's in-app YouTube player as a side effect - this tool has no way to know the player's
-    actual state (nothing is playing, queue is empty, etc.), it just forwards the request."""
+async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | None, int | None]:
+    """Returns (tool_message, action, volume). action (or None if invalid/unrecognized) and volume
+    (only for action='set_volume') are relayed to the frontend's in-app YouTube player as a side
+    effect - this tool has no way to know the player's actual state (nothing is playing, queue is
+    empty, etc.), it just forwards the request."""
     action = (arguments.get("action") or "").strip().lower()
     if action not in _PLAYER_ACTIONS:
-        return f"Unknown player action '{action}'.", None
-    return _PLAYER_ACTION_MESSAGES[action], action
+        return f"Unknown player action '{action}'.", None, None
+
+    if action == "set_volume":
+        try:
+            volume = max(0, min(100, int(arguments.get("volume"))))
+        except (TypeError, ValueError):
+            return "No volume level given.", None, None
+        return f"Set the video's volume to {volume}%.", action, volume
+
+    return _PLAYER_ACTION_MESSAGES[action], action, None
 
 
 async def execute_play_on_spotify(arguments: dict) -> str:

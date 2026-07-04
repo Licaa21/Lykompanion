@@ -148,7 +148,7 @@ async function sendDirectVoice(wavBlob) {
         if (payload.stop_listening) { stopListening = true; agentStopListening(); }
         if (payload.tool_sfx) playToolSfx(payload.tool_sfx);
         if (payload.youtube_play) window.loadYoutubeVideo(payload.youtube_play.video_id, payload.youtube_play.title);
-        if (payload.youtube_control) window.controlYoutubePlayer(payload.youtube_control);
+        if (payload.youtube_control) window.controlYoutubePlayer(payload.youtube_control.action, payload.youtube_control.volume);
         if (payload.done) {
           applyNarrationVolume(payload.narration_volume);
           transcript = payload.transcript || null;

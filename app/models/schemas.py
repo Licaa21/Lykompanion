@@ -23,7 +23,7 @@ class ChatResponse(BaseModel):
     stop_listening: bool = False
     transcript: str | None = None
     youtube_play: dict | None = None
-    youtube_control: str | None = None
+    youtube_control: dict | None = None
 
 
 class ChatTitleRequest(BaseModel):

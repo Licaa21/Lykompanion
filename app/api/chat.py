@@ -411,14 +411,27 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         side_effect = {"type": "youtube_play", **player} if player else None
         return message, None, side_effect
     if name == "control_youtube_player":
-        message, action = await execute_control_youtube_player(arguments)
-        side_effect = {"type": "youtube_control", "action": action} if action else None
+        message, action, volume = await execute_control_youtube_player(arguments)
+        side_effect = None
+        if action:
+            side_effect = {"type": "youtube_control", "action": action}
+            if volume is not None:
+                side_effect["volume"] = volume
         return message, None, side_effect
     if name == "play_on_spotify":
         return await execute_play_on_spotify(arguments), None, None
     if name in REMINDER_TOOL_NAMES:
         return execute_reminder_tool(name, arguments), None, None
     return execute_tool_call(name, arguments), None, None
+
+
+def _drop_type(side_effect: dict | None) -> dict | None:
+    """Strips the internal "type" discriminator before a youtube_play/youtube_control side effect
+    is handed to a non-streaming ChatResponse - the SSE paths key off it via event["type"]
+    instead, so it never needs to reach the client."""
+    if side_effect is None:
+        return None
+    return {k: v for k, v in side_effect.items() if k != "type"}
 
 
 def _safe_json_args(raw: str | None) -> dict:
@@ -560,8 +573,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
-        youtube_play=youtube_play,
-        youtube_control=youtube_control.get("action") if youtube_control else None,
+        youtube_play=_drop_type(youtube_play),
+        youtube_control=_drop_type(youtube_control),
     )
 
 
@@ -603,7 +616,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 elif event["type"] == "youtube_play":
                     yield f"data: {json.dumps({'youtube_play': {'video_id': event['video_id'], 'title': event['title']}})}\n\n"
                 elif event["type"] == "youtube_control":
-                    yield f"data: {json.dumps({'youtube_control': event['action']})}\n\n"
+                    yield f"data: {json.dumps({'youtube_control': _drop_type(event)})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
@@ -673,8 +686,8 @@ async def chat_voice(
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
         transcript=transcript,
-        youtube_play=youtube_play,
-        youtube_control=youtube_control.get("action") if youtube_control else None,
+        youtube_play=_drop_type(youtube_play),
+        youtube_control=_drop_type(youtube_control),
     )
 
 
@@ -740,7 +753,7 @@ async def chat_voice_stream(
                 elif event["type"] == "youtube_play":
                     yield f"data: {json.dumps({'youtube_play': {'video_id': event['video_id'], 'title': event['title']}})}\n\n"
                 elif event["type"] == "youtube_control":
-                    yield f"data: {json.dumps({'youtube_control': event['action']})}\n\n"
+                    yield f"data: {json.dumps({'youtube_control': _drop_type(event)})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
             return
