@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     # Native in-game overlay (overlay/overlay.exe) - spawned while a game is tracked, fed toasts
     # and game-state over its named-pipe API. Opt-in, Windows only, needs the built exe.
     overlay_enabled: bool = False
+    # User-configurable global hotkey that toggles the overlay's edit mode (default matches the
+    # overlay's historical hardcoded combo). Pushed to the overlay via a live pipe command and
+    # persisted into its layout JSON so a fresh launch also picks it up.
+    overlay_edit_hotkey: str = "Ctrl+Shift+O"
+    # Spoken phrase that enters overlay edit mode directly (bypasses the LLM entirely) - detected
+    # client-side by the same always-listening mechanism as wake_word/sleep_word, independent of
+    # hands-free mic state. No-ops if the overlay isn't running.
+    overlay_edit_phrase_enabled: bool = False
+    overlay_edit_phrase: str = "edit overlay"
 
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
@@ -118,6 +127,15 @@ class Settings(BaseSettings):
     # How often (seconds) the poller captures+OCRs a frame locally while building up the batch
     # sent to the LLM once per poll interval. Cheap - no LLM call happens per capture.
     game_state_capture_interval_seconds: int = 1
+    # If every frame in a poll window dedupes away as OCR-text-identical (see
+    # _SIMILARITY_THRESHOLD in game_state_extraction.py), the LLM pass is normally skipped
+    # entirely - correct for a frozen/paused screen, but it would also miss a minimal-UI game
+    # where the HUD text never changes even though the player is genuinely moving through the
+    # world. As a fallback in that case, the window's first and last raw screenshots are compared
+    # via a coarse pixel diff (0-100%); if they differ by at least this much, the window is sent
+    # through anyway on pixels alone. A real frozen screen has ~0% diff and stays skipped. Set to
+    # 100 to disable (never force a window through on visual diff alone).
+    game_state_visual_diff_threshold_percent: float = 12.0
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # Self-training: lets the extraction pass maintain a per-process notes document (how to decode

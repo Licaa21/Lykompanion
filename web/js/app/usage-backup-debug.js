@@ -189,7 +189,7 @@ backupImportInput?.addEventListener("change", async () => {
   const file = backupImportInput.files[0];
   backupImportInput.value = "";
   if (!file) return;
-  if (!confirm("Importing overwrites current chats, memories, and settings with the backup's contents. Continue?")) return;
+  if (!(await showConfirm("Importing overwrites current chats, memories, and settings with the backup's contents. Continue?", { title: "Import backup", danger: true, confirmText: "Import" }))) return;
 
   const formData = new FormData();
   formData.append("file", file);
@@ -197,12 +197,12 @@ backupImportInput?.addEventListener("change", async () => {
     const response = await fetch("/api/backup/import", { method: "POST", body: formData });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      alert(`Import failed: ${error.detail || "unknown error"}`);
+      await showAlert(`Import failed: ${error.detail || "unknown error"}`, { title: "Import failed" });
       return;
     }
-    alert("Backup imported. Restart Lykompanion for the restored settings to take effect.");
+    await showAlert("Backup imported. Restart Lykompanion for the restored settings to take effect.", { title: "Import complete" });
   } catch (err) {
-    alert("Import failed: connection error.");
+    await showAlert("Import failed: connection error.", { title: "Import failed" });
   }
 });
 

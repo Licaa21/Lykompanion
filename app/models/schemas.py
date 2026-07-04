@@ -53,9 +53,13 @@ class CompanionConfig(BaseModel):
     custom_openai_api_key_set: bool = False
     memory_extraction_model: str | None = None
     overlay_enabled: bool = False
+    overlay_edit_hotkey: str = "Ctrl+Shift+O"
+    overlay_edit_phrase_enabled: bool = False
+    overlay_edit_phrase: str = "edit overlay"
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
+    game_state_visual_diff_threshold_percent: float = 12.0
     game_state_model: str | None = None
     game_state_training_enabled: bool = False
     proactive_messages_enabled: bool = False

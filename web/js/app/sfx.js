@@ -158,6 +158,7 @@ function playMemoryDeleteSfx() {
 
 const TOOL_SFX = {
   web_search: playWebSearchSfx,
+  show_image: playWebSearchSfx,
   save_user_memory: playMemorySaveSfx,
   save_game_memory: playMemorySaveSfx,
   save_session_memory: playMemorySaveSfx,

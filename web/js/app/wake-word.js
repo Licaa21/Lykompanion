@@ -14,6 +14,11 @@ const sleepWordEnabledInput = document.getElementById("cfg-sleep-word-enabled");
 const sleepWordPhraseInput = document.getElementById("cfg-sleep-word-phrase");
 const sleepWordDependentEl = document.getElementById("sleep-word-dependent");
 
+const overlayEditPhraseControlsEl = document.getElementById("overlay-edit-phrase-controls");
+const overlayEditPhraseEnabledInput = document.getElementById("cfg-overlay-edit-phrase-enabled");
+const overlayEditPhraseInput = document.getElementById("cfg-overlay-edit-phrase");
+const overlayEditPhraseDependentEl = document.getElementById("overlay-edit-phrase-dependent");
+
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 const wakeWordSupported = Boolean(SpeechRecognitionCtor);
 
@@ -59,6 +64,18 @@ function handleWakeWordDetected() {
     }, 1500);
   }
   updateWakeWordListenerState();
+}
+
+// Opens the native overlay's edit mode directly — no chat request, no tool spec, no LLM
+// involvement at all. Orthogonal to hands-free state; best-effort (no-ops if the overlay isn't
+// running, which app/api/overlay.py's endpoint already guarantees).
+async function handleOverlayEditPhraseDetected() {
+  try {
+    // window.fetch is patched (core.js) to attach the required auth token header.
+    await fetch("/api/overlay/edit-mode", { method: "POST" });
+  } catch (err) {
+    // best-effort — overlay may not be running
+  }
 }
 
 function handleSleepWordDetected() {
@@ -110,6 +127,16 @@ function startWakeWordRecognition() {
         handleSleepWordDetected();
       }
     }
+
+    // The "edit overlay" phrase is checked unconditionally, independent of hands-free state
+    // (unlike wake/sleep word above, which are mutually exclusive by mic state) — bypasses the
+    // LLM entirely, see handleOverlayEditPhraseDetected().
+    if (overlayEditPhraseEnabled) {
+      const normalizedEdit = normalizeForWakeMatch(overlayEditPhrase);
+      if (normalizedEdit && normalizedTranscript.includes(normalizedEdit)) {
+        handleOverlayEditPhraseDetected();
+      }
+    }
   };
 
   wakeWordRecognition.onerror = (event) => {
@@ -154,7 +181,10 @@ function updateWakeWordListenerState() {
   // (while it's on) — so it stays alive across the on/off transition instead of stopping.
   const wantWake = wakeWordSupported && wakeWordEnabled && !liveMicEnabled;
   const wantSleep = wakeWordSupported && sleepWordEnabled && liveMicEnabled;
-  wakeWordShouldRun = wantWake || wantSleep;
+  // Independent of liveMicEnabled — the edit-overlay phrase must be caught whether or not
+  // hands-free is on, so the recognizer stays alive purely for it even if wake/sleep are both off.
+  const wantEditPhrase = wakeWordSupported && overlayEditPhraseEnabled;
+  wakeWordShouldRun = wantWake || wantSleep || wantEditPhrase;
 
   if (wakeWordShouldRun) {
     if (!wasRunning) wakeWordConsecutiveFailures = 0; // fresh start - give it a clean shot
@@ -165,6 +195,7 @@ function updateWakeWordListenerState() {
 
   wakeWordDependentEl.hidden = !wakeWordEnabled;
   sleepWordDependentEl.hidden = !sleepWordEnabled;
+  overlayEditPhraseDependentEl.hidden = !overlayEditPhraseEnabled;
   wakeWordDebugEl.hidden = !(wakeWordSupported && (wakeWordEnabled || sleepWordEnabled));
   if (wakeWordSupported && (wakeWordEnabled || sleepWordEnabled)) {
     wakeWordStatusEl.textContent = liveMicEnabled
@@ -178,6 +209,7 @@ if (!wakeWordSupported) {
   wakeWordUnsupportedEl.hidden = false;
   wakeWordControlsEl.hidden = true;
   sleepWordControlsEl.hidden = true;
+  overlayEditPhraseControlsEl.hidden = true;
 }
 
 wakeWordEnabledInput.addEventListener("change", () => {
@@ -196,6 +228,15 @@ sleepWordEnabledInput.addEventListener("change", () => {
 
 sleepWordPhraseInput.addEventListener("change", () => {
   sleepWordPhrase = sleepWordPhraseInput.value.trim() || "Go to sleep";
+});
+
+overlayEditPhraseEnabledInput.addEventListener("change", () => {
+  overlayEditPhraseEnabled = overlayEditPhraseEnabledInput.checked;
+  updateWakeWordListenerState();
+});
+
+overlayEditPhraseInput.addEventListener("change", () => {
+  overlayEditPhrase = overlayEditPhraseInput.value.trim() || "edit overlay";
 });
 
 updateWakeWordListenerState();

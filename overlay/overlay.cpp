@@ -35,6 +35,7 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #include <urlmon.h>
+#include <xinput.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -46,6 +47,7 @@
 #include <iterator>
 #include <cwctype>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 
 #pragma comment(lib, "user32.lib")
@@ -56,6 +58,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "xinput.lib")
 
 namespace {
 
@@ -87,11 +90,10 @@ constexpr UINT_PTR TIMER_DEMO   = 2;         // --demo auto-quit
 constexpr UINT_PTR TIMER_BANNER = 3;         // startup banner fade animation
 constexpr UINT_PTR TIMER_PARENT = 4;         // watch the parent process for exit
 constexpr UINT_PTR TIMER_HANDSFREE = 5;      // hands-free indicator animation
-constexpr int      HOTKEY_EDIT = 100;        // Ctrl+Shift+O edit-mode toggle
+constexpr UINT_PTR TIMER_GAMEPAD = 6;        // XInput poll, runs only while in edit mode
+constexpr int      HOTKEY_EDIT = 100;        // configurable edit-mode toggle
 
 constexpr int   AVATAR = 22;        // logo avatar size in reply toasts
-
-constexpr wchar_t kEditHint[] = L"Drag to move  \x2022  Ctrl+Shift+O to lock";
 
 // Widget geometry (device pixels @ 96 DPI; DPI scaling is a later concern).
 constexpr int   TOAST_W   = 340;
@@ -273,7 +275,15 @@ IDWriteTextFormat* g_fmtSmall = nullptr;  // panel row label (11px uppercase)
 IDWriteTextFormat* g_fmtHead  = nullptr;  // memory/handsfree header (semibold 14)
 IDWriteTextFormat* g_fmtIcon  = nullptr;  // emoji glyphs (color font)
 IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
+IDWriteTextFormat* g_fmtUi    = nullptr;  // edit-toolbar labels (fixed size/font)
 ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
+
+// Base sizes for the user-scalable text formats (multiplied by g_fontScale).
+constexpr float kSzTitle = 18.0f;  // toast title / panel title
+constexpr float kSzBody  = 14.0f;  // toast body / panel value
+constexpr float kSzLabel = 13.0f;  // panel label / image caption
+constexpr float kSzSmall = 11.0f;  // panel row label (uppercase)
+constexpr float kSzHead  = 14.0f;  // memory / handsfree header
 
 // A layered window plus its DIB-backed Direct2D render surface.
 struct LayeredWindow {
@@ -291,7 +301,7 @@ struct LayeredWindow {
     bool     hasPos  = false;  // false => derive from anchor on first commit
 };
 
-enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorBottomCenter, AnchorFixed };
+enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorBottomCenter, AnchorBottomRight, AnchorFixed };
 
 // ---- Appearance (user-adjustable in edit mode, persisted) ------------------
 struct Rgb { float r, g, b; };
@@ -306,6 +316,21 @@ const Rgb kAccents[] = {
 constexpr int kAccentCount = (int)(sizeof(kAccents) / sizeof(kAccents[0]));
 int   g_accentIdx = 0;
 float g_opacity   = 0.92f;  // whole-overlay alpha multiplier, 0.40..1.00
+
+// Text customization (persisted, live-adjustable in edit mode).
+const wchar_t* const kFonts[] = {
+    L"Segoe UI", L"Arial", L"Verdana", L"Georgia", L"Consolas", L"Comic Sans MS",
+};
+constexpr int kFontCount = (int)(sizeof(kFonts) / sizeof(kFonts[0]));
+int   g_fontIdx   = 0;
+float g_fontScale = 1.0f;    // 0.70..1.60 multiplier over the base text sizes
+
+// Per-area visibility (persisted, toggled in edit mode). When a widget is
+// disabled it hides entirely — even in edit mode; re-enable it from the toolbar.
+bool  g_showToasts    = true;   // reply / reminder / image toasts
+bool  g_showMemories  = true;   // memory save/remove toasts (own area)
+bool  g_showPanel     = true;   // game-state panel
+bool  g_showHandsfree = true;   // live-mic indicator
 
 // Color helpers: every widget color routes through these so opacity/accent
 // apply uniformly. `a` is the color's own alpha before the opacity multiply.
@@ -353,7 +378,9 @@ struct Panel {
 // ---- Global state ----------------------------------------------------------
 
 HWND          g_ctrl = nullptr;    // message-only controller window
+HWND          g_prevForeground = nullptr;  // foreground window before edit mode stole focus
 LayeredWindow g_toastWin;
+LayeredWindow g_memWin;            // memory save/remove toasts (separate area)
 LayeredWindow g_panelWin;
 LayeredWindow g_configWin;         // edit-mode appearance toolbar
 LayeredWindow g_bannerWin;         // startup fade-in/out hint
@@ -365,15 +392,79 @@ bool          g_logoOk = false;
 LayeredWindow g_handsfreeWin;             // persistent hands-free (live-mic) indicator
 bool          g_handsfreeActive = false;
 ULONGLONG     g_handsfreeStart = 0;       // animation clock
-std::vector<Toast> g_toasts;
+std::vector<Toast> g_toasts;     // reply / reminder / image toasts
+std::vector<Toast> g_memToasts;  // memory toasts (rendered in g_memWin)
 Panel         g_panel;
 bool          g_editMode = false;
 
+// ---------------------------------------------------------------------------
+// Position/appearance presets, dirty tracking, hotkey config, gamepad state,
+// input modality — all namespace-scope structs/enums (MSVC rejects a
+// function-local struct with a default member initializer referencing a
+// function-local enum; keep every new type declared here, never inside a fn).
+// ---------------------------------------------------------------------------
+
+struct LayoutPreset {
+    std::wstring name = L"Default";
+    int toastX=0, toastY=0; bool toastHasPos=false;
+    int memX=0, memY=0; bool memHasPos=false;
+    int panelX=0, panelY=0; bool panelHasPos=false;
+    int handsfreeX=0, handsfreeY=0; bool handsfreeHasPos=false;
+    float opacity = 0.92f;
+    int accentIdx = 0;
+    int fontIdx = 0;
+    float fontScale = 1.0f;
+    bool showToasts=true, showMemories=true, showPanel=true, showHandsfree=true;
+};
+std::vector<LayoutPreset> g_presets;
+int           g_activePreset = 0;
+bool          g_dirty = false;             // any live change since edit mode was entered
+LayoutPreset  g_editSnapshot;               // state at the moment edit mode was entered
+bool          g_showExitConfirm = false;    // "unsaved changes" prompt (hotkey-triggered exit)
+
+// Rename (keyboard-only, mouse-triggered — no gamepad path drives this).
+bool          g_renamingPreset = false;
+std::wstring  g_renameBuffer;
+int           g_renameIdx = -1;
+constexpr size_t kRenameMaxLen = 24;
+
+// Configurable edit-mode hotkey (defaults match the historical Ctrl+Shift+O).
+std::vector<std::wstring> g_hotkeyMods = {L"ctrl", L"shift"};
+wchar_t       g_hotkeyKey = L'O';
+
+enum InputModality { ModalityMouse, ModalityGamepad };
+InputModality g_lastModality = ModalityMouse;
+
+// Indexable widget registry (gamepad cycling target), parallel arrays.
+LayeredWindow* g_widgets[4] = { nullptr, nullptr, nullptr, nullptr };  // filled in wWinMain
+const wchar_t* g_widgetLabels[4] = { L"Chat toasts", L"Memory toasts", L"Game panel", L"Mic indicator" };
+int           g_selectedWidgetIdx = 0;   // gamepad-only concept, independent of mouse drag
+
+WORD          g_prevButtons = 0;         // previous-frame XInput button state (edge detection)
+ULONGLONG     g_lastCycleTick = 0;       // debounce for D-pad/stick widget cycling
+constexpr DWORD CYCLE_DEBOUNCE_MS = 220;
+constexpr float GAMEPAD_MOVE_SPEED = 480.0f;  // px/sec at full stick deflection
+
 // Config-toolbar hit rects (window coords), filled in by RenderConfig().
-constexpr int CONFIG_W = 300;
+constexpr int CONFIG_W = 340;
+constexpr int CONFIG_H = 444;
 D2D1_RECT_F   g_rcOpacMinus = {};
 D2D1_RECT_F   g_rcOpacPlus  = {};
+D2D1_RECT_F   g_rcTextMinus = {};
+D2D1_RECT_F   g_rcTextPlus  = {};
+D2D1_RECT_F   g_rcFontPrev  = {};
+D2D1_RECT_F   g_rcFontNext  = {};
 D2D1_RECT_F   g_rcSwatch[kAccentCount] = {};
+D2D1_RECT_F   g_rcToggle[4] = {};   // show: toasts / memories / panel / mic
+D2D1_RECT_F   g_rcPresetNew = {};
+D2D1_RECT_F   g_rcPresetDelete = {};
+D2D1_RECT_F   g_rcPresetRename = {};
+std::vector<D2D1_RECT_F> g_rcPresetChips;  // parallel to g_presets, rebuilt each render
+D2D1_RECT_F   g_rcSave = {};
+D2D1_RECT_F   g_rcDiscardClose = {};
+D2D1_RECT_F   g_rcConfirmSave = {};
+D2D1_RECT_F   g_rcConfirmDiscard = {};
+D2D1_RECT_F   g_rcConfirmKeep = {};
 
 std::mutex               g_queueMx;
 std::deque<std::wstring> g_queue;   // raw JSON lines from the pipe thread
@@ -382,6 +473,29 @@ std::deque<std::wstring> g_queue;   // raw JSON lines from the pipe thread
 // Direct2D surface management (shared by both widgets)
 // ---------------------------------------------------------------------------
 
+// (Re)create the user-scalable text formats from the current font + scale. Called
+// once at startup and again whenever the user changes text size / font in edit mode.
+bool RebuildTextFormats() {
+    SafeRelease(&g_fmtTitle);
+    SafeRelease(&g_fmtBody);
+    SafeRelease(&g_fmtLabel);
+    SafeRelease(&g_fmtSmall);
+    SafeRelease(&g_fmtHead);
+
+    const wchar_t* fam = kFonts[g_fontIdx];
+    const float s = g_fontScale;
+    auto mk = [&](DWRITE_FONT_WEIGHT w, float px, IDWriteTextFormat** out) -> bool {
+        return SUCCEEDED(g_dwriteFactory->CreateTextFormat(
+            fam, nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            px * s, L"en-us", out));
+    };
+    return mk(DWRITE_FONT_WEIGHT_SEMI_BOLD, kSzTitle, &g_fmtTitle)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzBody,  &g_fmtBody)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzLabel, &g_fmtLabel)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzSmall, &g_fmtSmall)
+        && mk(DWRITE_FONT_WEIGHT_SEMI_BOLD, kSzHead,  &g_fmtHead);
+}
+
 bool CreateFactories() {
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2dFactory)))
         return false;
@@ -389,27 +503,8 @@ bool CreateFactories() {
                                    reinterpret_cast<IUnknown**>(&g_dwriteFactory))))
         return false;
 
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 18.0f, L"en-us", &g_fmtTitle)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-us", &g_fmtBody)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtLabel)))
-        return false;
-
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"en-us", &g_fmtSmall)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-us", &g_fmtHead)))
-        return false;
+    // Fixed-size chrome formats (never scaled — they must stay usable/legible
+    // regardless of the text size the user is editing).
     if (FAILED(g_dwriteFactory->CreateTextFormat(
             L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"en-us", &g_fmtIcon)))
@@ -420,6 +515,12 @@ bool CreateFactories() {
         return false;
     g_fmtCenter->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     g_fmtCenter->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtUi)))
+        return false;
+
+    if (!RebuildTextFormats()) return false;
 
     D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties();
     sp.dashStyle = D2D1_DASH_STYLE_DASH;
@@ -441,15 +542,107 @@ std::wstring LayoutPath() {
     return dir + L"\\overlay_layout.json";
 }
 
+// Build a LayoutPreset from the CURRENT live globals (widget positions +
+// appearance + visibility). Used for snapshots, saves, and new-preset cloning.
+LayoutPreset CaptureSnapshot() {
+    LayoutPreset p;
+    p.toastX = g_toastWin.posX; p.toastY = g_toastWin.posY; p.toastHasPos = g_toastWin.hasPos;
+    p.memX = g_memWin.posX; p.memY = g_memWin.posY; p.memHasPos = g_memWin.hasPos;
+    p.panelX = g_panelWin.posX; p.panelY = g_panelWin.posY; p.panelHasPos = g_panelWin.hasPos;
+    p.handsfreeX = g_handsfreeWin.posX; p.handsfreeY = g_handsfreeWin.posY;
+    p.handsfreeHasPos = g_handsfreeWin.hasPos;
+    p.opacity = g_opacity;
+    p.accentIdx = g_accentIdx;
+    p.fontIdx = g_fontIdx;
+    p.fontScale = g_fontScale;
+    p.showToasts = g_showToasts; p.showMemories = g_showMemories;
+    p.showPanel = g_showPanel; p.showHandsfree = g_showHandsfree;
+    if (g_activePreset >= 0 && g_activePreset < (int)g_presets.size())
+        p.name = g_presets[g_activePreset].name;
+    return p;
+}
+
+// Write a LayoutPreset's fields back into the live globals + re-render every
+// widget. Deliberately does NOT touch g_configWin's visibility (that's owned
+// by ApplyEditMode) — these are forward declarations to widget render
+// functions defined later in the file (after the widget render functions).
+void RelayoutToasts();
+void RelayoutMemories();
+void RenderPanel();
+void RenderHandsFree();
+void RenderConfig();
+void ApplySnapshot(const LayoutPreset& p) {
+    g_toastWin.posX = p.toastX; g_toastWin.posY = p.toastY; g_toastWin.hasPos = p.toastHasPos;
+    g_memWin.posX = p.memX; g_memWin.posY = p.memY; g_memWin.hasPos = p.memHasPos;
+    g_panelWin.posX = p.panelX; g_panelWin.posY = p.panelY; g_panelWin.hasPos = p.panelHasPos;
+    g_handsfreeWin.posX = p.handsfreeX; g_handsfreeWin.posY = p.handsfreeY;
+    g_handsfreeWin.hasPos = p.handsfreeHasPos;
+    g_opacity = p.opacity;
+    g_accentIdx = p.accentIdx;
+    g_fontIdx = p.fontIdx;
+    g_fontScale = p.fontScale;
+    g_showToasts = p.showToasts; g_showMemories = p.showMemories;
+    g_showPanel = p.showPanel; g_showHandsfree = p.showHandsfree;
+    RebuildTextFormats();
+    RelayoutToasts();
+    RelayoutMemories();
+    RenderPanel();
+    RenderHandsFree();
+    if (g_editMode) RenderConfig();  // toolbar visibility/showing is owned by ApplyEditMode
+}
+
+std::wstring JsonEscape(const std::wstring& s) {
+    std::wstring out;
+    for (wchar_t c : s) {
+        if (c == L'"' || c == L'\\') out.push_back(L'\\');
+        out.push_back(c);
+    }
+    return out;
+}
+
+std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return std::string();
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), &s[0], n, nullptr, nullptr);
+    return s;
+}
+
+std::string SerializePreset(const LayoutPreset& p) {
+    return "{\"name\":\"" + WideToUtf8(JsonEscape(p.name)) + "\"" +
+           ",\"toast\":{\"x\":" + std::to_string(p.toastX) + ",\"y\":" + std::to_string(p.toastY) + "}" +
+           ",\"memory\":{\"x\":" + std::to_string(p.memX) + ",\"y\":" + std::to_string(p.memY) + "}" +
+           ",\"panel\":{\"x\":" + std::to_string(p.panelX) + ",\"y\":" + std::to_string(p.panelY) + "}" +
+           ",\"handsfree\":{\"x\":" + std::to_string(p.handsfreeX) + ",\"y\":" + std::to_string(p.handsfreeY) + "}" +
+           ",\"opacity\":" + std::to_string(p.opacity) +
+           ",\"accent\":" + std::to_string(p.accentIdx) +
+           ",\"font\":" + std::to_string(p.fontIdx) +
+           ",\"textScale\":" + std::to_string(p.fontScale) +
+           ",\"showToasts\":" + (p.showToasts ? "true" : "false") +
+           ",\"showMemories\":" + (p.showMemories ? "true" : "false") +
+           ",\"showPanel\":" + (p.showPanel ? "true" : "false") +
+           ",\"showHandsfree\":" + (p.showHandsfree ? "true" : "false") + "}";
+}
+
 void SaveLayout() {
-    std::string js = "{\"toast\":{\"x\":" + std::to_string(g_toastWin.posX) +
-                     ",\"y\":" + std::to_string(g_toastWin.posY) +
-                     "},\"panel\":{\"x\":" + std::to_string(g_panelWin.posX) +
-                     ",\"y\":" + std::to_string(g_panelWin.posY) +
-                     "},\"handsfree\":{\"x\":" + std::to_string(g_handsfreeWin.posX) +
-                     ",\"y\":" + std::to_string(g_handsfreeWin.posY) +
-                     "},\"opacity\":" + std::to_string(g_opacity) +
-                     ",\"accent\":" + std::to_string(g_accentIdx) + "}";
+    std::string hotkeyMods = "[";
+    for (size_t i = 0; i < g_hotkeyMods.size(); ++i) {
+        if (i) hotkeyMods += ",";
+        hotkeyMods += "\"" + WideToUtf8(g_hotkeyMods[i]) + "\"";
+    }
+    hotkeyMods += "]";
+
+    std::string presets = "[";
+    for (size_t i = 0; i < g_presets.size(); ++i) {
+        if (i) presets += ",";
+        presets += SerializePreset(g_presets[i]);
+    }
+    presets += "]";
+
+    std::string js = "{\"hotkeyMods\":" + hotkeyMods +
+                     ",\"hotkeyKey\":\"" + WideToUtf8(std::wstring(1, g_hotkeyKey)) + "\"" +
+                     ",\"activePreset\":" + std::to_string(g_activePreset) +
+                     ",\"presets\":" + presets + "}";
     HANDLE h = CreateFileW(LayoutPath().c_str(), GENERIC_WRITE, 0, nullptr,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE) {
@@ -457,6 +650,61 @@ void SaveLayout() {
         WriteFile(h, js.data(), (DWORD)js.size(), &n, nullptr);
         CloseHandle(h);
     }
+}
+
+// Parse one preset object (mirrors the old flat-shape fields, plus "name").
+LayoutPreset ParsePreset(const JsonValue& v) {
+    LayoutPreset p;
+    const JsonValue* nm = v.find(L"name");
+    if (nm && nm->type == JsonValue::Str && !nm->str.empty()) p.name = nm->str;
+
+    auto applyPos = [&](const wchar_t* key, int& px, int& py, bool& has) {
+        const JsonValue* o = v.find(key);
+        if (!o || o->type != JsonValue::Obj) return;
+        const JsonValue* x = o->find(L"x");
+        const JsonValue* y = o->find(L"y");
+        if (x && x->type == JsonValue::Num && y && y->type == JsonValue::Num) {
+            px = (int)x->num; py = (int)y->num; has = true;
+        }
+    };
+    applyPos(L"toast", p.toastX, p.toastY, p.toastHasPos);
+    applyPos(L"memory", p.memX, p.memY, p.memHasPos);
+    applyPos(L"panel", p.panelX, p.panelY, p.panelHasPos);
+    applyPos(L"handsfree", p.handsfreeX, p.handsfreeY, p.handsfreeHasPos);
+
+    const JsonValue* op = v.find(L"opacity");
+    if (op && op->type == JsonValue::Num) {
+        p.opacity = (float)op->num;
+        if (p.opacity < 0.40f) p.opacity = 0.40f;
+        if (p.opacity > 1.00f) p.opacity = 1.00f;
+    }
+    const JsonValue* ac = v.find(L"accent");
+    if (ac && ac->type == JsonValue::Num) {
+        p.accentIdx = (int)ac->num;
+        if (p.accentIdx < 0) p.accentIdx = 0;
+        if (p.accentIdx >= kAccentCount) p.accentIdx = kAccentCount - 1;
+    }
+    const JsonValue* fn = v.find(L"font");
+    if (fn && fn->type == JsonValue::Num) {
+        p.fontIdx = (int)fn->num;
+        if (p.fontIdx < 0) p.fontIdx = 0;
+        if (p.fontIdx >= kFontCount) p.fontIdx = kFontCount - 1;
+    }
+    const JsonValue* ts = v.find(L"textScale");
+    if (ts && ts->type == JsonValue::Num) {
+        p.fontScale = (float)ts->num;
+        if (p.fontScale < 0.70f) p.fontScale = 0.70f;
+        if (p.fontScale > 1.60f) p.fontScale = 1.60f;
+    }
+    auto applyBool = [&](const wchar_t* key, bool& flag) {
+        const JsonValue* b = v.find(key);
+        if (b && b->type == JsonValue::Bool) flag = b->b;
+    };
+    applyBool(L"showToasts", p.showToasts);
+    applyBool(L"showMemories", p.showMemories);
+    applyBool(L"showPanel", p.showPanel);
+    applyBool(L"showHandsfree", p.showHandsfree);
+    return p;
 }
 
 void LoadLayout() {
@@ -467,33 +715,57 @@ void LoadLayout() {
     JsonValue v;
     if (!ParseJson(Utf8ToWide(content), v) || v.type != JsonValue::Obj) return;
 
-    auto apply = [&](const wchar_t* key, LayeredWindow& lw) {
-        const JsonValue* o = v.find(key);
-        if (!o || o->type != JsonValue::Obj) return;
-        const JsonValue* x = o->find(L"x");
-        const JsonValue* y = o->find(L"y");
-        if (x && x->type == JsonValue::Num && y && y->type == JsonValue::Num) {
-            lw.posX = (int)x->num;
-            lw.posY = (int)y->num;
-            lw.hasPos = true;
-        }
-    };
-    apply(L"toast", g_toastWin);
-    apply(L"panel", g_panelWin);
-    apply(L"handsfree", g_handsfreeWin);
+    const JsonValue* hm = v.find(L"hotkeyMods");
+    if (hm && hm->type == JsonValue::Arr) {
+        g_hotkeyMods.clear();
+        for (auto& m : hm->arr) if (m.type == JsonValue::Str) g_hotkeyMods.push_back(m.str);
+        if (g_hotkeyMods.empty()) g_hotkeyMods = {L"ctrl", L"shift"};
+    }
+    const JsonValue* hk = v.find(L"hotkeyKey");
+    if (hk && hk->type == JsonValue::Str && !hk->str.empty()) g_hotkeyKey = hk->str[0];
 
-    const JsonValue* op = v.find(L"opacity");
-    if (op && op->type == JsonValue::Num) {
-        g_opacity = (float)op->num;
-        if (g_opacity < 0.40f) g_opacity = 0.40f;
-        if (g_opacity > 1.00f) g_opacity = 1.00f;
+    const JsonValue* presets = v.find(L"presets");
+    if (presets && presets->type == JsonValue::Arr && !presets->arr.empty()) {
+        // Current shape: an array of presets.
+        g_presets.clear();
+        for (auto& pv : presets->arr)
+            if (pv.type == JsonValue::Obj) g_presets.push_back(ParsePreset(pv));
+        const JsonValue* ap = v.find(L"activePreset");
+        g_activePreset = (ap && ap->type == JsonValue::Num) ? (int)ap->num : 0;
+    } else if (v.find(L"toast") || v.find(L"opacity")) {
+        // One-time forward migration from the old flat shape (no "presets" key).
+        g_presets.clear();
+        g_presets.push_back(ParsePreset(v));
+        g_presets[0].name = L"Default";
+        g_activePreset = 0;
     }
-    const JsonValue* ac = v.find(L"accent");
-    if (ac && ac->type == JsonValue::Num) {
-        g_accentIdx = (int)ac->num;
-        if (g_accentIdx < 0) g_accentIdx = 0;
-        if (g_accentIdx >= kAccentCount) g_accentIdx = kAccentCount - 1;
+    if (g_presets.empty()) g_presets.push_back(LayoutPreset{});
+    if (g_activePreset < 0 || g_activePreset >= (int)g_presets.size()) g_activePreset = 0;
+
+    ApplySnapshot(g_presets[g_activePreset]);
+    if (presets == nullptr || presets->type != JsonValue::Arr || presets->arr.empty())
+        SaveLayout();  // persist the migrated shape immediately
+}
+
+// Compute the RegisterHotKey MOD_* bitmask from g_hotkeyMods.
+UINT HotkeyModsBitmask() {
+    UINT mods = MOD_NOREPEAT;
+    for (auto& m : g_hotkeyMods) {
+        if (m == L"ctrl")       mods |= MOD_CONTROL;
+        else if (m == L"shift") mods |= MOD_SHIFT;
+        else if (m == L"alt")   mods |= MOD_ALT;
+        else if (m == L"win")   mods |= MOD_WIN;
     }
+    return mods;
+}
+
+// (Re)register the global edit-mode hotkey from the current g_hotkeyMods/g_hotkeyKey.
+void RegisterEditHotkey() {
+    RegisterHotKey(g_ctrl, HOTKEY_EDIT, HotkeyModsBitmask(), (UINT)towupper(g_hotkeyKey));
+}
+void ReregisterEditHotkey() {
+    UnregisterHotKey(g_ctrl, HOTKEY_EDIT);
+    RegisterEditHotkey();
 }
 
 void DiscardSurface(LayeredWindow& lw) {
@@ -556,12 +828,12 @@ void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
     } else if (anchor == AnchorFixed) {
         // Caller set posX/posY explicitly (banner).
     } else if (!lw.hasPos) {
-        lw.posX = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width
+        bool right  = (anchor == AnchorTopRight || anchor == AnchorBottomRight);
+        bool bottom = (anchor == AnchorBottomCenter || anchor == AnchorBottomRight);
+        lw.posX = right ? screenW - MARGIN - lw.width
                 : (anchor == AnchorBottomCenter) ? (screenW - lw.width) / 2
                 : MARGIN;
-        lw.posY = (anchor == AnchorBottomCenter)
-                      ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height
-                      : MARGIN;
+        lw.posY = bottom ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height : MARGIN;
         lw.hasPos = true;
     }
     int x = lw.posX, y = lw.posY;
@@ -597,6 +869,18 @@ void SetClickThrough(LayeredWindow& lw, bool through) {
     SetWindowLong(lw.hwnd, GWL_EXSTYLE, ex);
 }
 
+// Every overlay window is created WS_EX_NOACTIVATE so it never steals focus
+// from the game during normal play. Edit mode is the one exception: toggling
+// this off lets the toolbar actually become the foreground/focused window (see
+// ApplyEditMode), so the game stops receiving keyboard/mouse input while the
+// user is editing instead of both windows processing it at once.
+void SetActivatable(LayeredWindow& lw, bool activatable) {
+    LONG ex = GetWindowLong(lw.hwnd, GWL_EXSTYLE);
+    if (activatable) ex &= ~WS_EX_NOACTIVATE;
+    else             ex |= WS_EX_NOACTIVATE;
+    SetWindowLong(lw.hwnd, GWL_EXSTYLE, ex);
+}
+
 // Dashed outline drawn over a widget while in edit mode.
 void DrawEditDecoration(ID2D1RenderTarget* rt, int w, int h) {
     if (!g_dashStroke) return;
@@ -606,6 +890,28 @@ void DrawEditDecoration(ID2D1RenderTarget* rt, int w, int h) {
         D2D1::RectF(1.5f, 1.5f, w - 1.5f, h - 1.5f), 12.0f, 12.0f);
     rt->DrawRoundedRectangle(rr, b, 1.6f, g_dashStroke);
     SafeRelease(&b);
+}
+
+// Solid accent-colored ring marking the gamepad-cycling "selected" widget —
+// distinct from the dashed DrawEditDecoration, and only relevant in gamepad
+// modality (mouse dragging has no notion of "selected", it drags directly).
+void DrawSelectionRing(ID2D1RenderTarget* rt, int w, int h) {
+    const Rgb& a = kAccents[g_accentIdx];
+    ID2D1SolidColorBrush* b = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(a.r, a.g, a.b, 1.0f), &b);
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+        D2D1::RectF(2.0f, 2.0f, w - 2.0f, h - 2.0f), 12.0f, 12.0f);
+    rt->DrawRoundedRectangle(rr, b, 3.0f);
+    SafeRelease(&b);
+}
+
+// True while `lw` is the gamepad-selected widget and a gamepad is the active
+// input modality (index looked up by hwnd since g_widgets isn't populated yet
+// at the point some widgets render for the first time during startup).
+bool IsGamepadSelected(const LayeredWindow& lw) {
+    if (g_lastModality != ModalityGamepad) return false;
+    if (g_selectedWidgetIdx < 0 || g_selectedWidgetIdx >= 4) return false;
+    return g_widgets[g_selectedWidgetIdx] == &lw;
 }
 
 // ---------------------------------------------------------------------------
@@ -642,30 +948,53 @@ ID2D1Bitmap* MakeBitmap(ID2D1RenderTarget* rt, const ImageData& img) {
     return bmp;
 }
 
+// Human-readable name for a modifier/key token, used both for the hint text
+// and for RegisterHotKey's MOD_* bitmask (see RegisterEditHotkey).
+std::wstring FormatHotkeyCombo() {
+    std::wstring s;
+    for (auto& m : g_hotkeyMods) {
+        std::wstring cap = m;
+        if (!cap.empty()) cap[0] = (wchar_t)towupper(cap[0]);
+        s += cap + L"+";
+    }
+    s += std::wstring(1, g_hotkeyKey);
+    return s;
+}
+
+// The edit-mode hint line adapts to the live configured hotkey and to whichever
+// input the user is currently using (mouse vs. gamepad) — see g_lastModality.
+std::wstring EditHintText() {
+    if (g_lastModality == ModalityGamepad) {
+        return L"Left stick/D-pad: select  \x2022  Right stick: move  \x2022  "
+               L"A: Save  X: Delete  Y: New  B: Discard/Exit  LB/RB: Preset";
+    }
+    return L"Drag to move  \x2022  " + FormatHotkeyCombo() + L" to lock";
+}
+
 // While editing, an empty widget still shows a draggable placeholder card.
+// Control hints live in one place — the editor toolbar (RenderConfig) — not
+// repeated on every widget.
 void RenderPlaceholder(LayeredWindow& lw, const wchar_t* label,
                        Anchor anchor, int width) {
-    const int h = 64;
+    const int h = 44;
     if (!EnsureSurface(lw, width, h)) return;
     ID2D1RenderTarget* rt = lw.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr, *dim = nullptr;
+    ID2D1SolidColorBrush* bg = nullptr, *white = nullptr;
     rt->CreateSolidColorBrush(Bg(0.80f), &bg);            // previews live opacity
     rt->CreateSolidColorBrush(Txt(1.0f), &white);
-    rt->CreateSolidColorBrush(D2D1::ColorF(0.55f, 0.85f, 0.60f, 0.95f), &dim);  // edit green
 
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
         D2D1::RectF(1.5f, 1.5f, width - 1.5f, h - 1.5f), 12.0f, 12.0f);
     rt->FillRoundedRectangle(card, bg);
     rt->DrawText(label, (UINT32)wcslen(label), g_fmtBody,
                  D2D1::RectF(PAD, 12, width - PAD, 34), white);
-    rt->DrawText(kEditHint, (UINT32)wcslen(kEditHint), g_fmtLabel,
-                 D2D1::RectF(PAD, 36, width - PAD, 58), dim);
     DrawEditDecoration(rt, width, h);
+    if (IsGamepadSelected(lw)) DrawSelectionRing(rt, width, h);
 
-    SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+    SafeRelease(&white); SafeRelease(&bg);
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(lw); return; }
     CommitWindow(lw, anchor);
 }
@@ -687,23 +1016,27 @@ struct ToastPlan {
     float headerH = 0;
 };
 
-void RelayoutToasts() {
-    if (g_toasts.empty()) {
-        if (g_editMode) RenderPlaceholder(g_toastWin, L"Toasts appear here",
-                                          AnchorTopRight, TOAST_W);
-        else HideWindow(g_toastWin);
+// Render a stack of toasts into `win`, anchored to `anchor`. Shared by the
+// reply/reminder/image area (g_toasts → g_toastWin) and the separate memory
+// area (g_memToasts → g_memWin). `show` gates the whole area on/off.
+void RenderToastList(std::vector<Toast>& toasts, LayeredWindow& win,
+                     Anchor anchor, const wchar_t* placeholder, bool show) {
+    if (!show) { HideWindow(win); return; }
+    if (toasts.empty()) {
+        if (g_editMode) RenderPlaceholder(win, placeholder, anchor, TOAST_W);
+        else HideWindow(win);
         return;
     }
 
     const float innerW = TOAST_W - 2 * PAD;
 
     using Plan = ToastPlan;
-    std::vector<Plan> plans(g_toasts.size());
-    std::vector<float> cardH(g_toasts.size());
+    std::vector<Plan> plans(toasts.size());
+    std::vector<float> cardH(toasts.size());
     int total = 0;
 
-    for (size_t i = 0; i < g_toasts.size(); ++i) {
-        Toast& t = g_toasts[i];
+    for (size_t i = 0; i < toasts.size(); ++i) {
+        Toast& t = toasts[i];
         Plan& p = plans[i];
 
         if (t.isImage && t.imgState == ImgReady && t.image && t.image->ok) {
@@ -740,19 +1073,19 @@ void RelayoutToasts() {
             cardH[i] = (contentH + 2 * PAD < 44.0f) ? 44.0f : (contentH + 2 * PAD);
         }
         total += (int)cardH[i];
-        if (i + 1 < g_toasts.size()) total += TOAST_GAP;
+        if (i + 1 < toasts.size()) total += TOAST_GAP;
     }
 
     auto freePlans = [&]() {
         for (auto& p : plans) { SafeRelease(&p.layout); SafeRelease(&p.header); }
     };
 
-    if (!EnsureSurface(g_toastWin, TOAST_W, total)) {
+    if (!EnsureSurface(win, TOAST_W, total)) {
         freePlans();
         return;
     }
 
-    ID2D1DCRenderTarget* rt = g_toastWin.rt;
+    ID2D1DCRenderTarget* rt = win.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
@@ -760,8 +1093,8 @@ void RelayoutToasts() {
     rt->CreateSolidColorBrush(Txt(1.0f), &text);
 
     float y = 0;
-    for (size_t i = 0; i < g_toasts.size(); ++i) {
-        Toast& t = g_toasts[i];
+    for (size_t i = 0; i < toasts.size(); ++i) {
+        Toast& t = toasts[i];
         Plan& p = plans[i];
         bool reminder = (t.kind == L"reminder");
         ID2D1SolidColorBrush* bg = nullptr;
@@ -839,13 +1172,27 @@ void RelayoutToasts() {
     SafeRelease(&text);
     freePlans();
 
-    if (g_editMode) DrawEditDecoration(rt, TOAST_W, total);
+    if (g_editMode) {
+        DrawEditDecoration(rt, TOAST_W, total);
+        if (IsGamepadSelected(win)) DrawSelectionRing(rt, TOAST_W, total);
+    }
 
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
-        DiscardSurface(g_toastWin);
+        DiscardSurface(win);
         return;
     }
-    CommitWindow(g_toastWin, AnchorTopRight);
+    CommitWindow(win, anchor);
+}
+
+// The two toast areas. Replies/reminders/images stack top-right; memory
+// save/remove toasts get their own draggable area (bottom-right by default).
+void RelayoutToasts() {
+    RenderToastList(g_toasts, g_toastWin, AnchorTopRight,
+                    L"Replies & reminders appear here", g_showToasts);
+}
+void RelayoutMemories() {
+    RenderToastList(g_memToasts, g_memWin, AnchorBottomRight,
+                    L"Memory saves appear here", g_showMemories);
 }
 
 // durationMs = 0 uses the default TOAST_MS; a positive value (e.g. sent by the frontend to match
@@ -962,19 +1309,19 @@ void AddMemoryToast(const std::wstring& action, const std::wstring& scope,
     t.memScope = scope;
     t.text = content;
     t.expire = GetTickCount64() + TOAST_MS;
-    g_toasts.push_back(std::move(t));
-    RelayoutToasts();
+    g_memToasts.push_back(std::move(t));
+    RelayoutMemories();
 }
 
-// Drop expired toasts; returns true if the set changed.
-bool ExpireToasts() {
+// Drop expired toasts from a list; returns true if it changed.
+bool ExpireList(std::vector<Toast>& toasts) {
     ULONGLONG now = GetTickCount64();
-    size_t before = g_toasts.size();
-    for (size_t i = 0; i < g_toasts.size();) {
-        if (g_toasts[i].expire <= now) g_toasts.erase(g_toasts.begin() + i);
+    size_t before = toasts.size();
+    for (size_t i = 0; i < toasts.size();) {
+        if (toasts[i].expire <= now) toasts.erase(toasts.begin() + i);
         else ++i;
     }
-    return g_toasts.size() != before;
+    return toasts.size() != before;
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,6 +1349,7 @@ std::vector<std::wstring> SplitValueParts(const std::wstring& value) {
 // Each row is a stacked sub-card: an uppercase dim label above a wrapping value
 // (bulleted when the value is ';'-separated) — matching web/js/app/game-state.js.
 void RenderPanel() {
+    if (!g_showPanel) { HideWindow(g_panelWin); return; }
     if (!g_panel.valid ||
         (g_panel.title.empty() && g_panel.rows.empty())) {
         if (g_editMode) RenderPlaceholder(g_panelWin, L"Game state panel",
@@ -1118,7 +1466,10 @@ void RenderPanel() {
     SafeRelease(&titleLayout);
     freeRows();
 
-    if (g_editMode) DrawEditDecoration(rt, PANEL_W, height);
+    if (g_editMode) {
+        DrawEditDecoration(rt, PANEL_W, height);
+        if (IsGamepadSelected(g_panelWin)) DrawSelectionRing(rt, PANEL_W, height);
+    }
 
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
         DiscardSurface(g_panelWin);
@@ -1132,62 +1483,50 @@ bool InRect(const D2D1_RECT_F& r, int x, int y) {
 }
 
 // ---------------------------------------------------------------------------
-// Hands-free (live-mic) indicator: a persistent pill with a mic glyph and a
-// pulsing, scrolling accent gradient while listening.
+// Hands-free (live-mic) indicator: a small circular badge with a mic glyph and
+// a pulsing accent glow while listening.
 // ---------------------------------------------------------------------------
 
-constexpr int HANDSFREE_W = 190;
+constexpr int HANDSFREE_W = 44;
 
 void RenderHandsFree() {
+    if (!g_showHandsfree) { HideWindow(g_handsfreeWin); return; }
     if (!g_handsfreeActive && !g_editMode) { HideWindow(g_handsfreeWin); return; }
-    const int w = HANDSFREE_W, h = 46;
+    const int w = HANDSFREE_W, h = HANDSFREE_W;
     if (!EnsureSurface(g_handsfreeWin, w, h)) return;
 
     ID2D1DCRenderTarget* rt = g_handsfreeWin.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-    D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(
-        D2D1::RectF(1.0f, 1.0f, w - 1.0f, h - 1.0f), h / 2.0f, h / 2.0f);
+    D2D1_ELLIPSE circle = D2D1::Ellipse(
+        D2D1::Point2F(w / 2.0f, h / 2.0f), w / 2.0f - 1.0f, h / 2.0f - 1.0f);
 
     ID2D1SolidColorBrush* bg = nullptr;
     rt->CreateSolidColorBrush(Bg(0.90f), &bg);
-    rt->FillRoundedRectangle(pill, bg);
+    rt->FillEllipse(circle, bg);
 
-    // Scrolling accent gradient (wrapped) — animated only while active.
-    D2D1_GRADIENT_STOP stops[3] = {
-        {0.0f, Acc(0.05f)}, {0.5f, Acc(0.42f)}, {1.0f, Acc(0.05f)}};
-    ID2D1GradientStopCollection* gsc = nullptr;
-    if (SUCCEEDED(rt->CreateGradientStopCollection(
-            stops, 3, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_WRAP, &gsc)) && gsc) {
-        float phase = (GetTickCount64() - g_handsfreeStart) / 1000.0f;
-        const float span = 95.0f;
-        float off = g_handsfreeActive ? fmodf(phase * 55.0f, span) : 0.0f;
-        ID2D1LinearGradientBrush* grad = nullptr;
-        D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES gp = {{off, 0}, {off + span, 0}};
-        if (SUCCEEDED(rt->CreateLinearGradientBrush(gp, gsc, &grad)) && grad) {
-            rt->FillRoundedRectangle(pill, grad);
-            SafeRelease(&grad);
-        }
-        SafeRelease(&gsc);
-    }
+    // Pulsing accent fill — breathes only while active.
+    float phase = (GetTickCount64() - g_handsfreeStart) / 1000.0f;
+    float pulse = g_handsfreeActive ? 0.18f + 0.24f * (0.5f + 0.5f * sinf(phase * 3.0f)) : 0.15f;
+    ID2D1SolidColorBrush* glow = nullptr;
+    rt->CreateSolidColorBrush(Acc(pulse), &glow);
+    rt->FillEllipse(circle, glow);
 
     ID2D1SolidColorBrush* border = nullptr, *white = nullptr;
     rt->CreateSolidColorBrush(Acc(0.75f), &border);
     rt->CreateSolidColorBrush(Txt(1.0f), &white);
-    rt->DrawRoundedRectangle(pill, border, 1.4f);
+    rt->DrawEllipse(circle, border, 1.4f);
 
     DrawEmoji(rt, L"\U0001F3A4",
-              D2D1::RectF(PAD, (h - 24) / 2.0f, PAD + 24, (h + 24) / 2.0f), white);
-    float th = 0;
-    IDWriteTextLayout* tl = MakeLayout(L"Listening\x2026", g_fmtHead, (float)(w - PAD - 34), &th);
-    if (tl) {
-        rt->DrawTextLayout(D2D1::Point2F(PAD + 30, (h - th) / 2.0f), tl, white);
-        SafeRelease(&tl);
-    }
+              D2D1::RectF((w - 22) / 2.0f, (h - 22) / 2.0f,
+                          (w + 22) / 2.0f, (h + 22) / 2.0f), white);
 
-    SafeRelease(&white); SafeRelease(&border); SafeRelease(&bg);
-    if (g_editMode) DrawEditDecoration(rt, w, h);
+    SafeRelease(&white); SafeRelease(&border); SafeRelease(&glow); SafeRelease(&bg);
+    if (g_editMode) {
+        DrawEditDecoration(rt, w, h);
+        if (IsGamepadSelected(g_handsfreeWin)) DrawSelectionRing(rt, w, h);
+    }
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_handsfreeWin); return; }
     CommitWindow(g_handsfreeWin, AnchorBottomCenter);
 }
@@ -1208,8 +1547,177 @@ void SetHandsFree(bool active) {
 // it stays usable regardless of the overlay opacity it is editing.
 // ---------------------------------------------------------------------------
 
+// The "unsaved changes" prompt, drawn INSTEAD of the normal toolbar contents
+// while g_showExitConfirm is true (see RequestExit()).
+void DrawButtonGlyph(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const wchar_t* letter,
+                     D2D1_COLOR_F fill, bool pill);  // defined below, near RenderActionRow
+
+void RenderExitConfirm(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bg, ID2D1SolidColorBrush* white,
+                       ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc) {
+    D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
+        D2D1::RectF(1.0f, 1.0f, CONFIG_W - 1.0f, CONFIG_H - 1.0f), 12.0f, 12.0f);
+    rt->FillRoundedRectangle(card, bg);
+    rt->DrawRoundedRectangle(card, acc, 1.4f);
+
+    rt->DrawText(L"Unsaved changes", 15, g_fmtUi,
+                 D2D1::RectF(PAD, 16, CONFIG_W - PAD, 40), white);
+    const wchar_t* sub = L"Save them to the active preset, discard, or keep editing?";
+    IDWriteTextLayout* subLayout = MakeLayout(sub, g_fmtLabel, CONFIG_W - 2 * PAD, nullptr);
+    if (subLayout) {
+        rt->DrawTextLayout(D2D1::Point2F(PAD, 44), subLayout, dim);
+        SafeRelease(&subLayout);
+    }
+
+    const float bw = CONFIG_W - 2 * PAD, bh = 34, gap = 10;
+    float y = 100;
+    g_rcConfirmSave = D2D1::RectF(PAD, y, PAD + bw, y + bh);
+    y += bh + gap;
+    g_rcConfirmDiscard = D2D1::RectF(PAD, y, PAD + bw, y + bh);
+    y += bh + gap;
+    g_rcConfirmKeep = D2D1::RectF(PAD, y, PAD + bw, y + bh);
+
+    bool gamepad = (g_lastModality == ModalityGamepad);
+    auto drawBtn = [&](const D2D1_RECT_F& r, const wchar_t* label, bool filled,
+                       const wchar_t* glyphLetter, D2D1_COLOR_F glyphColor) {
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 8, 8);
+        if (filled) rt->FillRoundedRectangle(rr, acc);
+        else        rt->DrawRoundedRectangle(rr, dim, 1.2f);
+        rt->DrawText(label, (UINT32)wcslen(label), g_fmtCenter, r, white);
+        if (gamepad) {
+            D2D1_RECT_F badge = D2D1::RectF(r.left + 8, r.top + (r.bottom - r.top - 22) / 2,
+                                            r.left + 8 + 22, r.top + (r.bottom - r.top - 22) / 2 + 22);
+            DrawButtonGlyph(rt, badge, glyphLetter, glyphColor, false);
+        }
+    };
+    drawBtn(g_rcConfirmSave, L"Save & Exit", true, L"A", D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f));
+    drawBtn(g_rcConfirmDiscard, L"Discard & Exit", false, L"X", D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f));
+    drawBtn(g_rcConfirmKeep, L"Keep Editing", false, L"B", D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f));
+}
+
+// One preset "chip" row (click/LB/RB switch, +/×/pencil new/delete/rename) plus
+// the Save / Discard & Close action row underneath.
+void RenderPresetRow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
+                     ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc, float y) {
+    const float bh = 24, bw = 26;
+    rt->DrawText(L"Presets", 7, g_fmtUi, D2D1::RectF(PAD, y, 120, y + bh), white);
+
+    g_rcPresetRename = D2D1::RectF(CONFIG_W - PAD - bw, y, CONFIG_W - PAD, y + bh);
+    g_rcPresetDelete = D2D1::RectF(g_rcPresetRename.left - 4 - bw, y, g_rcPresetRename.left - 4, y + bh);
+    g_rcPresetNew    = D2D1::RectF(g_rcPresetDelete.left - 4 - bw, y, g_rcPresetDelete.left - 4, y + bh);
+    for (auto* r : {&g_rcPresetNew, &g_rcPresetDelete, &g_rcPresetRename}) {
+        D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
+        rt->DrawRoundedRectangle(br, dim, 1.2f);
+    }
+    rt->DrawText(L"+", 1, g_fmtCenter, g_rcPresetNew, white);
+    rt->DrawText(L"\x00D7", 1, g_fmtCenter, g_rcPresetDelete, white);   // ×
+    rt->DrawText(L"\x270E", 1, g_fmtCenter, g_rcPresetRename, white);  // pencil
+
+    float chipY = y + bh + 8.0f, chipH = 28.0f, chipX = PAD;
+    g_rcPresetChips.assign(g_presets.size(), D2D1_RECT_F{});
+    for (size_t i = 0; i < g_presets.size(); ++i) {
+        bool renaming = g_renamingPreset && (int)i == g_renameIdx;
+        const std::wstring& shown = renaming ? g_renameBuffer : g_presets[i].name;
+        float chipW = 24.0f + (float)shown.size() * 7.0f;
+        if (chipW < 50.0f) chipW = 50.0f;
+        if (chipW > 140.0f) chipW = 140.0f;
+        D2D1_RECT_F rc = D2D1::RectF(chipX, chipY, chipX + chipW, chipY + chipH);
+        g_rcPresetChips[i] = rc;
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(rc, 8, 8);
+        bool active = (int)i == g_activePreset;
+        if (active) rt->FillRoundedRectangle(rr, acc);
+        else        rt->DrawRoundedRectangle(rr, dim, 1.2f);
+        if (renaming) rt->DrawRoundedRectangle(rr, white, 1.6f);  // edit-mode highlight
+        std::wstring label = renaming ? shown + L"_" : shown;
+        rt->DrawText(label.c_str(), (UINT32)label.size(), g_fmtUi, rc, active ? white : dim);
+        chipX += chipW + 6.0f;
+    }
+}
+
+void RenderActionRow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
+                     ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc, float y) {
+    const float bw = (CONFIG_W - 2 * PAD - 10.0f) / 2.0f, bh = 30;
+    g_rcSave = D2D1::RectF(PAD, y, PAD + bw, y + bh);
+    g_rcDiscardClose = D2D1::RectF(PAD + bw + 10.0f, y, CONFIG_W - PAD, y + bh);
+
+    D2D1_ROUNDED_RECT saveR = D2D1::RoundedRect(g_rcSave, 8, 8);
+    rt->FillRoundedRectangle(saveR, acc);
+    rt->DrawText(L"Save", 4, g_fmtCenter, g_rcSave, white);
+
+    D2D1_ROUNDED_RECT discR = D2D1::RoundedRect(g_rcDiscardClose, 8, 8);
+    rt->DrawRoundedRectangle(discR, dim, 1.2f);
+    rt->DrawText(L"Discard & Close", 15, g_fmtCenter, g_rcDiscardClose, white);
+}
+
+// A real Xbox-style button glyph (colored circle for A/B/X/Y, a neutral pill
+// for the shoulder buttons) rather than plain "(A)"/"(B)" text.
+void DrawButtonGlyph(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const wchar_t* letter,
+                     D2D1_COLOR_F fill, bool pill) {
+    ID2D1SolidColorBrush* b = nullptr;
+    rt->CreateSolidColorBrush(fill, &b);
+    if (pill) {
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, (r.bottom - r.top) / 2.0f, (r.bottom - r.top) / 2.0f);
+        rt->FillRoundedRectangle(rr, b);
+    } else {
+        D2D1_ELLIPSE e = D2D1::Ellipse(
+            D2D1::Point2F((r.left + r.right) / 2.0f, (r.top + r.bottom) / 2.0f),
+            (r.right - r.left) / 2.0f, (r.bottom - r.top) / 2.0f);
+        rt->FillEllipse(e, b);
+    }
+    SafeRelease(&b);
+    ID2D1SolidColorBrush* white = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &white);
+    rt->DrawText(letter, (UINT32)wcslen(letter), g_fmtCenter, r, white);
+    SafeRelease(&white);
+}
+
+// One "[badge] Label" pair, badge at (x,y), label following it.
+void DrawGlyphChip(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white, float x, float y,
+                   const wchar_t* letter, D2D1_COLOR_F color, bool pill, float badgeW,
+                   const wchar_t* label) {
+    D2D1_RECT_F badge = D2D1::RectF(x, y, x + badgeW, y + 22.0f);
+    DrawButtonGlyph(rt, badge, letter, color, pill);
+    rt->DrawText(label, (UINT32)wcslen(label), g_fmtLabel,
+                 D2D1::RectF(x + badgeW + 6.0f, y + 2.0f, x + badgeW + 140.0f, y + 22.0f), white);
+}
+
+// Single hint area at the bottom of the toolbar — the ONLY place edit-mode
+// controls are explained (no longer repeated on every widget). Mouse modality
+// shows the configured hotkey; gamepad modality shows real button glyphs.
+void RenderControlsHint(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
+                        ID2D1SolidColorBrush* dim, float y) {
+    if (g_lastModality != ModalityGamepad) {
+        std::wstring hint = EditHintText();
+        IDWriteTextLayout* layout = MakeLayout(hint, g_fmtLabel, CONFIG_W - 2 * PAD, nullptr);
+        if (layout) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD, y + 8.0f), layout, dim);
+            SafeRelease(&layout);
+        }
+        return;
+    }
+
+    const D2D1_COLOR_F kA = D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f);
+    const D2D1_COLOR_F kB = D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f);
+    const D2D1_COLOR_F kX = D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f);
+    const D2D1_COLOR_F kY = D2D1::ColorF(0.90f, 0.75f, 0.10f, 1.0f);
+    const D2D1_COLOR_F kNeutral = D2D1::ColorF(0.40f, 0.42f, 0.48f, 1.0f);
+
+    const float col1 = PAD, col2 = PAD + 160.0f;
+    float row = y + 4.0f;
+    DrawGlyphChip(rt, white, col1, row, L"LS", kNeutral, true, 30.0f, L"Select widget");
+    DrawGlyphChip(rt, white, col2, row, L"RS", kNeutral, true, 30.0f, L"Move it");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"A", kA, false, 22.0f, L"Save");
+    DrawGlyphChip(rt, white, col2, row, L"B", kB, false, 22.0f, L"Discard/Exit");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"X", kX, false, 22.0f, L"Delete preset");
+    DrawGlyphChip(rt, white, col2, row, L"Y", kY, false, 22.0f, L"New preset");
+    row += 28.0f;
+    DrawGlyphChip(rt, white, col1, row, L"LB", kNeutral, true, 30.0f, L"Prev preset");
+    DrawGlyphChip(rt, white, col2, row, L"RB", kNeutral, true, 30.0f, L"Next preset");
+}
+
 void RenderConfig() {
-    const int h = 108;
+    const int h = CONFIG_H;
     if (!EnsureSurface(g_configWin, CONFIG_W, h)) return;
     ID2D1RenderTarget* rt = g_configWin.rt;
     rt->BeginDraw();
@@ -1222,39 +1730,73 @@ void RenderConfig() {
     rt->CreateSolidColorBrush(D2D1::ColorF(0.62f, 0.66f, 0.74f, 1.0f), &dim);
     rt->CreateSolidColorBrush(D2D1::ColorF(a.r, a.g, a.b, 1.0f), &acc);
 
+    if (g_showExitConfirm) {
+        RenderExitConfirm(rt, bg, white, dim, acc);
+        SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+        if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_configWin); return; }
+        CommitWindow(g_configWin, AnchorTopCenter);
+        return;
+    }
+
     D2D1_ROUNDED_RECT card = D2D1::RoundedRect(
         D2D1::RectF(1.0f, 1.0f, CONFIG_W - 1.0f, h - 1.0f), 12.0f, 12.0f);
     rt->FillRoundedRectangle(card, bg);
     rt->DrawRoundedRectangle(card, acc, 1.4f);
 
     // Title.
-    rt->DrawText(L"Overlay appearance", 18, g_fmtLabel,
+    rt->DrawText(L"Overlay appearance", 18, g_fmtUi,
                  D2D1::RectF(PAD, 8, CONFIG_W - PAD, 28), dim);
 
-    // --- Opacity row: label + [-] [xx%] [+] on the right.
-    rt->DrawText(L"Opacity", 7, g_fmtBody,
-                 D2D1::RectF(PAD, 34, 120, 58), white);
-    const float by = 34, bh = 24, bw = 26;
-    g_rcOpacPlus  = D2D1::RectF(CONFIG_W - PAD - bw, by, CONFIG_W - PAD, by + bh);
-    D2D1_RECT_F pct = D2D1::RectF(g_rcOpacPlus.left - 4 - 48, by,
-                                  g_rcOpacPlus.left - 4, by + bh);
-    g_rcOpacMinus = D2D1::RectF(pct.left - 4 - bw, by, pct.left - 4, by + bh);
-    for (auto* r : {&g_rcOpacMinus, &g_rcOpacPlus}) {
+    const float bh = 24, bw = 26;
+    // A right-aligned [-] [value] [+] stepper at row `by`; fills the passed rects.
+    auto stepper = [&](float by, const wchar_t* value,
+                       D2D1_RECT_F& minus, D2D1_RECT_F& plus) {
+        plus = D2D1::RectF(CONFIG_W - PAD - bw, by, CONFIG_W - PAD, by + bh);
+        D2D1_RECT_F val = D2D1::RectF(plus.left - 4 - 56, by, plus.left - 4, by + bh);
+        minus = D2D1::RectF(val.left - 4 - bw, by, val.left - 4, by + bh);
+        for (auto* r : {&minus, &plus}) {
+            D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
+            rt->DrawRoundedRectangle(br, dim, 1.2f);
+        }
+        rt->DrawText(L"\x2212", 1, g_fmtCenter, minus, white);  // minus sign
+        rt->DrawText(L"+", 1, g_fmtCenter, plus, white);
+        rt->DrawText(value, (UINT32)wcslen(value), g_fmtCenter, val, white);
+    };
+
+    // --- Opacity row.
+    rt->DrawText(L"Opacity", 7, g_fmtUi, D2D1::RectF(PAD, 34, 120, 58), white);
+    wchar_t opacText[8];
+    swprintf(opacText, 8, L"%d%%", (int)(g_opacity * 100 + 0.5f));
+    stepper(34, opacText, g_rcOpacMinus, g_rcOpacPlus);
+
+    // --- Text size row.
+    rt->DrawText(L"Text size", 9, g_fmtUi, D2D1::RectF(PAD, 64, 120, 88), white);
+    wchar_t sizeText[8];
+    swprintf(sizeText, 8, L"%d%%", (int)(g_fontScale * 100 + 0.5f));
+    stepper(64, sizeText, g_rcTextMinus, g_rcTextPlus);
+
+    // --- Font row: [<] name [>].
+    rt->DrawText(L"Font", 4, g_fmtUi, D2D1::RectF(PAD, 94, 120, 118), white);
+    const float fy = 94;
+    g_rcFontNext = D2D1::RectF(CONFIG_W - PAD - bw, fy, CONFIG_W - PAD, fy + bh);
+    D2D1_RECT_F nameRect = D2D1::RectF(g_rcFontNext.left - 4 - 120, fy,
+                                       g_rcFontNext.left - 4, fy + bh);
+    g_rcFontPrev = D2D1::RectF(nameRect.left - 4 - bw, fy, nameRect.left - 4, fy + bh);
+    for (auto* r : {&g_rcFontPrev, &g_rcFontNext}) {
         D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
         rt->DrawRoundedRectangle(br, dim, 1.2f);
     }
-    rt->DrawText(L"\x2212", 1, g_fmtCenter, g_rcOpacMinus, white);  // minus sign
-    rt->DrawText(L"+", 1, g_fmtCenter, g_rcOpacPlus, white);
-    wchar_t pctText[8];
-    swprintf(pctText, 8, L"%d%%", (int)(g_opacity * 100 + 0.5f));
-    rt->DrawText(pctText, (UINT32)wcslen(pctText), g_fmtCenter, pct, white);
+    rt->DrawText(L"\x2039", 1, g_fmtCenter, g_rcFontPrev, white);  // ‹
+    rt->DrawText(L"\x203A", 1, g_fmtCenter, g_rcFontNext, white);  // ›
+    rt->DrawText(kFonts[g_fontIdx], (UINT32)wcslen(kFonts[g_fontIdx]),
+                 g_fmtCenter, nameRect, white);
 
     // --- Accent row: swatches, selected one ringed.
-    rt->DrawText(L"Accent", 6, g_fmtBody, D2D1::RectF(PAD, 72, 90, 96), white);
-    const float sw = 24, sgap = 6;
+    const float ay = 126, sw = 22, sgap = 6;
+    rt->DrawText(L"Accent", 6, g_fmtUi, D2D1::RectF(PAD, ay, 90, ay + sw), white);
     float sx = CONFIG_W - PAD - (kAccentCount * (sw + sgap) - sgap);
     for (int i = 0; i < kAccentCount; ++i) {
-        g_rcSwatch[i] = D2D1::RectF(sx, 72, sx + sw, 72 + sw);
+        g_rcSwatch[i] = D2D1::RectF(sx, ay, sx + sw, ay + sw);
         ID2D1SolidColorBrush* sb = nullptr;
         rt->CreateSolidColorBrush(
             D2D1::ColorF(kAccents[i].r, kAccents[i].g, kAccents[i].b, 1.0f), &sb);
@@ -1262,54 +1804,249 @@ void RenderConfig() {
         rt->FillRoundedRectangle(rr, sb);
         if (i == g_accentIdx) {
             D2D1_ROUNDED_RECT ring = D2D1::RoundedRect(
-                D2D1::RectF(sx - 2, 70, sx + sw + 2, 74 + sw), 8, 8);
+                D2D1::RectF(sx - 2, ay - 2, sx + sw + 2, ay + sw + 2), 8, 8);
             rt->DrawRoundedRectangle(ring, white, 1.8f);
         }
         SafeRelease(&sb);
         sx += sw + sgap;
     }
 
+    // --- Show toggles: one chip per area, filled (accent) when visible.
+    rt->DrawText(L"Show", 4, g_fmtUi, D2D1::RectF(PAD, 158, 90, 178), white);
+    const wchar_t* labels[4] = {L"Chat", L"Memory", L"Panel", L"Mic"};
+    bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+    const float chy = 178, chh = 26, chgap = 6;
+    const float innerW = CONFIG_W - 2 * PAD;
+    const float chw = (innerW - 3 * chgap) / 4.0f;
+    for (int i = 0; i < 4; ++i) {
+        float cx = PAD + i * (chw + chgap);
+        g_rcToggle[i] = D2D1::RectF(cx, chy, cx + chw, chy + chh);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcToggle[i], 7, 7);
+        if (*flags[i]) rt->FillRoundedRectangle(rr, acc);
+        else           rt->DrawRoundedRectangle(rr, dim, 1.2f);
+        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtUi,
+                     D2D1::RectF(cx, chy + 4, cx + chw, chy + chh),
+                     *flags[i] ? white : dim);
+    }
+
+    RenderPresetRow(rt, white, dim, acc, 214.0f);
+    RenderActionRow(rt, white, dim, acc, 284.0f);
+    RenderControlsHint(rt, white, dim, 324.0f);
+
     SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_configWin); return; }
     CommitWindow(g_configWin, AnchorTopCenter);
 }
 
+// Re-render everything whose look depends on the toolbar (accent/opacity/toggles).
+void RerenderAll() {
+    RelayoutToasts();
+    RelayoutMemories();
+    RenderPanel();
+    RenderHandsFree();
+    RenderConfig();
+}
+
+void ApplyEditMode(bool on);  // forward decl — RequestExit/click handlers below call it
+
+// Commit the current live state to the active preset and persist it. Stays in
+// edit mode ("A button will save to the selected preset").
+void SavePreset() {
+    if (g_activePreset >= 0 && g_activePreset < (int)g_presets.size())
+        g_presets[g_activePreset] = CaptureSnapshot();
+    SaveLayout();
+    g_dirty = false;
+}
+
+// Revert to how things looked when edit mode was entered, then close. No
+// confirmation — pressing this button/gamepad-B already declares the intent.
+void DiscardAndClose() {
+    ApplySnapshot(g_editSnapshot);
+    g_showExitConfirm = false;
+    ApplyEditMode(false);
+}
+
+// Switch the active preset (LB/RB, chip click) — a preview/select action, not
+// an implicit save.
+void SwitchPreset(int idx) {
+    if (g_presets.empty()) return;
+    idx = ((idx % (int)g_presets.size()) + (int)g_presets.size()) % (int)g_presets.size();
+    g_activePreset = idx;
+    ApplySnapshot(g_presets[idx]);
+    g_dirty = true;
+}
+
+// Create a new preset cloned from the current live layout, auto-named.
+void CreatePreset() {
+    LayoutPreset p = CaptureSnapshot();
+    p.name = L"Preset " + std::to_wstring(g_presets.size() + 1);
+    g_presets.push_back(p);
+    g_activePreset = (int)g_presets.size() - 1;
+    g_dirty = true;
+    RenderConfig();
+}
+
+// Delete the active preset (refuses if it's the only one left).
+void DeletePreset() {
+    if (g_presets.size() <= 1) return;
+    g_presets.erase(g_presets.begin() + g_activePreset);
+    if (g_activePreset >= (int)g_presets.size()) g_activePreset = (int)g_presets.size() - 1;
+    ApplySnapshot(g_presets[g_activePreset]);
+    g_dirty = true;
+    RenderConfig();
+}
+
+// Enter in-place rename for the active preset (mouse-triggered, keyboard-typed
+// — see PollRenameKeys(); no gamepad path drives this).
+void BeginRenamePreset() {
+    if (g_activePreset < 0 || g_activePreset >= (int)g_presets.size()) return;
+    g_renamingPreset = true;
+    g_renameIdx = g_activePreset;
+    g_renameBuffer = g_presets[g_activePreset].name;
+    RenderConfig();
+}
+
+void CommitRenamePreset() {
+    if (g_renamingPreset && g_renameIdx >= 0 && g_renameIdx < (int)g_presets.size() &&
+        !g_renameBuffer.empty())
+        g_presets[g_renameIdx].name = g_renameBuffer;
+    g_renamingPreset = false;
+    g_renameIdx = -1;
+    SaveLayout();
+    RenderConfig();
+}
+
+void CancelRenamePreset() {
+    g_renamingPreset = false;
+    g_renameIdx = -1;
+    RenderConfig();
+}
+
 // Handle a click inside the config toolbar; returns true if something changed.
 bool ConfigClick(int x, int y) {
+    g_lastModality = ModalityMouse;
+
+    if (g_showExitConfirm) {
+        if (InRect(g_rcConfirmSave, x, y)) { SavePreset(); ApplyEditMode(false); g_showExitConfirm = false; }
+        else if (InRect(g_rcConfirmDiscard, x, y)) { DiscardAndClose(); }
+        else if (InRect(g_rcConfirmKeep, x, y)) { g_showExitConfirm = false; RenderConfig(); }
+        return true;
+    }
+
+    // Clicking anywhere in the toolbar while renaming commits the buffer first
+    // (so the user isn't stuck if they click away instead of pressing Enter).
+    if (g_renamingPreset) CommitRenamePreset();
+
     bool changed = false;
+    bool rebuildText = false;
     if (InRect(g_rcOpacMinus, x, y)) {
         g_opacity = (g_opacity - 0.05f < 0.40f) ? 0.40f : g_opacity - 0.05f;
         changed = true;
     } else if (InRect(g_rcOpacPlus, x, y)) {
         g_opacity = (g_opacity + 0.05f > 1.00f) ? 1.00f : g_opacity + 0.05f;
         changed = true;
+    } else if (InRect(g_rcTextMinus, x, y)) {
+        g_fontScale = (g_fontScale - 0.10f < 0.70f) ? 0.70f : g_fontScale - 0.10f;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcTextPlus, x, y)) {
+        g_fontScale = (g_fontScale + 0.10f > 1.60f) ? 1.60f : g_fontScale + 0.10f;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcFontPrev, x, y)) {
+        g_fontIdx = (g_fontIdx + kFontCount - 1) % kFontCount;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcFontNext, x, y)) {
+        g_fontIdx = (g_fontIdx + 1) % kFontCount;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcSave, x, y)) {
+        SavePreset();
+        RenderConfig();
+        return true;
+    } else if (InRect(g_rcDiscardClose, x, y)) {
+        DiscardAndClose();
+        return true;
+    } else if (InRect(g_rcPresetNew, x, y)) {
+        CreatePreset();
+        return true;
+    } else if (InRect(g_rcPresetDelete, x, y)) {
+        DeletePreset();
+        return true;
+    } else if (InRect(g_rcPresetRename, x, y)) {
+        BeginRenamePreset();
+        return true;
     } else {
         for (int i = 0; i < kAccentCount; ++i)
             if (InRect(g_rcSwatch[i], x, y)) { g_accentIdx = i; changed = true; break; }
+        bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+        for (int i = 0; !changed && i < 4; ++i)
+            if (InRect(g_rcToggle[i], x, y)) { *flags[i] = !*flags[i]; changed = true; break; }
+        for (size_t i = 0; !changed && i < g_rcPresetChips.size(); ++i)
+            if (InRect(g_rcPresetChips[i], x, y)) { SwitchPreset((int)i); changed = true; break; }
     }
     if (changed) {
-        RelayoutToasts();
-        RenderPanel();
-        RenderConfig();
-        SaveLayout();
+        g_dirty = true;
+        if (rebuildText) RebuildTextFormats();
+        RerenderAll();
     }
     return changed;
 }
 
+// A hotkey press is an ambiguous toggle (the same key opens and closes), so it
+// never silently picks save-or-discard: if nothing changed this session it
+// just exits; otherwise it opens the Save & Exit / Discard & Exit / Keep
+// Editing prompt. Explicit button/gamepad presses (Save, Discard & Close)
+// already declare their own intent and act immediately (see ConfigClick /
+// PollGamepad) without going through this.
+void RequestExit() {
+    if (!g_editMode) { ApplyEditMode(true); return; }
+    if (g_showExitConfirm) return;  // already showing the prompt
+    if (!g_dirty) { ApplyEditMode(false); return; }
+    g_showExitConfirm = true;
+    RenderConfig();
+}
+
 // Toggle edit mode: lift/restore click-through, show/hide the appearance
-// toolbar, re-render every widget, and on exit persist to the config file.
+// toolbar, re-render every widget. Persistence now only happens via an
+// explicit Save (or Save & Exit) — see RequestExit()/SavePreset().
 void ApplyEditMode(bool on) {
     g_editMode = on;
     SetClickThrough(g_toastWin, !on);
+    SetClickThrough(g_memWin, !on);
     SetClickThrough(g_panelWin, !on);
     SetClickThrough(g_configWin, !on);
     SetClickThrough(g_handsfreeWin, !on);
+    // The toolbar is normally WS_EX_NOACTIVATE (never steals focus from the
+    // game). Edit mode is the exception: taking foreground/focus stops the
+    // game's own window from receiving keyboard/mouse input while editing
+    // (best-effort — a game reading raw/exclusive input ignores this, same
+    // caveat as everything else in this overlay).
+    SetActivatable(g_configWin, on);
+    if (on) {
+        g_editSnapshot = CaptureSnapshot();
+        g_dirty = false;
+        g_showExitConfirm = false;
+        g_renamingPreset = false;
+        g_selectedWidgetIdx = 0;
+        g_prevButtons = 0;
+        g_prevForeground = GetForegroundWindow();
+        SetTimer(g_ctrl, TIMER_GAMEPAD, 33, nullptr);
+    } else {
+        KillTimer(g_ctrl, TIMER_GAMEPAD);
+        g_showExitConfirm = false;
+        g_renamingPreset = false;
+    }
     RelayoutToasts();
+    RelayoutMemories();
     RenderPanel();
     RenderHandsFree();  // shows a positionable placeholder in edit mode
-    if (on) RenderConfig();
-    else    HideWindow(g_configWin);
-    if (!on) SaveLayout();
+    if (on) {
+        RenderConfig();
+        SetForegroundWindow(g_configWin.hwnd);
+        SetFocus(g_configWin.hwnd);
+    } else {
+        HideWindow(g_configWin);
+        if (g_prevForeground && IsWindow(g_prevForeground)) SetForegroundWindow(g_prevForeground);
+        g_prevForeground = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,10 +2082,10 @@ void RenderBanner() {
 
     rt->DrawText(L"Lykompanion overlay active", 26, g_fmtCenter,
                  D2D1::RectF(PAD, 14, w - PAD, 40), white);
-    const wchar_t* sub = L"Press Ctrl+Shift+O to move widgets & customize appearance";
+    std::wstring sub = L"Press " + FormatHotkeyCombo() + L" to move widgets & customize appearance";
     IDWriteTextLayout* subLayout = nullptr;
     if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(
-            sub, (UINT32)wcslen(sub), g_fmtLabel, w - 2 * PAD, 26.0f, &subLayout)) &&
+            sub.c_str(), (UINT32)sub.size(), g_fmtUi, w - 2 * PAD, 26.0f, &subLayout)) &&
         subLayout) {
         subLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         rt->DrawTextLayout(D2D1::Point2F(PAD, 44), subLayout, dim);
@@ -1422,7 +2159,22 @@ void HandleCommand(const std::wstring& line) {
         RenderPanel();
     } else if (type == L"edit_mode") {
         const JsonValue* en = v.find(L"enabled");
-        ApplyEditMode(en ? en->asBool() : false);
+        // Same ambiguous-toggle logic as the physical hotkey when re-enabling
+        // (the pipe caller may not know whether edit mode is already open).
+        bool wantOn = en ? en->asBool() : false;
+        if (wantOn && !g_editMode) ApplyEditMode(true);
+        else if (!wantOn && g_editMode) RequestExit();
+    } else if (type == L"set_hotkey") {
+        const JsonValue* mods = v.find(L"mods");
+        const JsonValue* key = v.find(L"key");
+        if (mods && mods->type == JsonValue::Arr) {
+            g_hotkeyMods.clear();
+            for (auto& m : mods->arr) if (m.type == JsonValue::Str) g_hotkeyMods.push_back(m.str);
+            if (g_hotkeyMods.empty()) g_hotkeyMods = {L"ctrl", L"shift"};
+        }
+        if (key && key->type == JsonValue::Str && !key->str.empty()) g_hotkeyKey = key->str[0];
+        ReregisterEditHotkey();
+        SaveLayout();
     } else if (type == L"quit") {
         PostQuitMessage(0);
     }
@@ -1473,6 +2225,142 @@ void PipeThread() {
 }
 
 // ---------------------------------------------------------------------------
+// Rename-mode keyboard polling (keyboard-only — no gamepad path drives this).
+// The overlay's layered windows are WS_EX_NOACTIVATE and never take keyboard
+// focus (the game does), so instead of WM_CHAR we poll GetAsyncKeyState for a
+// small character set, the same "global input" approach RegisterHotKey already
+// relies on to work while a game has focus.
+// ---------------------------------------------------------------------------
+
+void PollRenameKeys() {
+    static bool prevDown[256] = {};
+    bool nowDown[256] = {};
+
+    BYTE kbState[256] = {};
+    GetKeyboardState(kbState);
+
+    auto edge = [&](int vk) {
+        nowDown[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
+        bool e = nowDown[vk] && !prevDown[vk];
+        return e;
+    };
+
+    if (edge(VK_RETURN)) { CommitRenamePreset(); memcpy(prevDown, nowDown, sizeof(nowDown)); return; }
+    if (edge(VK_ESCAPE)) { CancelRenamePreset(); memcpy(prevDown, nowDown, sizeof(nowDown)); return; }
+    if (edge(VK_BACK)) {
+        if (!g_renameBuffer.empty()) g_renameBuffer.pop_back();
+        RenderConfig();
+    }
+    for (int vk = 0x30; vk <= 0x39; ++vk) {  // digits
+        if (edge(vk) && g_renameBuffer.size() < kRenameMaxLen) {
+            wchar_t buf[4] = {};
+            UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+            if (ToUnicode(vk, sc, kbState, buf, 4, 0) == 1) g_renameBuffer.push_back(buf[0]);
+            RenderConfig();
+        }
+    }
+    for (int vk = 0x41; vk <= 0x5A; ++vk) {  // letters
+        if (edge(vk) && g_renameBuffer.size() < kRenameMaxLen) {
+            wchar_t buf[4] = {};
+            UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+            if (ToUnicode(vk, sc, kbState, buf, 4, 0) == 1) g_renameBuffer.push_back(buf[0]);
+            RenderConfig();
+        }
+    }
+    if (edge(VK_SPACE) && g_renameBuffer.size() < kRenameMaxLen) {
+        g_renameBuffer.push_back(L' ');
+        RenderConfig();
+    }
+
+    memcpy(prevDown, nowDown, sizeof(nowDown));
+}
+
+// ---------------------------------------------------------------------------
+// XInput gamepad polling — runs only while edit mode is open (TIMER_GAMEPAD,
+// started/killed in ApplyEditMode). No WM_INPUT/XInput message exists, so
+// button "presses" are detected as edges against the previous poll's state.
+// ---------------------------------------------------------------------------
+
+void CycleSelectedWidget(int dir) {
+    for (int step = 0; step < 4; ++step) {
+        g_selectedWidgetIdx = ((g_selectedWidgetIdx + dir) % 4 + 4) % 4;
+        LayeredWindow* w = g_widgets[g_selectedWidgetIdx];
+        bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+        if (w && *flags[g_selectedWidgetIdx]) break;  // skip hidden widgets
+    }
+    RerenderAll();
+}
+
+void PollGamepad() {
+    XINPUT_STATE state = {};
+    if (XInputGetState(0, &state) != ERROR_SUCCESS) return;  // no controller connected
+
+    const XINPUT_GAMEPAD& gp = state.Gamepad;
+    WORD buttons = gp.wButtons;
+    auto pressed = [&](WORD mask) { return (buttons & mask) && !(g_prevButtons & mask); };
+
+    bool anyActivity = (buttons != 0) ||
+        (abs(gp.sThumbLX) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) ||
+        (abs(gp.sThumbLY) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) ||
+        (abs(gp.sThumbRX) > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE) ||
+        (abs(gp.sThumbRY) > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
+    if (anyActivity) g_lastModality = ModalityGamepad;
+
+    if (g_showExitConfirm) {
+        if (pressed(XINPUT_GAMEPAD_A)) { SavePreset(); ApplyEditMode(false); g_showExitConfirm = false; }
+        else if (pressed(XINPUT_GAMEPAD_X)) { DiscardAndClose(); }
+        else if (pressed(XINPUT_GAMEPAD_B)) { g_showExitConfirm = false; RenderConfig(); }
+        g_prevButtons = buttons;
+        return;
+    }
+
+    if (g_renamingPreset) {
+        PollRenameKeys();
+        g_prevButtons = buttons;
+        return;  // no gamepad action while renaming — keyboard/mouse only
+    }
+
+    if (pressed(XINPUT_GAMEPAD_A)) { SavePreset(); RenderConfig(); }
+    else if (pressed(XINPUT_GAMEPAD_B)) { DiscardAndClose(); }
+    else if (pressed(XINPUT_GAMEPAD_X)) { DeletePreset(); }
+    else if (pressed(XINPUT_GAMEPAD_Y)) { CreatePreset(); }
+    else if (pressed(XINPUT_GAMEPAD_LEFT_SHOULDER)) { SwitchPreset(g_activePreset - 1); RenderConfig(); }
+    else if (pressed(XINPUT_GAMEPAD_RIGHT_SHOULDER)) { SwitchPreset(g_activePreset + 1); RenderConfig(); }
+
+    // D-pad / left-stick widget cycling — debounced (stick deflection isn't a
+    // discrete press the way a button is).
+    ULONGLONG now = GetTickCount64();
+    bool wantCycle = (buttons & (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN |
+                                 XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)) ||
+                     abs(gp.sThumbLX) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE ||
+                     abs(gp.sThumbLY) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
+    if (wantCycle && now - g_lastCycleTick > CYCLE_DEBOUNCE_MS) {
+        int dir = (buttons & (XINPUT_GAMEPAD_DPAD_DOWN)) || gp.sThumbLY < -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE
+                      ? 1 : -1;
+        CycleSelectedWidget(dir);
+        g_lastCycleTick = now;
+    }
+
+    // Right stick moves the selected widget directly (bypasses the OS drag
+    // path entirely — there's no window being dragged, just a position delta).
+    if (abs(gp.sThumbRX) > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE ||
+        abs(gp.sThumbRY) > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE) {
+        LayeredWindow* w = g_widgets[g_selectedWidgetIdx];
+        if (w) {
+            float nx = gp.sThumbRX / 32767.0f, ny = gp.sThumbRY / 32767.0f;
+            const float dt = 0.033f;  // ~33ms tick
+            w->posX += (int)(nx * GAMEPAD_MOVE_SPEED * dt);
+            w->posY += (int)(-ny * GAMEPAD_MOVE_SPEED * dt);  // XInput's Y+ is up
+            w->hasPos = true;
+            g_dirty = true;
+            RerenderAll();
+        }
+    }
+
+    g_prevButtons = buttons;
+}
+
+// ---------------------------------------------------------------------------
 // Windows
 // ---------------------------------------------------------------------------
 
@@ -1513,16 +2401,21 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
         case WM_HOTKEY:
-            if (wParam == HOTKEY_EDIT) ApplyEditMode(!g_editMode);
+            if (wParam == HOTKEY_EDIT) RequestExit();
             return 0;
         case WM_TIMER:
             if (wParam == TIMER_TICK) {
                 // Don't let toasts expire out from under you while arranging.
-                if (!g_editMode && ExpireToasts()) RelayoutToasts();
+                if (!g_editMode) {
+                    if (ExpireList(g_toasts)) RelayoutToasts();
+                    if (ExpireList(g_memToasts)) RelayoutMemories();
+                }
             } else if (wParam == TIMER_BANNER) {
                 if (!TickBanner()) KillTimer(g_ctrl, TIMER_BANNER);
             } else if (wParam == TIMER_HANDSFREE) {
                 RenderHandsFree();  // animate the gradient sweep
+            } else if (wParam == TIMER_GAMEPAD) {
+                PollGamepad();
             } else if (wParam == TIMER_PARENT) {
                 // Parent (Lykompanion) exited — including a hard kill that skips
                 // its graceful stop() — so tear ourselves down too.
@@ -1543,6 +2436,7 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 LayeredWindow* FromHwnd(HWND h) {
     if (h == g_toastWin.hwnd) return &g_toastWin;
+    if (h == g_memWin.hwnd) return &g_memWin;
     if (h == g_panelWin.hwnd) return &g_panelWin;
     if (h == g_handsfreeWin.hwnd) return &g_handsfreeWin;
     return nullptr;
@@ -1567,6 +2461,7 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_NCHITTEST:
             // In edit mode the whole widget is a drag handle; DefWindowProc then
             // moves the window for us. Otherwise it's click-through anyway.
+            if (g_editMode) g_lastModality = ModalityMouse;
             return g_editMode ? HTCAPTION : HTTRANSPARENT;
         case WM_MOVE: {
             // Keep the stored position in sync so later re-renders (new toast,
@@ -1576,11 +2471,13 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 lw->posX = (int)(short)LOWORD(lParam);
                 lw->posY = (int)(short)HIWORD(lParam);
                 lw->hasPos = true;
+                if (g_editMode) g_dirty = true;
             }
             return 0;
         }
         case WM_EXITSIZEMOVE:
-            SaveLayout();
+            // Persistence now only happens via an explicit Save — dragging just
+            // marks the session dirty (see WM_MOVE above).
             return 0;
         default:
             return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -1658,20 +2555,27 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (!g_ctrl) return 2;
 
     g_toastWin.hwnd     = CreateLayeredHwnd(hInstance);
+    g_memWin.hwnd       = CreateLayeredHwnd(hInstance);
     g_panelWin.hwnd     = CreateLayeredHwnd(hInstance);
     g_configWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_bannerWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_handsfreeWin.hwnd = CreateLayeredHwnd(hInstance);
-    if (!g_toastWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
+    if (!g_toastWin.hwnd || !g_memWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
         !g_bannerWin.hwnd || !g_handsfreeWin.hwnd)
         return 3;
 
-    LoadLogo();    // reply-toast avatar (logo.png next to the exe)
-    LoadLayout();  // restore saved positions + appearance before first commit
+    g_widgets[0] = &g_toastWin;
+    g_widgets[1] = &g_memWin;
+    g_widgets[2] = &g_panelWin;
+    g_widgets[3] = &g_handsfreeWin;
 
-    // Ctrl+Shift+O toggles edit mode. Registered on the controller window so its
-    // message loop (already running) delivers WM_HOTKEY.
-    RegisterHotKey(g_ctrl, HOTKEY_EDIT, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'O');
+    LoadLogo();    // reply-toast avatar (logo.png next to the exe)
+    LoadLayout();  // restore saved presets + appearance (also applies the font/scale/hotkey)
+
+    // Toggles edit mode; combo is user-configurable (see RegisterEditHotkey).
+    // Registered on the controller window so its message loop (already
+    // running) delivers WM_HOTKEY.
+    RegisterEditHotkey();
 
     SetTimer(g_ctrl, TIMER_TICK, 250, nullptr);
 
@@ -1702,6 +2606,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
 
     UnregisterHotKey(g_ctrl, HOTKEY_EDIT);
     DiscardSurface(g_toastWin);
+    DiscardSurface(g_memWin);
     DiscardSurface(g_panelWin);
     DiscardSurface(g_configWin);
     DiscardSurface(g_bannerWin);
@@ -1709,6 +2614,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (g_parentProcess) CloseHandle(g_parentProcess);
     CoUninitialize();
     SafeRelease(&g_dashStroke);
+    SafeRelease(&g_fmtUi);
     SafeRelease(&g_fmtCenter);
     SafeRelease(&g_fmtIcon);
     SafeRelease(&g_fmtHead);

@@ -1,6 +1,7 @@
 """Desktop launcher — starts the FastAPI server in a background thread, then opens a
 native app window (EdgeWebView2 on Windows 11) pointed at it. Close the window to exit."""
 
+import ctypes
 import faulthandler
 import json
 import os
@@ -9,6 +10,7 @@ import socket
 import sys
 import time
 import threading
+from ctypes import wintypes
 from pathlib import Path
 
 # The process has died silently (no traceback, straight to RUN.cmd's pause) during normal use -
@@ -175,6 +177,96 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
+# Remove the Windows 11 window border/outline on the frameless window. This is a DWM attribute
+# (colour of the border), NOT a window style — so it's safe and can't affect the frameless drag
+# the way the reverted WS_THICKFRAME hack did. argtypes are set so the 64-bit HWND isn't
+# truncated to a 32-bit int (which would silently no-op).
+_DWMWA_BORDER_COLOR = 34          # Win11 22000+
+_DWMWA_COLOR_NONE = 0xFFFFFFFE
+_dwmapi = ctypes.windll.dwmapi
+_user32 = ctypes.windll.user32
+_dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long  # HRESULT
+_dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+
+
+def _remove_window_border(hwnd: int) -> None:
+    color = ctypes.c_uint(_DWMWA_COLOR_NONE)
+    _dwmapi.DwmSetWindowAttribute(hwnd, _DWMWA_BORDER_COLOR, ctypes.byref(color), ctypes.sizeof(color))
+
+
+# Window position/size persistence — logical px, matching create_window's units and the values
+# the frontend sends via window_save_bounds.
+_WINDOW_STATE_FILE = ROOT / "data" / "window_state.json"
+
+
+def _clamp_window_state(state: dict) -> dict:
+    """Keep a restored window on-screen. If its titlebar centre falls outside every connected
+    monitor (e.g. a second display was unplugged since we saved), recentre on the virtual desktop
+    while preserving the size. GetSystemMetrics returns physical px, so divide by the system DPI
+    scale to compare against the logical px the saved bounds use.
+    """
+    try:
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
+        scale = (_user32.GetDpiForSystem() or 96) / 96.0
+        vx = _user32.GetSystemMetrics(SM_XVIRTUALSCREEN) / scale
+        vy = _user32.GetSystemMetrics(SM_YVIRTUALSCREEN) / scale
+        vw = _user32.GetSystemMetrics(SM_CXVIRTUALSCREEN) / scale
+        vh = _user32.GetSystemMetrics(SM_CYVIRTUALSCREEN) / scale
+    except Exception:
+        return state
+    x, y, w, h = state["x"], state["y"], state["w"], state["h"]
+    cx, cy = x + w / 2, y + 20  # centre of the titlebar
+    if vx <= cx <= vx + vw and vy <= cy <= vy + vh:
+        return state
+    return {"x": int(vx + (vw - w) / 2), "y": int(vy + (vh - h) / 2), "w": w, "h": h}
+
+
+def _load_window_state() -> dict | None:
+    try:
+        s = json.loads(_WINDOW_STATE_FILE.read_text(encoding="utf-8"))
+        x, y, w, h = int(s["x"]), int(s["y"]), int(s["w"]), int(s["h"])
+    except Exception:
+        return None
+    if w < 800 or h < 600:
+        return None
+    return _clamp_window_state({"x": x, "y": y, "w": w, "h": h})
+
+
+def _save_window_state(x: float, y: float, w: float, h: float) -> None:
+    try:
+        _WINDOW_STATE_FILE.write_text(
+            json.dumps({"x": int(x), "y": int(y), "w": int(w), "h": int(h)}), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+def _run_tray(win, tray: dict, quit_fn) -> None:
+    """Run the system-tray icon loop (blocking — call in a daemon thread).
+
+    Menu: "Open Lykompanion" (also the default action, so a double-click on the tray icon
+    restores the window on Windows) and "Quit". Stores the icon in `tray["icon"]` so the
+    quit path can stop it.
+    """
+    import pystray
+    from PIL import Image
+
+    image = Image.open(ROOT / "logo.png")
+
+    def _open(icon, item) -> None:
+        win.show()
+
+    def _quit(icon, item) -> None:
+        quit_fn()
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open Lykompanion", _open, default=True),
+        pystray.MenuItem("Quit", _quit),
+    )
+    tray["icon"] = pystray.Icon("Lykompanion", image, "Lykompanion", menu)
+    tray["icon"].run()
+
+
 def main() -> None:
     import webview
 
@@ -189,15 +281,77 @@ def main() -> None:
     profile_dir.mkdir(parents=True, exist_ok=True)
     _configure_profile(profile_dir)  # apply before start (2nd+ launch, or pre-seeds fresh install)
 
+    # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
+    # minimize/close buttons. easy_drag=False; the titlebar drives its own move/snap from JS.
+    # Restore the last window position+size if we saved one, else default centered.
+    state = _load_window_state()
     win = webview.create_window(
         "Lykompanion",
         f"{URL}/?token={API_TOKEN}",
-        width=1280,
-        height=820,
+        width=state["w"] if state else 1280,
+        height=state["h"] if state else 820,
+        x=state["x"] if state else None,
+        y=state["y"] if state else None,
         min_size=(800, 600),
+        frameless=True,
+        easy_drag=False,
     )
-    win.expose(_make_download_api(win))
-    win.events.loaded += lambda: _lock_down_webview(win)
+
+    # Tray icon + clean-quit wiring. The custom titlebar's minimize hides the window to the tray
+    # (window stays alive); close and the tray "Quit" item both go through _quit, which stops the
+    # tray loop and destroys the window so webview.start() returns and the process exits cleanly
+    # (a half-torn-down tray leaves a zombie icon that only disappears on hover).
+    tray = {"icon": None}
+
+    def _quit() -> None:
+        icon = tray["icon"]
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                pass
+        try:
+            win.destroy()
+        except Exception:
+            pass
+
+    def window_minimize() -> None:
+        win.hide()
+
+    def window_close() -> None:
+        _quit()
+
+    # Resize + maximize are driven from JS (the frontend's resize grips and titlebar double-click)
+    # through pywebview's own move/resize — NOT by mutating the window style, which fought the
+    # frameless drag and broke moving the window. One combined setter keeps it to a single bridge
+    # call per drag frame. min_size is enforced here as a backstop to the JS clamp.
+    def window_set_bounds(x: float, y: float, w: float, h: float) -> None:
+        try:
+            win.move(int(x), int(y))
+            win.resize(max(int(w), 800), max(int(h), 600))
+        except Exception:
+            pass
+
+    # Persist logical bounds for next-launch restore. The frontend calls this only at gesture end
+    # (drag/resize release, snap, maximize), not every frame, so file writes stay cheap.
+    def window_save_bounds(x: float, y: float, w: float, h: float) -> None:
+        _save_window_state(x, y, w, h)
+
+    win.expose(
+        _make_download_api(win), window_minimize, window_close,
+        window_set_bounds, window_save_bounds,
+    )
+
+    def _on_loaded() -> None:
+        _lock_down_webview(win)
+        try:
+            _remove_window_border(int(win._window.Handle.ToInt64()))
+        except Exception:
+            pass
+
+    win.events.loaded += _on_loaded
+
+    threading.Thread(target=_run_tray, args=(win, tray, _quit), daemon=True).start()
 
     # private_mode=False required — without it pywebview ignores storage_path and uses
     # an in-memory session, so permissions and download prefs are never written to disk.

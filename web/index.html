@@ -9,6 +9,38 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+
+  <!-- ── CUSTOM TITLEBAR — frameless desktop app only (body.desktop-app); hidden in browser.
+       The drag area is a sibling of the controls (never an ancestor of the buttons) so button
+       clicks are never swallowed by window-drag. ──────────────────────────────────────────── -->
+  <div class="titlebar" id="app-titlebar">
+    <div class="titlebar-drag">
+      <img src="img/logo.png" alt="" class="titlebar-logo" draggable="false" />
+      <span class="titlebar-name">Lykompanion</span>
+    </div>
+    <div class="titlebar-controls">
+      <button type="button" id="win-min" class="titlebar-btn" title="Minimize to tray" aria-label="Minimize to tray">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><line x1="2.5" y1="6.5" x2="9.5" y2="6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" id="win-close" class="titlebar-btn titlebar-btn-close" title="Close" aria-label="Close">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Resize grips (desktop app only). Frameless windows have no OS resize border; these thin
+       edge/corner strips drive pywebview move/resize from JS. -->
+  <div class="resize-grips" aria-hidden="true">
+    <div class="resize-grip rg-n"  data-dir="n"></div>
+    <div class="resize-grip rg-s"  data-dir="s"></div>
+    <div class="resize-grip rg-e"  data-dir="e"></div>
+    <div class="resize-grip rg-w"  data-dir="w"></div>
+    <div class="resize-grip rg-ne" data-dir="ne"></div>
+    <div class="resize-grip rg-nw" data-dir="nw"></div>
+    <div class="resize-grip rg-se" data-dir="se"></div>
+    <div class="resize-grip rg-sw" data-dir="sw"></div>
+  </div>
+
   <div class="app-shell">
 
     <!-- ── SIDEBAR — glass, logo + chat list + tool dock ────────────── -->
@@ -322,7 +354,7 @@
             <button type="button" id="cfg-refresh-devices" class="secondary-btn cfg-refresh-devices">Refresh device list</button>
             <label class="checkbox">
               <input id="cfg-transcription-enabled" type="checkbox" />
-              Transcribe voice messages before sending to the main model
+              [Obsolete - Not recommended] Transcribe voice messages before sending to the main model
               <button type="button" class="cfg-help" data-tip="Runs a dedicated audio-input model to transcribe your voice message to text first, then sends the text to the main chat model - so the main model no longer needs to support raw audio input.">?</button>
             </label>
             <div id="transcription-dependent">
@@ -465,6 +497,20 @@
               </label>
             </div>
           </div>
+
+          <div id="overlay-edit-phrase-controls">
+            <label class="checkbox">
+              <input id="cfg-overlay-edit-phrase-enabled" type="checkbox" />
+              Enable "edit overlay" phrase
+              <button type="button" class="cfg-help" data-tip="Say this phrase to open the in-game overlay's edit mode directly — detected locally, never sent to the AI. No-ops if the overlay isn't running.">?</button>
+            </label>
+            <div id="overlay-edit-phrase-dependent">
+              <label>
+                <span class="cfg-label">Phrase <button type="button" class="cfg-help" data-tip="The phrase that opens overlay edit mode when spoken, regardless of hands-free state.">?</button></span>
+                <input id="cfg-overlay-edit-phrase" type="text" value="edit overlay" autocomplete="off" />
+              </label>
+            </div>
+          </div>
         </section>
 
         </div>
@@ -600,8 +646,17 @@
             <label class="checkbox">
               <input id="cfg-overlay-enabled" type="checkbox" />
               In-game overlay (Windows only) — show game-state + toasts over the game
-              <button type="button" class="cfg-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press Ctrl+Shift+O in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
+              <button type="button" class="cfg-help" id="cfg-overlay-enabled-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press the configured hotkey in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
             </label>
+            <div class="cfg-row">
+              <label>
+                <span class="cfg-label">Overlay Edit Hotkey <button type="button" class="cfg-help" data-tip="The global key combo that toggles the overlay's edit mode in-game.">?</button></span>
+                <span class="hotkey-capture">
+                  <span id="cfg-overlay-hotkey-display" class="hotkey-display">Ctrl+Shift+O</span>
+                  <button type="button" id="cfg-overlay-hotkey-record" class="secondary-btn">Change…</button>
+                </span>
+              </label>
+            </div>
 
             <label class="checkbox">
               <input id="cfg-proactive-enabled" type="checkbox" />
@@ -643,6 +698,10 @@
                 <label>
                   <span class="cfg-label">Capture Interval: <span id="cfg-game-state-capture-interval-value">1</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the poller captures+OCRs a frame locally while building up the batch sent to the model once per Poll Interval. This step is free - no LLM call happens per capture.">?</button></span>
                   <input id="cfg-game-state-capture-interval" type="range" min="1" max="10" step="1" value="1" />
+                </label>
+                <label>
+                  <span class="cfg-label">Visual Diff Threshold: <span id="cfg-game-state-visual-diff-value">12</span>% <button type="button" class="cfg-help" data-tip="If the on-screen text never changes across a whole poll window, it's normally skipped entirely (e.g. sitting in a pause menu). As a fallback, the window's first and last screenshots are compared by pixels - if they differ by at least this percent, the window is sent through anyway. A genuinely frozen screen stays skipped; a minimal-UI game where you're actually moving around still gets checked. Set to 100 to disable this fallback.">?</button></span>
+                  <input id="cfg-game-state-visual-diff" type="range" min="0" max="100" step="1" value="12" />
                 </label>
               </details>
             </div>
@@ -909,6 +968,7 @@
   <!-- app.js was split into ordered concern files; these are classic scripts (no type=module,
        no defer) so they share one global lexical scope, and load in dependency order. -->
   <script src="js/app/core.js"></script>
+  <script src="js/app/custom-select.js"></script>
   <script src="js/app/sfx.js"></script>
   <script src="js/app/chat-store.js"></script>
   <script src="js/app/narration.js"></script>

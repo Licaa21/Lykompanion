@@ -11,7 +11,9 @@ python-multipart
 websockets
 
 # Desktop launcher (run_app.py) — native app window via OS WebView (EdgeWebView2 on Windows 11).
+# Frameless: the web UI draws its own titlebar; pystray provides the minimize-to-tray icon.
 pywebview
+pystray
 
 # Passive game-state OCR: GPU-based capture via the Windows Graphics Capture API (avoids the
 # desktop-compositor stalls that GDI/BitBlt capture - what "mss" uses - causes in games) and

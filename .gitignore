@@ -14,3 +14,4 @@ venv/
 !.vscode/launch.json
 !.vscode/settings.json
 image/
+/dist/
