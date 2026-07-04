@@ -146,7 +146,11 @@ async def execute_play_on_youtube(arguments: dict) -> str:
         if song and song.get("videoId"):
             title = song.get("title") or query
             artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
-            _open(f"https://music.youtube.com/watch?v={song['videoId']}")
+            # youtube.com, not music.youtube.com: the videoId resolves to the same official-audio
+            # upload either way, but music.youtube.com is a separate origin without Chromium's
+            # autoplay allowlist entry that youtube.com has, so it opens paused until a manual
+            # click - youtube.com/watch autoplays reliably for the identical video.
+            _open(f"https://www.youtube.com/watch?v={song['videoId']}")
             label = f"'{title}'" + (f" by {artists}" if artists else "")
             return f"Now playing {label} on YouTube Music."
 
