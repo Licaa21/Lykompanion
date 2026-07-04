@@ -186,7 +186,9 @@ async def fetch_art(process: str, force: bool = False) -> dict:
     data = _load_all()
     key = process.lower()
     existing = data.get(key)
-    if existing and not force:
+    # A record saved before the "description" field existed is treated as stale so it gets
+    # backfilled once, rather than permanently missing a description it was never fetched with.
+    if existing and not force and "description" in existing:
         return existing
 
     term = _clean_search_term(process)

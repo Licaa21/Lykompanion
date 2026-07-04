@@ -2456,6 +2456,30 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   opacity: 1;
 }
 
+.journal-detail-separator {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 2px 0;
+}
+
+/* Themed cards for the two always-distinct sections in a game's detail view - a tinted
+   background instead of another plain box, so scanning the (long) view stays orientable. */
+.journal-themed-card {
+  border-radius: var(--r3);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.journal-themed-card--memories {
+  background: rgba(91,95,199,0.08);
+  border: 1px solid rgba(91,95,199,0.25);
+}
+.journal-themed-card--training {
+  background: rgba(74,222,128,0.06);
+  border: 1px solid rgba(74,222,128,0.2);
+}
+
 #journal-detail-view:not([hidden]) {
   display: flex;
   flex-direction: column;
