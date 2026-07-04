@@ -5,6 +5,11 @@ function openModal(modal) {
 }
 
 function closeModal(modal) {
+  // Closing the Gaming Journal while "Customize Overlay Layout" is active would otherwise leave a
+  // design-only overlay process running in edit mode with nothing in Settings to stop it.
+  if (modal.id === "gaming-journal-modal" && overlayDesignModeActive) {
+    setOverlayDesignMode(false);
+  }
   modal.classList.remove('modal-animate-in');
   setTimeout(() => { modal.hidden = true; }, 240);
 }
@@ -145,6 +150,51 @@ overlayHotkeyRecordBtn.addEventListener("click", () => {
   };
   document.addEventListener("keydown", onKeydown, true);
 });
+
+// --- Overlay design mode ("Customize Overlay Layout") ---
+// Lets the user open the overlay's edit mode straight from Settings, without a game running, so
+// there's no controller double-action risk (nothing else is reading the gamepad). Toggled by one
+// button; also auto-stopped if the Gaming Journal modal is closed while still active, so we never
+// leave a design-only overlay process running in the background.
+const overlayDesignModeBtn = document.getElementById("cfg-overlay-design-mode");
+let overlayDesignModeActive = false;
+
+let overlayDesignModePoll = null;
+
+async function setOverlayDesignMode(active) {
+  overlayDesignModeActive = active;
+  overlayDesignModeBtn.textContent = active ? "Stop Editing" : "Start Editing";
+  overlayDesignModeBtn.classList.toggle("active", active);
+  clearInterval(overlayDesignModePoll);
+  overlayDesignModePoll = null;
+  try {
+    const res = await fetch(`/api/overlay/design-mode/${active ? "start" : "stop"}`, { method: "POST" });
+    if (active && res.ok) {
+      // The backend downgrades to a restricted (move/save/switch-preset only) session instead of
+      // full customization if a game is actually being tracked right now - surface that so the
+      // button label doesn't silently lie about what just opened.
+      const { full } = await res.json();
+      if (full === false) overlayDesignModeBtn.textContent = "Stop Editing (restricted — game active)";
+
+      // Save/Discard/B inside the overlay itself can end the session with no message back to us
+      // (the pipe is write-only) - poll its actual window visibility so this button doesn't stay
+      // stuck reading "Stop Editing" after the user already closed it from inside the overlay.
+      overlayDesignModePoll = setInterval(async () => {
+        try {
+          const statusRes = await fetch("/api/overlay/design-mode/status");
+          const { active: stillActive } = await statusRes.json();
+          if (!stillActive) setOverlayDesignMode(false);
+        } catch (err) {
+          // best-effort — a transient failure just means we check again next tick
+        }
+      }, 2000);
+    }
+  } catch (err) {
+    // best-effort — overlay may be disabled/missing
+  }
+}
+
+overlayDesignModeBtn.addEventListener("click", () => setOverlayDesignMode(!overlayDesignModeActive));
 
 function populateSelect(selectEl, options, selectedValue) {
   selectEl.innerHTML = "";
@@ -819,6 +869,7 @@ async function saveSettings(saveButton) {
 
 document.getElementById("cfg-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
 document.getElementById("ga-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
+document.getElementById("overlay-save").addEventListener("click", (event) => saveSettings(event.currentTarget));
 
 // --- Personal Data modal (Instructions + Memory) ---
 

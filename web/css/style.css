@@ -1322,6 +1322,7 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   color: var(--t2);
 }
 .secondary-btn:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+.secondary-btn.active { background: var(--accent-dim); color: var(--accent-2); border-color: transparent; box-shadow: 0 0 10px var(--accent-glow); }
 .secondary-btn.confirming { background: linear-gradient(135deg, #e05c5c, #c94949); color: #fff; border-color: transparent; box-shadow: 0 2px 14px var(--red-glow); }
 .cfg-refresh-devices { margin: 2px 0 10px; }
 .hotkey-capture { display: inline-flex; align-items: center; gap: 8px; }

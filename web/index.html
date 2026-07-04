@@ -610,6 +610,7 @@
         <nav class="modal-tabs">
           <button type="button" class="tab-btn active" data-tab="journal">Journal</button>
           <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
+          <button type="button" class="tab-btn" data-tab="overlay-layout">Customize Overlay</button>
         </nav>
         <div class="modal-main modal-body">
 
@@ -645,21 +646,6 @@
               Game-state self-training
               <button type="button" class="cfg-help" data-tip="Lets the Game-State Model maintain per-game notes on how to decode that game's HUD/UI (learned from the screenshots it sees), fed back into its future passes. See the Training Data tab.">?</button>
             </label>
-
-            <label class="checkbox">
-              <input id="cfg-overlay-enabled" type="checkbox" />
-              In-game overlay (Windows only) — show game-state + toasts over the game
-              <button type="button" class="cfg-help" id="cfg-overlay-enabled-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press the configured hotkey in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
-            </label>
-            <div class="cfg-row">
-              <label>
-                <span class="cfg-label">Overlay Edit Hotkey <button type="button" class="cfg-help" data-tip="The global key combo that toggles the overlay's edit mode in-game.">?</button></span>
-                <span class="hotkey-capture">
-                  <span id="cfg-overlay-hotkey-display" class="hotkey-display">Ctrl+Shift+O</span>
-                  <button type="button" id="cfg-overlay-hotkey-record" class="secondary-btn">Change…</button>
-                </span>
-              </label>
-            </div>
 
             <label class="checkbox">
               <input id="cfg-proactive-enabled" type="checkbox" />
@@ -753,6 +739,33 @@
             </label>
             <select id="game-state-training-data-process"></select>
             <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - the Game-State Model writes it automatically as it learns the game's UI (requires self-training to be enabled)."></textarea>
+          </div>
+        </section>
+
+        <!-- CUSTOMIZE OVERLAY LAYOUT tab -->
+        <section class="tab-panel" data-tab="overlay-layout" hidden>
+          <label class="checkbox">
+            <input id="cfg-overlay-enabled" type="checkbox" />
+            In-game overlay (Windows only) — show game-state + toasts over the game
+            <button type="button" class="cfg-help" id="cfg-overlay-enabled-help" data-tip="Launches a native overlay while a game is tracked, drawing the game-state panel plus reply/reminder toasts on top of the game (borderless/windowed only). Press the configured hotkey in-game to move widgets and change opacity/color. Requires the built overlay.exe.">?</button>
+          </label>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Overlay Edit Hotkey <button type="button" class="cfg-help" data-tip="The global key combo that toggles the overlay's edit mode in-game.">?</button></span>
+              <span class="hotkey-capture">
+                <span id="cfg-overlay-hotkey-display" class="hotkey-display">Ctrl+Shift+O</span>
+                <button type="button" id="cfg-overlay-hotkey-record" class="secondary-btn">Change…</button>
+              </span>
+            </label>
+          </div>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Customize Overlay Layout <button type="button" class="cfg-help" data-tip="Opens the overlay's edit mode on the desktop, with no game required — move widgets, create/save presets with mouse or gamepad, with no risk of a controller button also acting in a game since none is running. Requires the overlay enabled + overlay.exe.">?</button></span>
+              <button type="button" id="cfg-overlay-design-mode" class="secondary-btn">Start Editing</button>
+            </label>
+          </div>
+          <div class="modal-footer modal-footer--inline">
+            <button type="button" id="overlay-save" class="primary-btn">Save Overlay Settings</button>
           </div>
         </section>
 

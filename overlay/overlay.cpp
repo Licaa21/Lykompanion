@@ -396,6 +396,12 @@ std::vector<Toast> g_toasts;     // reply / reminder / image toasts
 std::vector<Toast> g_memToasts;  // memory toasts (rendered in g_memWin)
 Panel         g_panel;
 bool          g_editMode = false;
+// true = full editor (opened from the app's Settings, no game running - safe to expose
+// everything on any input); false = an in-game session (native hotkey or voice phrase).
+// A false session only actually restricts the visible/usable controls once a gamepad is
+// the active input modality (see g_configRestricted) - keyboard/mouse in-game already avoids
+// the double-action problem via focus-stealing, so it's left showing the full editor.
+bool          g_editModeFull = true;
 
 // ---------------------------------------------------------------------------
 // Position/appearance presets, dirty tracking, hotkey config, gamepad state,
@@ -1578,39 +1584,46 @@ void RenderExitConfirm(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bg, ID2D1Sol
 
     bool gamepad = (g_lastModality == ModalityGamepad);
     auto drawBtn = [&](const D2D1_RECT_F& r, const wchar_t* label, bool filled,
-                       const wchar_t* glyphLetter, D2D1_COLOR_F glyphColor) {
+                       const wchar_t* glyphLetter, D2D1_COLOR_F glyphColor, bool pill = false, float badgeW = 22.0f) {
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 8, 8);
         if (filled) rt->FillRoundedRectangle(rr, acc);
         else        rt->DrawRoundedRectangle(rr, dim, 1.2f);
         rt->DrawText(label, (UINT32)wcslen(label), g_fmtCenter, r, white);
         if (gamepad) {
             D2D1_RECT_F badge = D2D1::RectF(r.left + 8, r.top + (r.bottom - r.top - 22) / 2,
-                                            r.left + 8 + 22, r.top + (r.bottom - r.top - 22) / 2 + 22);
-            DrawButtonGlyph(rt, badge, glyphLetter, glyphColor, false);
+                                            r.left + 8 + badgeW, r.top + (r.bottom - r.top - 22) / 2 + 22);
+            DrawButtonGlyph(rt, badge, glyphLetter, glyphColor, pill);
         }
     };
-    drawBtn(g_rcConfirmSave, L"Save & Exit", true, L"A", D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f));
+    drawBtn(g_rcConfirmSave, L"Save & Exit", true, L"L3", D2D1::ColorF(0.40f, 0.42f, 0.48f, 1.0f), true, 30.0f);
     drawBtn(g_rcConfirmDiscard, L"Discard & Exit", false, L"X", D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f));
     drawBtn(g_rcConfirmKeep, L"Keep Editing", false, L"B", D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f));
 }
 
 // One preset "chip" row (click/LB/RB switch, +/×/pencil new/delete/rename) plus
-// the Save / Discard & Close action row underneath.
+// the Save / Discard & Close action row underneath. showCrud is false for a restricted in-game
+// gamepad session - switching between existing presets is still allowed there, but creating,
+// deleting, or renaming one is a Settings-only action, so those three icons/hit-rects are skipped
+// entirely (rects reset to empty so a stray click can never match a stale position).
 void RenderPresetRow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
-                     ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc, float y) {
+                     ID2D1SolidColorBrush* dim, ID2D1SolidColorBrush* acc, float y, bool showCrud) {
     const float bh = 24, bw = 26;
     rt->DrawText(L"Presets", 7, g_fmtUi, D2D1::RectF(PAD, y, 120, y + bh), white);
 
-    g_rcPresetRename = D2D1::RectF(CONFIG_W - PAD - bw, y, CONFIG_W - PAD, y + bh);
-    g_rcPresetDelete = D2D1::RectF(g_rcPresetRename.left - 4 - bw, y, g_rcPresetRename.left - 4, y + bh);
-    g_rcPresetNew    = D2D1::RectF(g_rcPresetDelete.left - 4 - bw, y, g_rcPresetDelete.left - 4, y + bh);
-    for (auto* r : {&g_rcPresetNew, &g_rcPresetDelete, &g_rcPresetRename}) {
-        D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
-        rt->DrawRoundedRectangle(br, dim, 1.2f);
+    if (showCrud) {
+        g_rcPresetRename = D2D1::RectF(CONFIG_W - PAD - bw, y, CONFIG_W - PAD, y + bh);
+        g_rcPresetDelete = D2D1::RectF(g_rcPresetRename.left - 4 - bw, y, g_rcPresetRename.left - 4, y + bh);
+        g_rcPresetNew    = D2D1::RectF(g_rcPresetDelete.left - 4 - bw, y, g_rcPresetDelete.left - 4, y + bh);
+        for (auto* r : {&g_rcPresetNew, &g_rcPresetDelete, &g_rcPresetRename}) {
+            D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
+            rt->DrawRoundedRectangle(br, dim, 1.2f);
+        }
+        rt->DrawText(L"+", 1, g_fmtCenter, g_rcPresetNew, white);
+        rt->DrawText(L"\x00D7", 1, g_fmtCenter, g_rcPresetDelete, white);   // ×
+        rt->DrawText(L"\x270E", 1, g_fmtCenter, g_rcPresetRename, white);  // pencil
+    } else {
+        g_rcPresetNew = g_rcPresetDelete = g_rcPresetRename = D2D1_RECT_F{};
     }
-    rt->DrawText(L"+", 1, g_fmtCenter, g_rcPresetNew, white);
-    rt->DrawText(L"\x00D7", 1, g_fmtCenter, g_rcPresetDelete, white);   // ×
-    rt->DrawText(L"\x270E", 1, g_fmtCenter, g_rcPresetRename, white);  // pencil
 
     float chipY = y + bh + 8.0f, chipH = 28.0f, chipX = PAD;
     g_rcPresetChips.assign(g_presets.size(), D2D1_RECT_F{});
@@ -1628,7 +1641,7 @@ void RenderPresetRow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
         else        rt->DrawRoundedRectangle(rr, dim, 1.2f);
         if (renaming) rt->DrawRoundedRectangle(rr, white, 1.6f);  // edit-mode highlight
         std::wstring label = renaming ? shown + L"_" : shown;
-        rt->DrawText(label.c_str(), (UINT32)label.size(), g_fmtUi, rc, active ? white : dim);
+        rt->DrawText(label.c_str(), (UINT32)label.size(), g_fmtCenter, rc, active ? white : dim);
         chipX += chipW + 6.0f;
     }
 }
@@ -1695,7 +1708,6 @@ void RenderControlsHint(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
         return;
     }
 
-    const D2D1_COLOR_F kA = D2D1::ColorF(0.20f, 0.65f, 0.30f, 1.0f);
     const D2D1_COLOR_F kB = D2D1::ColorF(0.85f, 0.20f, 0.20f, 1.0f);
     const D2D1_COLOR_F kX = D2D1::ColorF(0.10f, 0.45f, 0.85f, 1.0f);
     const D2D1_COLOR_F kY = D2D1::ColorF(0.90f, 0.75f, 0.10f, 1.0f);
@@ -1704,14 +1716,18 @@ void RenderControlsHint(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* white,
     const float col1 = PAD, col2 = PAD + 160.0f;
     float row = y + 4.0f;
     DrawGlyphChip(rt, white, col1, row, L"LS", kNeutral, true, 30.0f, L"Select widget");
-    DrawGlyphChip(rt, white, col2, row, L"RS", kNeutral, true, 30.0f, L"Move it");
+    DrawGlyphChip(rt, white, col2, row, L"RS", kNeutral, true, 30.0f, L"Move the widget");
     row += 28.0f;
-    DrawGlyphChip(rt, white, col1, row, L"A", kA, false, 22.0f, L"Save");
+    DrawGlyphChip(rt, white, col1, row, L"L3", kNeutral, true, 30.0f, L"Save");
     DrawGlyphChip(rt, white, col2, row, L"B", kB, false, 22.0f, L"Discard/Exit");
     row += 28.0f;
-    DrawGlyphChip(rt, white, col1, row, L"X", kX, false, 22.0f, L"Delete preset");
-    DrawGlyphChip(rt, white, col2, row, L"Y", kY, false, 22.0f, L"New preset");
-    row += 28.0f;
+    // Delete/create preset are Settings-only in a restricted (in-game gamepad) session - see
+    // g_editModeFull - so the legend only advertises buttons that actually do something here.
+    if (g_editModeFull) {
+        DrawGlyphChip(rt, white, col1, row, L"X", kX, false, 22.0f, L"Delete preset");
+        DrawGlyphChip(rt, white, col2, row, L"Y", kY, false, 22.0f, L"New preset");
+        row += 28.0f;
+    }
     DrawGlyphChip(rt, white, col1, row, L"LB", kNeutral, true, 30.0f, L"Prev preset");
     DrawGlyphChip(rt, white, col2, row, L"RB", kNeutral, true, 30.0f, L"Next preset");
 }
@@ -1746,6 +1762,39 @@ void RenderConfig() {
     // Title.
     rt->DrawText(L"Overlay appearance", 18, g_fmtUi,
                  D2D1::RectF(PAD, 8, CONFIG_W - PAD, 28), dim);
+
+    // Restricted = an in-game (non-full) session currently driven by a gamepad. Keyboard/mouse
+    // in-game sessions are left showing the full editor below (they don't have the game-also-
+    // reacting problem a gamepad does, since focus-stealing works for them) - only gamepad input
+    // cuts the card down to "switch preset, move widgets, save" plus a pointer to Settings for
+    // everything else. Reactive: flips back the instant g_lastModality returns to mouse. The
+    // rects for every hidden control are zeroed below, so a stray click can never match a stale
+    // position left over from a previous, differently-shaped render.
+    bool restricted = !g_editModeFull && g_lastModality == ModalityGamepad;
+    if (restricted) {
+        g_rcOpacMinus = g_rcOpacPlus = g_rcTextMinus = g_rcTextPlus = D2D1_RECT_F{};
+        g_rcFontPrev = g_rcFontNext = D2D1_RECT_F{};
+        for (auto& r : g_rcSwatch) r = D2D1_RECT_F{};
+        for (auto& r : g_rcToggle) r = D2D1_RECT_F{};
+        g_rcSave = g_rcDiscardClose = D2D1_RECT_F{};
+
+        const wchar_t* note =
+            L"Full customization \x2014 appearance, new/delete presets \x2014 is in the app's "
+            L"Settings \x2192 Gaming Journal \x2192 Customize Overlay Layout.";
+        IDWriteTextLayout* noteLayout = MakeLayout(note, g_fmtLabel, CONFIG_W - 2 * PAD, nullptr);
+        if (noteLayout) {
+            rt->DrawTextLayout(D2D1::Point2F(PAD, 34), noteLayout, dim);
+            SafeRelease(&noteLayout);
+        }
+
+        RenderPresetRow(rt, white, dim, acc, 104.0f, false);
+        RenderControlsHint(rt, white, dim, 176.0f);
+
+        SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
+        if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_configWin); return; }
+        CommitWindow(g_configWin, AnchorTopCenter);
+        return;
+    }
 
     const float bh = 24, bw = 26;
     // A right-aligned [-] [value] [+] stepper at row `by`; fills the passed rects.
@@ -1824,12 +1873,11 @@ void RenderConfig() {
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcToggle[i], 7, 7);
         if (*flags[i]) rt->FillRoundedRectangle(rr, acc);
         else           rt->DrawRoundedRectangle(rr, dim, 1.2f);
-        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtUi,
-                     D2D1::RectF(cx, chy + 4, cx + chw, chy + chh),
-                     *flags[i] ? white : dim);
+        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtCenter,
+                     g_rcToggle[i], *flags[i] ? white : dim);
     }
 
-    RenderPresetRow(rt, white, dim, acc, 214.0f);
+    RenderPresetRow(rt, white, dim, acc, 214.0f, true);
     RenderActionRow(rt, white, dim, acc, 284.0f);
     RenderControlsHint(rt, white, dim, 324.0f);
 
@@ -1847,10 +1895,10 @@ void RerenderAll() {
     RenderConfig();
 }
 
-void ApplyEditMode(bool on);  // forward decl — RequestExit/click handlers below call it
+void ApplyEditMode(bool on, bool full = true);  // forward decl — RequestExit/click handlers below call it
 
 // Commit the current live state to the active preset and persist it. Stays in
-// edit mode ("A button will save to the selected preset").
+// edit mode (L3/Save button commits to the selected preset).
 void SavePreset() {
     if (g_activePreset >= 0 && g_activePreset < (int)g_presets.size())
         g_presets[g_activePreset] = CaptureSnapshot();
@@ -1959,7 +2007,7 @@ bool ConfigClick(int x, int y) {
         changed = rebuildText = true;
     } else if (InRect(g_rcSave, x, y)) {
         SavePreset();
-        RenderConfig();
+        ApplyEditMode(false);  // saving closes the editing overlay
         return true;
     } else if (InRect(g_rcDiscardClose, x, y)) {
         DiscardAndClose();
@@ -1997,7 +2045,8 @@ bool ConfigClick(int x, int y) {
 // already declare their own intent and act immediately (see ConfigClick /
 // PollGamepad) without going through this.
 void RequestExit() {
-    if (!g_editMode) { ApplyEditMode(true); return; }
+    // Only reached via the native hotkey (WM_HOTKEY) - always an in-game session.
+    if (!g_editMode) { ApplyEditMode(true, false); return; }
     if (g_showExitConfirm) return;  // already showing the prompt
     if (!g_dirty) { ApplyEditMode(false); return; }
     g_showExitConfirm = true;
@@ -2007,8 +2056,9 @@ void RequestExit() {
 // Toggle edit mode: lift/restore click-through, show/hide the appearance
 // toolbar, re-render every widget. Persistence now only happens via an
 // explicit Save (or Save & Exit) — see RequestExit()/SavePreset().
-void ApplyEditMode(bool on) {
+void ApplyEditMode(bool on, bool full) {
     g_editMode = on;
+    if (on) g_editModeFull = full;
     SetClickThrough(g_toastWin, !on);
     SetClickThrough(g_memWin, !on);
     SetClickThrough(g_panelWin, !on);
@@ -2159,10 +2209,14 @@ void HandleCommand(const std::wstring& line) {
         RenderPanel();
     } else if (type == L"edit_mode") {
         const JsonValue* en = v.find(L"enabled");
+        const JsonValue* full = v.find(L"full");
         // Same ambiguous-toggle logic as the physical hotkey when re-enabling
         // (the pipe caller may not know whether edit mode is already open).
+        // "full" defaults to false (in-game/restricted) - only the app's design-mode button sends
+        // full:true; the voice "edit overlay" phrase is in-game and never sends it.
         bool wantOn = en ? en->asBool() : false;
-        if (wantOn && !g_editMode) ApplyEditMode(true);
+        bool wantFull = full ? full->asBool() : false;
+        if (wantOn && !g_editMode) ApplyEditMode(true, wantFull);
         else if (!wantOn && g_editMode) RequestExit();
     } else if (type == L"set_hotkey") {
         const JsonValue* mods = v.find(L"mods");
@@ -2307,7 +2361,7 @@ void PollGamepad() {
     if (anyActivity) g_lastModality = ModalityGamepad;
 
     if (g_showExitConfirm) {
-        if (pressed(XINPUT_GAMEPAD_A)) { SavePreset(); ApplyEditMode(false); g_showExitConfirm = false; }
+        if (pressed(XINPUT_GAMEPAD_LEFT_THUMB)) { SavePreset(); ApplyEditMode(false); g_showExitConfirm = false; }
         else if (pressed(XINPUT_GAMEPAD_X)) { DiscardAndClose(); }
         else if (pressed(XINPUT_GAMEPAD_B)) { g_showExitConfirm = false; RenderConfig(); }
         g_prevButtons = buttons;
@@ -2320,10 +2374,14 @@ void PollGamepad() {
         return;  // no gamepad action while renaming — keyboard/mouse only
     }
 
-    if (pressed(XINPUT_GAMEPAD_A)) { SavePreset(); RenderConfig(); }
+    // Delete/create preset are Settings-only (app design mode) actions - blocked here as
+    // defense-in-depth even though the buttons are also no longer advertised in a restricted
+    // in-game session (see g_editModeFull / RenderControlsHint).
+    // Saving closes the editing overlay, same as the mouse-clicked Save button.
+    if (pressed(XINPUT_GAMEPAD_LEFT_THUMB)) { SavePreset(); ApplyEditMode(false); }
     else if (pressed(XINPUT_GAMEPAD_B)) { DiscardAndClose(); }
-    else if (pressed(XINPUT_GAMEPAD_X)) { DeletePreset(); }
-    else if (pressed(XINPUT_GAMEPAD_Y)) { CreatePreset(); }
+    else if (pressed(XINPUT_GAMEPAD_X) && g_editModeFull) { DeletePreset(); }
+    else if (pressed(XINPUT_GAMEPAD_Y) && g_editModeFull) { CreatePreset(); }
     else if (pressed(XINPUT_GAMEPAD_LEFT_SHOULDER)) { SwitchPreset(g_activePreset - 1); RenderConfig(); }
     else if (pressed(XINPUT_GAMEPAD_RIGHT_SHOULDER)) { SwitchPreset(g_activePreset + 1); RenderConfig(); }
 
@@ -2461,7 +2519,14 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_NCHITTEST:
             // In edit mode the whole widget is a drag handle; DefWindowProc then
             // moves the window for us. Otherwise it's click-through anyway.
-            if (g_editMode) g_lastModality = ModalityMouse;
+            // Edge-triggered (only on an actual modality change, not every hittest - Windows sends
+            // this continuously on mouse movement): re-render the toolbar the instant the mouse
+            // takes over from a gamepad, so a restricted in-game layout doesn't stay stuck on
+            // screen after the controller's been put down. See RenderConfig()'s `restricted`.
+            if (g_editMode && g_lastModality != ModalityMouse) {
+                g_lastModality = ModalityMouse;
+                RenderConfig();
+            }
             return g_editMode ? HTCAPTION : HTTRANSPARENT;
         case WM_MOVE: {
             // Keep the stored position in sync so later re-renders (new toast,
@@ -2563,6 +2628,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (!g_toastWin.hwnd || !g_memWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
         !g_bannerWin.hwnd || !g_handsfreeWin.hwnd)
         return 3;
+    // All layered windows share one class with an empty title, so give the config toolbar a
+    // distinct one - it's the only window Python needs to identify from outside: its visibility
+    // (shown by ApplyEditMode when on, SW_HIDE'd when off) is the authoritative signal for whether
+    // an edit-mode session is still open, since Save/Discard/B can end one entirely inside this
+    // process with no pipe message back to the app (see overlay_process.is_design_mode_active()).
+    SetWindowTextW(g_configWin.hwnd, L"LykoOverlayConfig");
 
     g_widgets[0] = &g_toastWin;
     g_widgets[1] = &g_memWin;

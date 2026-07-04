@@ -184,8 +184,59 @@ def push_game_state(title: str, rows: list[list[str]]) -> None:
     push({"type": "game_state", "title": title, "rows": rows})
 
 
-def set_edit_mode(enabled: bool) -> None:
-    push({"type": "edit_mode", "enabled": bool(enabled)})
+def set_edit_mode(enabled: bool, full: bool = False) -> None:
+    """full=True is the app's "Customize Overlay Layout" design-mode session (no game running,
+    everything unlocked); False (the default, used by the voice/hotkey in-game triggers) is a
+    restricted in-game session - the overlay itself further cuts that down to move/save/switch-
+    preset only once a gamepad becomes the active input, see overlay.cpp's g_editModeFull."""
+    push({"type": "edit_mode", "enabled": bool(enabled), "full": bool(full)})
+
+
+def is_design_mode_active() -> bool:
+    """True if the overlay's edit-mode config toolbar is currently visible - the pipe is
+    write-only (we send commands, the overlay never talks back), so this is the only way to learn
+    that Save/Discard/B already closed editing entirely inside the overlay's own process. Used to
+    let the Settings "Customize Overlay Layout" button correct itself instead of staying stuck on
+    "Stop Editing" after the user exits from inside the overlay itself.
+
+    Finds the config window by its distinct title (overlay.cpp names it "LykoOverlayConfig" -
+    every other overlay window shares one class with an empty title) scoped to our own child
+    process's id, then reads its actual visibility. Best-effort: returns False on any failure or
+    off Windows, same as everything else in this module."""
+    if sys.platform != "win32":
+        return False
+    with _lock:
+        proc = _proc
+    if proc is None or proc.poll() is not None:
+        return False
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    result = {"visible": False}
+
+    def _callback(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value != proc.pid:
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        if buf.value == "LykoOverlayConfig":
+            result["visible"] = bool(user32.IsWindowVisible(hwnd))
+            return False  # found it, stop enumerating
+        return True
+
+    try:
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(WNDENUMPROC(_callback), 0)
+    except OSError:
+        return False
+    return result["visible"]
 
 
 _LAYOUT_PATH = (
