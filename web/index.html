@@ -677,8 +677,8 @@
                   <input id="cfg-game-state-capture-interval" type="range" min="1" max="10" step="1" value="1" />
                 </label>
                 <label>
-                  <span class="cfg-label">Heartbeat: <span id="cfg-game-state-heartbeat-value">10</span> min <button type="button" class="cfg-help" data-tip="A frame whose on-screen text hasn't changed is normally skipped for good (e.g. sitting in a pause menu). This caps how long that can go on before the next frame is sent anyway based on its pixels, so quiet-but-textless gameplay (minimal-UI games, exploration, cutscenes) still gets checked periodically. 0 = never force a frame through.">?</button></span>
-                  <input id="cfg-game-state-heartbeat" type="range" min="0" max="30" step="1" value="10" />
+                  <span class="cfg-label">Visual Diff Threshold: <span id="cfg-game-state-visual-diff-value">12</span>% <button type="button" class="cfg-help" data-tip="If the on-screen text never changes across a whole poll window, it's normally skipped entirely (e.g. sitting in a pause menu). As a fallback, the window's first and last screenshots are compared by pixels - if they differ by at least this percent, the window is sent through anyway. A genuinely frozen screen stays skipped; a minimal-UI game where you're actually moving around still gets checked. Set to 100 to disable this fallback.">?</button></span>
+                  <input id="cfg-game-state-visual-diff" type="range" min="0" max="100" step="1" value="12" />
                 </label>
               </details>
             </div>

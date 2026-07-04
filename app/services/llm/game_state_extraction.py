@@ -5,6 +5,8 @@ import sys
 import time
 from difflib import SequenceMatcher
 
+from PIL import Image, ImageChops, ImageStat
+
 from app.core import game_state
 from app.core import game_state_processes
 from app.core import game_state_trackers
@@ -44,7 +46,6 @@ _OCR_MAX_WIDTH = 1600
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
-_last_kept_at: float | None = None
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
@@ -54,6 +55,13 @@ _window_started_at: float | None = None
 # who's speaking, spatial layout - which is exactly where text-only extraction hallucinated.
 _first_frame_b64: str | None = None
 _last_frame_b64: str | None = None
+
+# The very first and most recently captured raw frame of the window, kept *regardless* of the OCR
+# text dedupe above - used only as a visual-diff fallback (see _visual_diff_percent) so a window
+# where the on-screen text never changes at all can still be recognized as having moved (camera
+# panning, environment change) instead of being a genuinely frozen screen (paused/static menu).
+_window_first_image: Image.Image | None = None
+_window_last_image: Image.Image | None = None
 
 # A single empty OCR result is routine (loading screens, blank/solid-color frames, a menu with no
 # text) and not worth logging every tick - only warn once capture/OCR has come back empty this
@@ -85,19 +93,35 @@ def _reset_window() -> None:
     """Resets the per-process OCR-batching buffers (frames collected this poll window, dedupe
     state). Doesn't touch persisted tracker values - those live independently in game_state.py,
     keyed by process, and survive a process switch or the companion restarting."""
-    global _frames, _last_kept_text, _last_kept_at, _window_started_at, _empty_ocr_streak
-    global _first_frame_b64, _last_frame_b64
+    global _frames, _last_kept_text, _window_started_at, _empty_ocr_streak
+    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image
     _frames = []
     _last_kept_text = None
-    _last_kept_at = None
     _window_started_at = None
     _empty_ocr_streak = 0
     _first_frame_b64 = None
     _last_frame_b64 = None
+    _window_first_image = None
+    _window_last_image = None
 
 
 def _frames_similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= _SIMILARITY_THRESHOLD
+
+
+_VISUAL_DIFF_SIZE = (64, 64)
+
+
+def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
+    """Coarse whole-frame visual difference between two images, as a 0-100 percent: both are
+    downscaled to a tiny grayscale thumbnail (cheap, and blurs out compression/OCR-irrelevant
+    noise) and compared via mean absolute pixel difference. Used only as a fallback signal when
+    OCR text found nothing to distinguish the window's frames - real camera movement/environment
+    change registers here even when no on-screen text changed at all."""
+    a_thumb = a.convert("L").resize(_VISUAL_DIFF_SIZE)
+    b_thumb = b.convert("L").resize(_VISUAL_DIFF_SIZE)
+    diff = ImageChops.difference(a_thumb, b_thumb)
+    return (ImageStat.Stat(diff).mean[0] / 255) * 100
 
 
 def _format_frames(frames: list[tuple[float, str]]) -> str:
@@ -302,8 +326,8 @@ async def extract_and_apply_game_state(
 async def _capture_tick() -> None:
     """Captures+OCRs one frame locally (no LLM call) and, once a full poll window's worth of
     frames has accumulated, batches them into a single structuring LLM call."""
-    global _last_process, _last_kept_text, _last_kept_at, _frames, _window_started_at, _empty_ocr_streak
-    global _first_frame_b64, _last_frame_b64
+    global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
+    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -374,30 +398,19 @@ async def _capture_tick() -> None:
         if image.width > _OCR_MAX_WIDTH:
             ratio = _OCR_MAX_WIDTH / image.width
             image = image.resize((_OCR_MAX_WIDTH, int(image.height * ratio)))
+        # Tracked regardless of the OCR-text dedupe below - the visual-diff fallback needs the
+        # window's true first/last frame, not just its first/last *kept* one.
+        if _window_first_image is None:
+            _window_first_image = image
+        _window_last_image = image
         ocr_text = await windows_ocr.extract_text(image)
     if ocr_text and ocr_text.strip():
         ocr_text = ocr_text.strip()
         _empty_ocr_streak = 0
-        now = time.time()
         normalized = " ".join(ocr_text.split())
-        changed = _last_kept_text is None or not _frames_similar(normalized, _last_kept_text)
-        heartbeat_due = (
-            not changed
-            and settings.game_state_heartbeat_minutes > 0
-            and _last_kept_at is not None
-            and now - _last_kept_at >= settings.game_state_heartbeat_minutes * 60
-        )
-        if changed or heartbeat_due:
-            if heartbeat_due:
-                logger.info(
-                    "Game-state poll: text unchanged for %.0fs, force-keeping frame for process=%r "
-                    "(heartbeat)",
-                    now - _last_kept_at,
-                    process,
-                )
-            _frames.append((now, ocr_text))
+        if _last_kept_text is None or not _frames_similar(normalized, _last_kept_text):
+            _frames.append((time.time(), ocr_text))
             _last_kept_text = normalized
-            _last_kept_at = now
             # Keep the pixels too (downscaled per the screenshot settings) - the first and most
             # recent kept frames of the window get attached to the extraction call as images.
             frame_b64 = image_to_b64(image)
@@ -427,15 +440,41 @@ async def _capture_tick() -> None:
 
     frames_to_send = _frames
     first_b64, last_b64 = _first_frame_b64, _last_frame_b64
+    window_first_image, window_last_image = _window_first_image, _window_last_image
     _frames = []
     _first_frame_b64 = None
     _last_frame_b64 = None
     _window_started_at = None
+    _window_first_image = None
+    _window_last_image = None
     if not frames_to_send:
-        logger.debug(
-            "Game-state poll: no changed frames captured for process=%r this window, skipping LLM pass", process
-        )
-        return
+        diff_percent = None
+        if (
+            window_first_image is not None
+            and window_last_image is not None
+            and window_first_image is not window_last_image
+        ):
+            diff_percent = _visual_diff_percent(window_first_image, window_last_image)
+        if diff_percent is not None and diff_percent >= settings.game_state_visual_diff_threshold_percent:
+            # OCR text never changed all window, but the actual pixels did (camera movement,
+            # environment change) - a minimal-UI/textless gameplay moment, not a frozen screen.
+            # Force the window through on the last OCR reading + these two raw frames so the
+            # extraction pass still gets a look, driven entirely by pixels since there's no new text.
+            logger.info(
+                "Game-state poll: OCR text unchanged but frames differ %.1f%% for process=%r, "
+                "running structuring pass on visual diff alone",
+                diff_percent,
+                process,
+            )
+            frames_to_send = [(time.time(), _last_kept_text or "(no on-screen text detected)")]
+            first_b64 = first_b64 or image_to_b64(window_first_image)
+            last_b64 = image_to_b64(window_last_image)
+        else:
+            logger.debug(
+                "Game-state poll: no changed frames captured for process=%r this window, skipping LLM pass",
+                process,
+            )
+            return
 
     logger.info(
         "Game-state poll: %d changed frame(s) captured for process=%r, running structuring pass",

@@ -23,7 +23,7 @@ async def get_config() -> CompanionConfig:
         game_state_ocr_enabled=settings.game_state_ocr_enabled,
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
-        game_state_heartbeat_minutes=settings.game_state_heartbeat_minutes,
+        game_state_visual_diff_threshold_percent=settings.game_state_visual_diff_threshold_percent,
         game_state_model=settings.game_state_model or None,
         game_state_training_enabled=settings.game_state_training_enabled,
         proactive_messages_enabled=settings.proactive_messages_enabled,
@@ -149,8 +149,8 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     settings.game_state_capture_interval_seconds = config.game_state_capture_interval_seconds
     env_updates["GAME_STATE_CAPTURE_INTERVAL_SECONDS"] = str(config.game_state_capture_interval_seconds)
 
-    settings.game_state_heartbeat_minutes = config.game_state_heartbeat_minutes
-    env_updates["GAME_STATE_HEARTBEAT_MINUTES"] = str(config.game_state_heartbeat_minutes)
+    settings.game_state_visual_diff_threshold_percent = config.game_state_visual_diff_threshold_percent
+    env_updates["GAME_STATE_VISUAL_DIFF_THRESHOLD_PERCENT"] = str(config.game_state_visual_diff_threshold_percent)
 
     if config.game_state_model is not None:
         settings.game_state_model = config.game_state_model

@@ -56,7 +56,7 @@ class CompanionConfig(BaseModel):
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
-    game_state_heartbeat_minutes: int = 10
+    game_state_visual_diff_threshold_percent: float = 12.0
     game_state_model: str | None = None
     game_state_training_enabled: bool = False
     proactive_messages_enabled: bool = False
