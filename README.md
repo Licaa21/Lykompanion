@@ -312,6 +312,8 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `lookup_game_info` | IGDB game data (genre, platforms, release date, rating). | Twitch app credentials |
 | `lookup_steam_game` | Steam store page details. | No |
 | `fetch_steam_library` | User's owned games / playtime. | Steam API key + SteamID64 |
+| `play_on_youtube` | Search YouTube (via `yt-dlp`, no API key) for a song/video and open its watch page, which autoplays. | No |
+| `play_on_spotify` | Search Spotify's catalog and hand off a `spotify:track:` URI to the local Spotify app, which starts playing immediately. | Spotify app Client ID/Secret (free, no Premium/login needed) |
 
 ## Development
 

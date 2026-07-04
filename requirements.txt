@@ -33,6 +33,10 @@ winrt-Windows.Foundation
 # specific app/game up or down in the Windows volume mixer, separate from its own narration volume.
 pycaw
 
+# Resolves a YouTube search query to the actual best-match video (no API key/quota) for the
+# play_on_youtube tool.
+yt-dlp
+
 
 # Dev only: unit tests (run with `python -m pytest tests`).
 pytest

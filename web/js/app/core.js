@@ -275,6 +275,7 @@ const CLEARABLE_KEY_FIELDS = {
   "cfg-custom-openai-key": "custom_openai_api_key",
   "cfg-igdb-client-secret": "igdb_client_secret",
   "cfg-steam-api-key": "steam_api_key",
+  "cfg-spotify-client-secret": "spotify_client_secret",
 };
 
 settingsModal.addEventListener("click", async (e) => {

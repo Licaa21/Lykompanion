@@ -340,6 +340,24 @@
               <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
             </label>
           </div>
+
+          <h3>Spotify</h3>
+          <p class="modal-hint">
+            Lets the companion play a song on Spotify by voice ("play X on Spotify"). Create a free app at
+            <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a>
+            to get a Client ID and Secret — no Spotify Premium or account login required, it only searches the
+            catalog and hands off to your local Spotify app.
+          </p>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">Client ID <button type="button" class="cfg-help" data-tip="Spotify application Client ID, used to search the catalog for play_on_spotify.">?</button></span>
+              <input id="cfg-spotify-client-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+            <label>
+              <span class="cfg-label">Client Secret <button type="button" class="cfg-help" data-tip="Spotify application Client Secret, paired with the Client ID above.">?</button></span>
+              <span class="key-field"><input id="cfg-spotify-client-secret" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
         </section>
 
         <!-- VOICE tab -->

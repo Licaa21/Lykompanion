@@ -726,6 +726,10 @@ function applyConfigToForm(cfg) {
     : "Not set";
   document.getElementById("cfg-steam-api-key").placeholder = cfg.steam_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-steam-id").value = cfg.steam_id || "";
+  document.getElementById("cfg-spotify-client-id").value = cfg.spotify_client_id || "";
+  document.getElementById("cfg-spotify-client-secret").placeholder = cfg.spotify_client_secret_set
+    ? "•••••••• (set)"
+    : "Not set";
 
   updateSetupBanner(cfg);
 }
@@ -816,6 +820,8 @@ async function saveSettings(saveButton) {
     igdb_client_secret: keyFieldValue("cfg-igdb-client-secret"),
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
+    spotify_client_id: document.getElementById("cfg-spotify-client-id").value,
+    spotify_client_secret: keyFieldValue("cfg-spotify-client-secret"),
     overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     overlay_edit_hotkey: overlayEditHotkey || "Ctrl+Shift+O",
     overlay_edit_phrase_enabled: overlayEditPhraseEnabledInput.checked,
@@ -851,7 +857,7 @@ async function saveSettings(saveButton) {
   const keyInputIds = [
     "cfg-api-key", "cfg-management-key", "cfg-google-ai-studio-key",
     "cfg-google-tts-api-key", "cfg-custom-openai-key",
-    "cfg-igdb-client-secret", "cfg-steam-api-key",
+    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-spotify-client-secret",
   ];
   for (const id of keyInputIds) {
     const el = document.getElementById(id);

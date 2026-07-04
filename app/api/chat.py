@@ -26,6 +26,7 @@ from app.services.llm.client import (
 from app.services.llm.app_volume_tool import APP_VOLUME_TOOLS, execute_set_application_volume
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
+from app.services.llm.media_tool import MEDIA_TOOLS, execute_play_on_spotify, execute_play_on_youtube
 from app.services.llm.memory_extraction import extract_and_apply_memory
 from app.services.llm.reminder_tool import REMINDER_TOOLS, execute_reminder_tool
 from app.services.llm.screenshot_tool import SCREENSHOT_TOOLS, execute_take_screenshot, format_monitors_for_prompt
@@ -57,6 +58,7 @@ ALL_TOOLS = (
     + SYSTEM_INFO_TOOLS
     + REMINDER_TOOLS
     + APP_VOLUME_TOOLS
+    + MEDIA_TOOLS
 )
 
 REMINDER_TOOL_NAMES = {"add_reminder", "remove_reminder", "add_alarm", "cancel_alarm"}
@@ -399,6 +401,10 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return await execute_fetch_steam_library(arguments), None, None
     if name == "fetch_system_info":
         return execute_fetch_system_info(arguments), None, None
+    if name == "play_on_youtube":
+        return await execute_play_on_youtube(arguments), None, None
+    if name == "play_on_spotify":
+        return await execute_play_on_spotify(arguments), None, None
     if name in REMINDER_TOOL_NAMES:
         return execute_reminder_tool(name, arguments), None, None
     return execute_tool_call(name, arguments), None, None

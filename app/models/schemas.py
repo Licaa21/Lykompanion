@@ -107,6 +107,10 @@ class CompanionConfig(BaseModel):
     steam_api_key_set: bool = False
     steam_id: str | None = None
 
+    spotify_client_id: str | None = None
+    spotify_client_secret: str | None = None
+    spotify_client_secret_set: bool = False
+
     debug_mode_enabled: bool = False
 
 
