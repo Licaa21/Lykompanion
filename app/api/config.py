@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.core import spotify_auth
+from app.core import spotify_auth, youtube_auth
 from app.core.config import persist_env_values, settings
 from app.models.schemas import CompanionConfig
 
@@ -70,6 +70,10 @@ async def get_config() -> CompanionConfig:
         spotify_client_id=settings.spotify_client_id,
         spotify_connected=spotify_auth.is_connected(),
         spotify_display_name=spotify_auth.get_display_name(),
+        youtube_client_id=settings.youtube_client_id,
+        youtube_client_secret_set=bool(settings.youtube_client_secret),
+        youtube_connected=youtube_auth.is_connected(),
+        youtube_channel_title=youtube_auth.get_channel_title(),
         debug_mode_enabled=settings.debug_mode_enabled,
     )
 
@@ -264,6 +268,13 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
         settings.spotify_client_id = config.spotify_client_id
         env_updates["SPOTIFY_CLIENT_ID"] = config.spotify_client_id
 
+    if config.youtube_client_id is not None:
+        settings.youtube_client_id = config.youtube_client_id
+        env_updates["YOUTUBE_CLIENT_ID"] = config.youtube_client_id
+    if config.youtube_client_secret is not None:
+        settings.youtube_client_secret = config.youtube_client_secret
+        env_updates["YOUTUBE_CLIENT_SECRET"] = config.youtube_client_secret
+
     settings.debug_mode_enabled = config.debug_mode_enabled
     env_updates["DEBUG_MODE_ENABLED"] = str(config.debug_mode_enabled)
 
@@ -282,6 +293,7 @@ _CLEARABLE_KEYS = {
     "google_tts_api_key": "GOOGLE_TTS_API_KEY",
     "custom_openai_api_key": "CUSTOM_OPENAI_API_KEY",
     "igdb_client_secret": "IGDB_CLIENT_SECRET",
+    "youtube_client_secret": "YOUTUBE_CLIENT_SECRET",
     "steam_api_key": "STEAM_API_KEY",
 }
 

@@ -168,6 +168,12 @@ class Settings(BaseSettings):
     # Secret is needed anywhere in that flow, just this (non-secret) Client ID.
     spotify_client_id: str = ""
 
+    # Registers the OAuth app with Google/YouTube (see app/api/youtube_oauth.py). Unlike Spotify,
+    # Google's token endpoint still expects the Client Secret alongside PKCE - not treated as
+    # fully secret for installed apps per Google's own docs, but required in the request body.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+
     # Gates app/core/debug_log.py recording - off by default so full, untruncated prompts/replies
     # (which can be large) aren't kept in memory unless the user is actively debugging.
     debug_mode_enabled: bool = False

@@ -68,6 +68,22 @@ window.loadYoutubeVideo = function (videoId, title) {
   ytPlayQueueEntry(ytQueue[ytQueueIndex]);
 };
 
+// Called from chat-stream.js when a play_youtube_playlist tool call resolves (SSE
+// `youtube_playlist` event / non-streaming response field) - queues every video in the playlist
+// (each { video_id, title }) and starts playing the first one, so next/previous walk the real
+// playlist instead of just this session's ad-hoc play history.
+window.loadYoutubePlaylist = function (videos, title) {
+  if (!videos || !videos.length) return;
+  ytQueue = ytQueue.slice(0, ytQueueIndex + 1);
+  for (const video of videos) {
+    ytQueue.push({ videoId: video.video_id, title: video.title });
+  }
+  ytQueueIndex = ytQueue.length - videos.length;
+  showYoutubePanel(title || ytQueue[ytQueueIndex].title);
+  ytLoadApiOnce();
+  ytPlayQueueEntry(ytQueue[ytQueueIndex]);
+};
+
 // Called from chat-stream.js for control_youtube_player tool calls (SSE `youtube_control` event /
 // non-streaming `youtube_control` response field) and by the panel's own buttons.
 window.controlYoutubePlayer = function (action, volume) {

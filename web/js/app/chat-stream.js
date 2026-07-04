@@ -365,6 +365,10 @@ async function sendMessage(text) {
           window.controlYoutubePlayer(payload.youtube_control.action, payload.youtube_control.volume);
           continue;
         }
+        if (payload.youtube_playlist) {
+          window.loadYoutubePlaylist(payload.youtube_playlist.videos, payload.youtube_playlist.title);
+          continue;
+        }
         if (payload.done) continue;
 
         fullReply += payload.delta;

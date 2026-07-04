@@ -365,6 +365,38 @@
               <button type="button" id="cfg-spotify-disconnect" class="secondary-btn secondary-btn--danger" hidden>Disconnect</button>
             </label>
           </div>
+
+          <h3>YouTube</h3>
+          <p class="modal-hint">
+            Lets the companion list and play your own YouTube playlists ("play my road trip playlist") in the
+            in-app player, instead of just searching public YouTube. Needs a free OAuth client from
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>
+            (enable the "YouTube Data API v3", create an OAuth client of type "Desktop app") — add a Redirect URI of
+            <code>http://127.0.0.1:6692/api/youtube/oauth/callback</code> (adjust the port if you run the server on a
+            different one), then paste its Client ID and Client Secret below and click Connect. Unlike Spotify,
+            Google's flow still requires the Client Secret even for a desktop app — it isn't sensitive in this
+            context per Google's own docs, but the field is still there.
+          </p>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Client ID <button type="button" class="cfg-help" data-tip="Google Cloud OAuth Client ID, from console.cloud.google.com/apis/credentials.">?</button></span>
+              <input id="cfg-youtube-client-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Client Secret <button type="button" class="cfg-help" data-tip="Paired with the Client ID above. Google still requires this in the token exchange even for PKCE desktop app flows.">?</button></span>
+              <span class="key-field"><input id="cfg-youtube-client-secret" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
+            </label>
+          </div>
+          <div class="cfg-row">
+            <label>
+              <span class="cfg-label">Account <button type="button" class="cfg-help" data-tip="Connects your actual YouTube/Google account (OAuth) so the companion can list and play your own playlists, separate from the app Client ID/Secret above which only register the integration with Google.">?</button></span>
+              <span id="cfg-youtube-account-status" class="hotkey-display">Not connected</span>
+              <button type="button" id="cfg-youtube-connect" class="secondary-btn">Connect</button>
+              <button type="button" id="cfg-youtube-disconnect" class="secondary-btn secondary-btn--danger" hidden>Disconnect</button>
+            </label>
+          </div>
         </section>
 
         <!-- VOICE tab -->

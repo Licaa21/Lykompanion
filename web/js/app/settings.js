@@ -732,6 +732,15 @@ function applyConfigToForm(cfg) {
     : "Not connected";
   document.getElementById("cfg-spotify-connect").hidden = cfg.spotify_connected;
   document.getElementById("cfg-spotify-disconnect").hidden = !cfg.spotify_connected;
+  document.getElementById("cfg-youtube-client-id").value = cfg.youtube_client_id || "";
+  document.getElementById("cfg-youtube-client-secret").placeholder = cfg.youtube_client_secret_set
+    ? "•••••••• (set)"
+    : "Not set";
+  document.getElementById("cfg-youtube-account-status").textContent = cfg.youtube_connected
+    ? `Connected${cfg.youtube_channel_title ? " as " + cfg.youtube_channel_title : ""}`
+    : "Not connected";
+  document.getElementById("cfg-youtube-connect").hidden = cfg.youtube_connected;
+  document.getElementById("cfg-youtube-disconnect").hidden = !cfg.youtube_connected;
 
   updateSetupBanner(cfg);
 }
@@ -773,6 +782,45 @@ document.getElementById("cfg-spotify-connect").addEventListener("click", async (
 
 document.getElementById("cfg-spotify-disconnect").addEventListener("click", async () => {
   await fetch("/api/spotify/oauth/disconnect", { method: "POST" });
+  await loadConfig();
+});
+
+// --- YouTube account connect/disconnect (OAuth) --- same pattern as Spotify above, except the
+// Connect button first does a normal Save so a freshly-typed Client ID/Secret are persisted
+// before /api/youtube/oauth/start reads them from the live settings singleton.
+let youtubeConnectPoll = null;
+
+document.getElementById("cfg-youtube-connect").addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  try {
+    await saveSettings(null);
+    const response = await fetch("/api/youtube/oauth/start", { method: "POST" });
+    const result = await response.json();
+    if (result.ok === false) {
+      alert(result.error || "Couldn't start YouTube connection.");
+      return;
+    }
+  } catch (err) {
+    alert("Couldn't reach the server to start YouTube connection.");
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+
+  clearInterval(youtubeConnectPoll);
+  let attempts = 0;
+  youtubeConnectPoll = setInterval(async () => {
+    attempts += 1;
+    const cfg = await loadConfig();
+    if ((cfg && cfg.youtube_connected) || attempts >= 60) {  // ~2 minutes at 2s intervals
+      clearInterval(youtubeConnectPoll);
+    }
+  }, 2000);
+});
+
+document.getElementById("cfg-youtube-disconnect").addEventListener("click", async () => {
+  await fetch("/api/youtube/oauth/disconnect", { method: "POST" });
   await loadConfig();
 });
 
@@ -863,6 +911,8 @@ async function saveSettings(saveButton) {
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
     spotify_client_id: document.getElementById("cfg-spotify-client-id").value,
+    youtube_client_id: document.getElementById("cfg-youtube-client-id").value,
+    youtube_client_secret: keyFieldValue("cfg-youtube-client-secret"),
     overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     overlay_edit_hotkey: overlayEditHotkey || "Ctrl+Shift+O",
     overlay_edit_phrase_enabled: overlayEditPhraseEnabledInput.checked,
@@ -898,7 +948,7 @@ async function saveSettings(saveButton) {
   const keyInputIds = [
     "cfg-api-key", "cfg-management-key", "cfg-google-ai-studio-key",
     "cfg-google-tts-api-key", "cfg-custom-openai-key",
-    "cfg-igdb-client-secret", "cfg-steam-api-key",
+    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-youtube-client-secret",
   ];
   for (const id of keyInputIds) {
     const el = document.getElementById(id);

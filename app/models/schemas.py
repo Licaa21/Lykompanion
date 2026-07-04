@@ -24,6 +24,7 @@ class ChatResponse(BaseModel):
     transcript: str | None = None
     youtube_play: dict | None = None
     youtube_control: dict | None = None
+    youtube_playlist: dict | None = None
 
 
 class ChatTitleRequest(BaseModel):
@@ -112,6 +113,12 @@ class CompanionConfig(BaseModel):
     spotify_client_id: str | None = None
     spotify_connected: bool = False
     spotify_display_name: str | None = None
+
+    youtube_client_id: str | None = None
+    youtube_client_secret: str | None = None
+    youtube_client_secret_set: bool = False
+    youtube_connected: bool = False
+    youtube_channel_title: str | None = None
 
     debug_mode_enabled: bool = False
 
