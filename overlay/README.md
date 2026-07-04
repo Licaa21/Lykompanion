@@ -49,8 +49,12 @@ $w.WriteLine('{"type":"toast","text":"hello from the pipe","kind":"reply"}')
 
 Press **Ctrl+Shift+O** (a global hotkey the exe registers itself) to toggle edit
 mode: widgets become draggable, empty ones show a placeholder, and a top-center
-toolbar exposes **opacity** and an **accent-color** picker. Positions + appearance
-persist to `%LOCALAPPDATA%\Lykompanion\overlay_layout.json`.
+toolbar exposes **opacity**, **text size**, **font**, an **accent-color** picker,
+and per-area **show/hide** toggles (Chat = reply/reminder/image toasts, Memory =
+memory save/remove toasts, Panel = game-state panel, Mic = hands-free indicator).
+The memory toasts live in their **own draggable area** (bottom-right by default),
+separate from the reply/reminder toasts (top-right). Positions + appearance persist
+to `%LOCALAPPDATA%\Lykompanion\overlay_layout.json`.
 
 `Lykompanion-overlay.exe --demo` shows sample content for ~20s for a quick visual check.
 

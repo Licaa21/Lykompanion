@@ -273,7 +273,15 @@ IDWriteTextFormat* g_fmtSmall = nullptr;  // panel row label (11px uppercase)
 IDWriteTextFormat* g_fmtHead  = nullptr;  // memory/handsfree header (semibold 14)
 IDWriteTextFormat* g_fmtIcon  = nullptr;  // emoji glyphs (color font)
 IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
+IDWriteTextFormat* g_fmtUi    = nullptr;  // edit-toolbar labels (fixed size/font)
 ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
+
+// Base sizes for the user-scalable text formats (multiplied by g_fontScale).
+constexpr float kSzTitle = 18.0f;  // toast title / panel title
+constexpr float kSzBody  = 14.0f;  // toast body / panel value
+constexpr float kSzLabel = 13.0f;  // panel label / image caption
+constexpr float kSzSmall = 11.0f;  // panel row label (uppercase)
+constexpr float kSzHead  = 14.0f;  // memory / handsfree header
 
 // A layered window plus its DIB-backed Direct2D render surface.
 struct LayeredWindow {
@@ -291,7 +299,7 @@ struct LayeredWindow {
     bool     hasPos  = false;  // false => derive from anchor on first commit
 };
 
-enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorBottomCenter, AnchorFixed };
+enum Anchor { AnchorTopRight, AnchorTopLeft, AnchorTopCenter, AnchorBottomCenter, AnchorBottomRight, AnchorFixed };
 
 // ---- Appearance (user-adjustable in edit mode, persisted) ------------------
 struct Rgb { float r, g, b; };
@@ -306,6 +314,21 @@ const Rgb kAccents[] = {
 constexpr int kAccentCount = (int)(sizeof(kAccents) / sizeof(kAccents[0]));
 int   g_accentIdx = 0;
 float g_opacity   = 0.92f;  // whole-overlay alpha multiplier, 0.40..1.00
+
+// Text customization (persisted, live-adjustable in edit mode).
+const wchar_t* const kFonts[] = {
+    L"Segoe UI", L"Arial", L"Verdana", L"Georgia", L"Consolas", L"Comic Sans MS",
+};
+constexpr int kFontCount = (int)(sizeof(kFonts) / sizeof(kFonts[0]));
+int   g_fontIdx   = 0;
+float g_fontScale = 1.0f;    // 0.70..1.60 multiplier over the base text sizes
+
+// Per-area visibility (persisted, toggled in edit mode). When a widget is
+// disabled it hides entirely — even in edit mode; re-enable it from the toolbar.
+bool  g_showToasts    = true;   // reply / reminder / image toasts
+bool  g_showMemories  = true;   // memory save/remove toasts (own area)
+bool  g_showPanel     = true;   // game-state panel
+bool  g_showHandsfree = true;   // live-mic indicator
 
 // Color helpers: every widget color routes through these so opacity/accent
 // apply uniformly. `a` is the color's own alpha before the opacity multiply.
@@ -354,6 +377,7 @@ struct Panel {
 
 HWND          g_ctrl = nullptr;    // message-only controller window
 LayeredWindow g_toastWin;
+LayeredWindow g_memWin;            // memory save/remove toasts (separate area)
 LayeredWindow g_panelWin;
 LayeredWindow g_configWin;         // edit-mode appearance toolbar
 LayeredWindow g_bannerWin;         // startup fade-in/out hint
@@ -365,15 +389,21 @@ bool          g_logoOk = false;
 LayeredWindow g_handsfreeWin;             // persistent hands-free (live-mic) indicator
 bool          g_handsfreeActive = false;
 ULONGLONG     g_handsfreeStart = 0;       // animation clock
-std::vector<Toast> g_toasts;
+std::vector<Toast> g_toasts;     // reply / reminder / image toasts
+std::vector<Toast> g_memToasts;  // memory toasts (rendered in g_memWin)
 Panel         g_panel;
 bool          g_editMode = false;
 
 // Config-toolbar hit rects (window coords), filled in by RenderConfig().
-constexpr int CONFIG_W = 300;
+constexpr int CONFIG_W = 340;
 D2D1_RECT_F   g_rcOpacMinus = {};
 D2D1_RECT_F   g_rcOpacPlus  = {};
+D2D1_RECT_F   g_rcTextMinus = {};
+D2D1_RECT_F   g_rcTextPlus  = {};
+D2D1_RECT_F   g_rcFontPrev  = {};
+D2D1_RECT_F   g_rcFontNext  = {};
 D2D1_RECT_F   g_rcSwatch[kAccentCount] = {};
+D2D1_RECT_F   g_rcToggle[4] = {};   // show: toasts / memories / panel / mic
 
 std::mutex               g_queueMx;
 std::deque<std::wstring> g_queue;   // raw JSON lines from the pipe thread
@@ -382,6 +412,29 @@ std::deque<std::wstring> g_queue;   // raw JSON lines from the pipe thread
 // Direct2D surface management (shared by both widgets)
 // ---------------------------------------------------------------------------
 
+// (Re)create the user-scalable text formats from the current font + scale. Called
+// once at startup and again whenever the user changes text size / font in edit mode.
+bool RebuildTextFormats() {
+    SafeRelease(&g_fmtTitle);
+    SafeRelease(&g_fmtBody);
+    SafeRelease(&g_fmtLabel);
+    SafeRelease(&g_fmtSmall);
+    SafeRelease(&g_fmtHead);
+
+    const wchar_t* fam = kFonts[g_fontIdx];
+    const float s = g_fontScale;
+    auto mk = [&](DWRITE_FONT_WEIGHT w, float px, IDWriteTextFormat** out) -> bool {
+        return SUCCEEDED(g_dwriteFactory->CreateTextFormat(
+            fam, nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            px * s, L"en-us", out));
+    };
+    return mk(DWRITE_FONT_WEIGHT_SEMI_BOLD, kSzTitle, &g_fmtTitle)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzBody,  &g_fmtBody)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzLabel, &g_fmtLabel)
+        && mk(DWRITE_FONT_WEIGHT_NORMAL,    kSzSmall, &g_fmtSmall)
+        && mk(DWRITE_FONT_WEIGHT_SEMI_BOLD, kSzHead,  &g_fmtHead);
+}
+
 bool CreateFactories() {
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2dFactory)))
         return false;
@@ -389,27 +442,8 @@ bool CreateFactories() {
                                    reinterpret_cast<IUnknown**>(&g_dwriteFactory))))
         return false;
 
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 18.0f, L"en-us", &g_fmtTitle)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-us", &g_fmtBody)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtLabel)))
-        return false;
-
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"en-us", &g_fmtSmall)))
-        return false;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-us", &g_fmtHead)))
-        return false;
+    // Fixed-size chrome formats (never scaled — they must stay usable/legible
+    // regardless of the text size the user is editing).
     if (FAILED(g_dwriteFactory->CreateTextFormat(
             L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"en-us", &g_fmtIcon)))
@@ -420,6 +454,12 @@ bool CreateFactories() {
         return false;
     g_fmtCenter->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     g_fmtCenter->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtUi)))
+        return false;
+
+    if (!RebuildTextFormats()) return false;
 
     D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties();
     sp.dashStyle = D2D1_DASH_STYLE_DASH;
@@ -444,12 +484,20 @@ std::wstring LayoutPath() {
 void SaveLayout() {
     std::string js = "{\"toast\":{\"x\":" + std::to_string(g_toastWin.posX) +
                      ",\"y\":" + std::to_string(g_toastWin.posY) +
+                     "},\"memory\":{\"x\":" + std::to_string(g_memWin.posX) +
+                     ",\"y\":" + std::to_string(g_memWin.posY) +
                      "},\"panel\":{\"x\":" + std::to_string(g_panelWin.posX) +
                      ",\"y\":" + std::to_string(g_panelWin.posY) +
                      "},\"handsfree\":{\"x\":" + std::to_string(g_handsfreeWin.posX) +
                      ",\"y\":" + std::to_string(g_handsfreeWin.posY) +
                      "},\"opacity\":" + std::to_string(g_opacity) +
-                     ",\"accent\":" + std::to_string(g_accentIdx) + "}";
+                     ",\"accent\":" + std::to_string(g_accentIdx) +
+                     ",\"font\":" + std::to_string(g_fontIdx) +
+                     ",\"textScale\":" + std::to_string(g_fontScale) +
+                     ",\"showToasts\":" + (g_showToasts ? "true" : "false") +
+                     ",\"showMemories\":" + (g_showMemories ? "true" : "false") +
+                     ",\"showPanel\":" + (g_showPanel ? "true" : "false") +
+                     ",\"showHandsfree\":" + (g_showHandsfree ? "true" : "false") + "}";
     HANDLE h = CreateFileW(LayoutPath().c_str(), GENERIC_WRITE, 0, nullptr,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE) {
@@ -479,6 +527,7 @@ void LoadLayout() {
         }
     };
     apply(L"toast", g_toastWin);
+    apply(L"memory", g_memWin);
     apply(L"panel", g_panelWin);
     apply(L"handsfree", g_handsfreeWin);
 
@@ -494,6 +543,26 @@ void LoadLayout() {
         if (g_accentIdx < 0) g_accentIdx = 0;
         if (g_accentIdx >= kAccentCount) g_accentIdx = kAccentCount - 1;
     }
+    const JsonValue* fn = v.find(L"font");
+    if (fn && fn->type == JsonValue::Num) {
+        g_fontIdx = (int)fn->num;
+        if (g_fontIdx < 0) g_fontIdx = 0;
+        if (g_fontIdx >= kFontCount) g_fontIdx = kFontCount - 1;
+    }
+    const JsonValue* ts = v.find(L"textScale");
+    if (ts && ts->type == JsonValue::Num) {
+        g_fontScale = (float)ts->num;
+        if (g_fontScale < 0.70f) g_fontScale = 0.70f;
+        if (g_fontScale > 1.60f) g_fontScale = 1.60f;
+    }
+    auto applyBool = [&](const wchar_t* key, bool& flag) {
+        const JsonValue* b = v.find(key);
+        if (b && b->type == JsonValue::Bool) flag = b->b;
+    };
+    applyBool(L"showToasts", g_showToasts);
+    applyBool(L"showMemories", g_showMemories);
+    applyBool(L"showPanel", g_showPanel);
+    applyBool(L"showHandsfree", g_showHandsfree);
 }
 
 void DiscardSurface(LayeredWindow& lw) {
@@ -556,12 +625,12 @@ void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
     } else if (anchor == AnchorFixed) {
         // Caller set posX/posY explicitly (banner).
     } else if (!lw.hasPos) {
-        lw.posX = (anchor == AnchorTopRight) ? screenW - MARGIN - lw.width
+        bool right  = (anchor == AnchorTopRight || anchor == AnchorBottomRight);
+        bool bottom = (anchor == AnchorBottomCenter || anchor == AnchorBottomRight);
+        lw.posX = right ? screenW - MARGIN - lw.width
                 : (anchor == AnchorBottomCenter) ? (screenW - lw.width) / 2
                 : MARGIN;
-        lw.posY = (anchor == AnchorBottomCenter)
-                      ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height
-                      : MARGIN;
+        lw.posY = bottom ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height : MARGIN;
         lw.hasPos = true;
     }
     int x = lw.posX, y = lw.posY;
@@ -687,23 +756,27 @@ struct ToastPlan {
     float headerH = 0;
 };
 
-void RelayoutToasts() {
-    if (g_toasts.empty()) {
-        if (g_editMode) RenderPlaceholder(g_toastWin, L"Toasts appear here",
-                                          AnchorTopRight, TOAST_W);
-        else HideWindow(g_toastWin);
+// Render a stack of toasts into `win`, anchored to `anchor`. Shared by the
+// reply/reminder/image area (g_toasts → g_toastWin) and the separate memory
+// area (g_memToasts → g_memWin). `show` gates the whole area on/off.
+void RenderToastList(std::vector<Toast>& toasts, LayeredWindow& win,
+                     Anchor anchor, const wchar_t* placeholder, bool show) {
+    if (!show) { HideWindow(win); return; }
+    if (toasts.empty()) {
+        if (g_editMode) RenderPlaceholder(win, placeholder, anchor, TOAST_W);
+        else HideWindow(win);
         return;
     }
 
     const float innerW = TOAST_W - 2 * PAD;
 
     using Plan = ToastPlan;
-    std::vector<Plan> plans(g_toasts.size());
-    std::vector<float> cardH(g_toasts.size());
+    std::vector<Plan> plans(toasts.size());
+    std::vector<float> cardH(toasts.size());
     int total = 0;
 
-    for (size_t i = 0; i < g_toasts.size(); ++i) {
-        Toast& t = g_toasts[i];
+    for (size_t i = 0; i < toasts.size(); ++i) {
+        Toast& t = toasts[i];
         Plan& p = plans[i];
 
         if (t.isImage && t.imgState == ImgReady && t.image && t.image->ok) {
@@ -740,19 +813,19 @@ void RelayoutToasts() {
             cardH[i] = (contentH + 2 * PAD < 44.0f) ? 44.0f : (contentH + 2 * PAD);
         }
         total += (int)cardH[i];
-        if (i + 1 < g_toasts.size()) total += TOAST_GAP;
+        if (i + 1 < toasts.size()) total += TOAST_GAP;
     }
 
     auto freePlans = [&]() {
         for (auto& p : plans) { SafeRelease(&p.layout); SafeRelease(&p.header); }
     };
 
-    if (!EnsureSurface(g_toastWin, TOAST_W, total)) {
+    if (!EnsureSurface(win, TOAST_W, total)) {
         freePlans();
         return;
     }
 
-    ID2D1DCRenderTarget* rt = g_toastWin.rt;
+    ID2D1DCRenderTarget* rt = win.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
@@ -760,8 +833,8 @@ void RelayoutToasts() {
     rt->CreateSolidColorBrush(Txt(1.0f), &text);
 
     float y = 0;
-    for (size_t i = 0; i < g_toasts.size(); ++i) {
-        Toast& t = g_toasts[i];
+    for (size_t i = 0; i < toasts.size(); ++i) {
+        Toast& t = toasts[i];
         Plan& p = plans[i];
         bool reminder = (t.kind == L"reminder");
         ID2D1SolidColorBrush* bg = nullptr;
@@ -842,10 +915,21 @@ void RelayoutToasts() {
     if (g_editMode) DrawEditDecoration(rt, TOAST_W, total);
 
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
-        DiscardSurface(g_toastWin);
+        DiscardSurface(win);
         return;
     }
-    CommitWindow(g_toastWin, AnchorTopRight);
+    CommitWindow(win, anchor);
+}
+
+// The two toast areas. Replies/reminders/images stack top-right; memory
+// save/remove toasts get their own draggable area (bottom-right by default).
+void RelayoutToasts() {
+    RenderToastList(g_toasts, g_toastWin, AnchorTopRight,
+                    L"Replies & reminders appear here", g_showToasts);
+}
+void RelayoutMemories() {
+    RenderToastList(g_memToasts, g_memWin, AnchorBottomRight,
+                    L"Memory saves appear here", g_showMemories);
 }
 
 // durationMs = 0 uses the default TOAST_MS; a positive value (e.g. sent by the frontend to match
@@ -962,19 +1046,19 @@ void AddMemoryToast(const std::wstring& action, const std::wstring& scope,
     t.memScope = scope;
     t.text = content;
     t.expire = GetTickCount64() + TOAST_MS;
-    g_toasts.push_back(std::move(t));
-    RelayoutToasts();
+    g_memToasts.push_back(std::move(t));
+    RelayoutMemories();
 }
 
-// Drop expired toasts; returns true if the set changed.
-bool ExpireToasts() {
+// Drop expired toasts from a list; returns true if it changed.
+bool ExpireList(std::vector<Toast>& toasts) {
     ULONGLONG now = GetTickCount64();
-    size_t before = g_toasts.size();
-    for (size_t i = 0; i < g_toasts.size();) {
-        if (g_toasts[i].expire <= now) g_toasts.erase(g_toasts.begin() + i);
+    size_t before = toasts.size();
+    for (size_t i = 0; i < toasts.size();) {
+        if (toasts[i].expire <= now) toasts.erase(toasts.begin() + i);
         else ++i;
     }
-    return g_toasts.size() != before;
+    return toasts.size() != before;
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,6 +1086,7 @@ std::vector<std::wstring> SplitValueParts(const std::wstring& value) {
 // Each row is a stacked sub-card: an uppercase dim label above a wrapping value
 // (bulleted when the value is ';'-separated) — matching web/js/app/game-state.js.
 void RenderPanel() {
+    if (!g_showPanel) { HideWindow(g_panelWin); return; }
     if (!g_panel.valid ||
         (g_panel.title.empty() && g_panel.rows.empty())) {
         if (g_editMode) RenderPlaceholder(g_panelWin, L"Game state panel",
@@ -1139,6 +1224,7 @@ bool InRect(const D2D1_RECT_F& r, int x, int y) {
 constexpr int HANDSFREE_W = 44;
 
 void RenderHandsFree() {
+    if (!g_showHandsfree) { HideWindow(g_handsfreeWin); return; }
     if (!g_handsfreeActive && !g_editMode) { HideWindow(g_handsfreeWin); return; }
     const int w = HANDSFREE_W, h = HANDSFREE_W;
     if (!EnsureSurface(g_handsfreeWin, w, h)) return;
@@ -1192,8 +1278,10 @@ void SetHandsFree(bool active) {
 // it stays usable regardless of the overlay opacity it is editing.
 // ---------------------------------------------------------------------------
 
+constexpr int CONFIG_H = 214;
+
 void RenderConfig() {
-    const int h = 108;
+    const int h = CONFIG_H;
     if (!EnsureSurface(g_configWin, CONFIG_W, h)) return;
     ID2D1RenderTarget* rt = g_configWin.rt;
     rt->BeginDraw();
@@ -1212,33 +1300,59 @@ void RenderConfig() {
     rt->DrawRoundedRectangle(card, acc, 1.4f);
 
     // Title.
-    rt->DrawText(L"Overlay appearance", 18, g_fmtLabel,
+    rt->DrawText(L"Overlay appearance", 18, g_fmtUi,
                  D2D1::RectF(PAD, 8, CONFIG_W - PAD, 28), dim);
 
-    // --- Opacity row: label + [-] [xx%] [+] on the right.
-    rt->DrawText(L"Opacity", 7, g_fmtBody,
-                 D2D1::RectF(PAD, 34, 120, 58), white);
-    const float by = 34, bh = 24, bw = 26;
-    g_rcOpacPlus  = D2D1::RectF(CONFIG_W - PAD - bw, by, CONFIG_W - PAD, by + bh);
-    D2D1_RECT_F pct = D2D1::RectF(g_rcOpacPlus.left - 4 - 48, by,
-                                  g_rcOpacPlus.left - 4, by + bh);
-    g_rcOpacMinus = D2D1::RectF(pct.left - 4 - bw, by, pct.left - 4, by + bh);
-    for (auto* r : {&g_rcOpacMinus, &g_rcOpacPlus}) {
+    const float bh = 24, bw = 26;
+    // A right-aligned [-] [value] [+] stepper at row `by`; fills the passed rects.
+    auto stepper = [&](float by, const wchar_t* value,
+                       D2D1_RECT_F& minus, D2D1_RECT_F& plus) {
+        plus = D2D1::RectF(CONFIG_W - PAD - bw, by, CONFIG_W - PAD, by + bh);
+        D2D1_RECT_F val = D2D1::RectF(plus.left - 4 - 56, by, plus.left - 4, by + bh);
+        minus = D2D1::RectF(val.left - 4 - bw, by, val.left - 4, by + bh);
+        for (auto* r : {&minus, &plus}) {
+            D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
+            rt->DrawRoundedRectangle(br, dim, 1.2f);
+        }
+        rt->DrawText(L"\x2212", 1, g_fmtCenter, minus, white);  // minus sign
+        rt->DrawText(L"+", 1, g_fmtCenter, plus, white);
+        rt->DrawText(value, (UINT32)wcslen(value), g_fmtCenter, val, white);
+    };
+
+    // --- Opacity row.
+    rt->DrawText(L"Opacity", 7, g_fmtUi, D2D1::RectF(PAD, 34, 120, 58), white);
+    wchar_t opacText[8];
+    swprintf(opacText, 8, L"%d%%", (int)(g_opacity * 100 + 0.5f));
+    stepper(34, opacText, g_rcOpacMinus, g_rcOpacPlus);
+
+    // --- Text size row.
+    rt->DrawText(L"Text size", 9, g_fmtUi, D2D1::RectF(PAD, 64, 120, 88), white);
+    wchar_t sizeText[8];
+    swprintf(sizeText, 8, L"%d%%", (int)(g_fontScale * 100 + 0.5f));
+    stepper(64, sizeText, g_rcTextMinus, g_rcTextPlus);
+
+    // --- Font row: [<] name [>].
+    rt->DrawText(L"Font", 4, g_fmtUi, D2D1::RectF(PAD, 94, 120, 118), white);
+    const float fy = 94;
+    g_rcFontNext = D2D1::RectF(CONFIG_W - PAD - bw, fy, CONFIG_W - PAD, fy + bh);
+    D2D1_RECT_F nameRect = D2D1::RectF(g_rcFontNext.left - 4 - 120, fy,
+                                       g_rcFontNext.left - 4, fy + bh);
+    g_rcFontPrev = D2D1::RectF(nameRect.left - 4 - bw, fy, nameRect.left - 4, fy + bh);
+    for (auto* r : {&g_rcFontPrev, &g_rcFontNext}) {
         D2D1_ROUNDED_RECT br = D2D1::RoundedRect(*r, 6, 6);
         rt->DrawRoundedRectangle(br, dim, 1.2f);
     }
-    rt->DrawText(L"\x2212", 1, g_fmtCenter, g_rcOpacMinus, white);  // minus sign
-    rt->DrawText(L"+", 1, g_fmtCenter, g_rcOpacPlus, white);
-    wchar_t pctText[8];
-    swprintf(pctText, 8, L"%d%%", (int)(g_opacity * 100 + 0.5f));
-    rt->DrawText(pctText, (UINT32)wcslen(pctText), g_fmtCenter, pct, white);
+    rt->DrawText(L"\x2039", 1, g_fmtCenter, g_rcFontPrev, white);  // ‹
+    rt->DrawText(L"\x203A", 1, g_fmtCenter, g_rcFontNext, white);  // ›
+    rt->DrawText(kFonts[g_fontIdx], (UINT32)wcslen(kFonts[g_fontIdx]),
+                 g_fmtCenter, nameRect, white);
 
     // --- Accent row: swatches, selected one ringed.
-    rt->DrawText(L"Accent", 6, g_fmtBody, D2D1::RectF(PAD, 72, 90, 96), white);
-    const float sw = 24, sgap = 6;
+    const float ay = 126, sw = 22, sgap = 6;
+    rt->DrawText(L"Accent", 6, g_fmtUi, D2D1::RectF(PAD, ay, 90, ay + sw), white);
     float sx = CONFIG_W - PAD - (kAccentCount * (sw + sgap) - sgap);
     for (int i = 0; i < kAccentCount; ++i) {
-        g_rcSwatch[i] = D2D1::RectF(sx, 72, sx + sw, 72 + sw);
+        g_rcSwatch[i] = D2D1::RectF(sx, ay, sx + sw, ay + sw);
         ID2D1SolidColorBrush* sb = nullptr;
         rt->CreateSolidColorBrush(
             D2D1::ColorF(kAccents[i].r, kAccents[i].g, kAccents[i].b, 1.0f), &sb);
@@ -1246,11 +1360,29 @@ void RenderConfig() {
         rt->FillRoundedRectangle(rr, sb);
         if (i == g_accentIdx) {
             D2D1_ROUNDED_RECT ring = D2D1::RoundedRect(
-                D2D1::RectF(sx - 2, 70, sx + sw + 2, 74 + sw), 8, 8);
+                D2D1::RectF(sx - 2, ay - 2, sx + sw + 2, ay + sw + 2), 8, 8);
             rt->DrawRoundedRectangle(ring, white, 1.8f);
         }
         SafeRelease(&sb);
         sx += sw + sgap;
+    }
+
+    // --- Show toggles: one chip per area, filled (accent) when visible.
+    rt->DrawText(L"Show", 4, g_fmtUi, D2D1::RectF(PAD, 158, 90, 178), white);
+    const wchar_t* labels[4] = {L"Chat", L"Memory", L"Panel", L"Mic"};
+    bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+    const float chy = 178, chh = 26, chgap = 6;
+    const float innerW = CONFIG_W - 2 * PAD;
+    const float chw = (innerW - 3 * chgap) / 4.0f;
+    for (int i = 0; i < 4; ++i) {
+        float cx = PAD + i * (chw + chgap);
+        g_rcToggle[i] = D2D1::RectF(cx, chy, cx + chw, chy + chh);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcToggle[i], 7, 7);
+        if (*flags[i]) rt->FillRoundedRectangle(rr, acc);
+        else           rt->DrawRoundedRectangle(rr, dim, 1.2f);
+        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtUi,
+                     D2D1::RectF(cx, chy + 4, cx + chw, chy + chh),
+                     *flags[i] ? white : dim);
     }
 
     SafeRelease(&acc); SafeRelease(&dim); SafeRelease(&white); SafeRelease(&bg);
@@ -1258,23 +1390,47 @@ void RenderConfig() {
     CommitWindow(g_configWin, AnchorTopCenter);
 }
 
+// Re-render everything whose look depends on the toolbar (accent/opacity/toggles).
+void RerenderAll() {
+    RelayoutToasts();
+    RelayoutMemories();
+    RenderPanel();
+    RenderHandsFree();
+    RenderConfig();
+}
+
 // Handle a click inside the config toolbar; returns true if something changed.
 bool ConfigClick(int x, int y) {
     bool changed = false;
+    bool rebuildText = false;
     if (InRect(g_rcOpacMinus, x, y)) {
         g_opacity = (g_opacity - 0.05f < 0.40f) ? 0.40f : g_opacity - 0.05f;
         changed = true;
     } else if (InRect(g_rcOpacPlus, x, y)) {
         g_opacity = (g_opacity + 0.05f > 1.00f) ? 1.00f : g_opacity + 0.05f;
         changed = true;
+    } else if (InRect(g_rcTextMinus, x, y)) {
+        g_fontScale = (g_fontScale - 0.10f < 0.70f) ? 0.70f : g_fontScale - 0.10f;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcTextPlus, x, y)) {
+        g_fontScale = (g_fontScale + 0.10f > 1.60f) ? 1.60f : g_fontScale + 0.10f;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcFontPrev, x, y)) {
+        g_fontIdx = (g_fontIdx + kFontCount - 1) % kFontCount;
+        changed = rebuildText = true;
+    } else if (InRect(g_rcFontNext, x, y)) {
+        g_fontIdx = (g_fontIdx + 1) % kFontCount;
+        changed = rebuildText = true;
     } else {
         for (int i = 0; i < kAccentCount; ++i)
             if (InRect(g_rcSwatch[i], x, y)) { g_accentIdx = i; changed = true; break; }
+        bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+        for (int i = 0; !changed && i < 4; ++i)
+            if (InRect(g_rcToggle[i], x, y)) { *flags[i] = !*flags[i]; changed = true; break; }
     }
     if (changed) {
-        RelayoutToasts();
-        RenderPanel();
-        RenderConfig();
+        if (rebuildText) RebuildTextFormats();
+        RerenderAll();
         SaveLayout();
     }
     return changed;
@@ -1285,10 +1441,12 @@ bool ConfigClick(int x, int y) {
 void ApplyEditMode(bool on) {
     g_editMode = on;
     SetClickThrough(g_toastWin, !on);
+    SetClickThrough(g_memWin, !on);
     SetClickThrough(g_panelWin, !on);
     SetClickThrough(g_configWin, !on);
     SetClickThrough(g_handsfreeWin, !on);
     RelayoutToasts();
+    RelayoutMemories();
     RenderPanel();
     RenderHandsFree();  // shows a positionable placeholder in edit mode
     if (on) RenderConfig();
@@ -1332,7 +1490,7 @@ void RenderBanner() {
     const wchar_t* sub = L"Press Ctrl+Shift+O to move widgets & customize appearance";
     IDWriteTextLayout* subLayout = nullptr;
     if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(
-            sub, (UINT32)wcslen(sub), g_fmtLabel, w - 2 * PAD, 26.0f, &subLayout)) &&
+            sub, (UINT32)wcslen(sub), g_fmtUi, w - 2 * PAD, 26.0f, &subLayout)) &&
         subLayout) {
         subLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         rt->DrawTextLayout(D2D1::Point2F(PAD, 44), subLayout, dim);
@@ -1502,7 +1660,10 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_TIMER:
             if (wParam == TIMER_TICK) {
                 // Don't let toasts expire out from under you while arranging.
-                if (!g_editMode && ExpireToasts()) RelayoutToasts();
+                if (!g_editMode) {
+                    if (ExpireList(g_toasts)) RelayoutToasts();
+                    if (ExpireList(g_memToasts)) RelayoutMemories();
+                }
             } else if (wParam == TIMER_BANNER) {
                 if (!TickBanner()) KillTimer(g_ctrl, TIMER_BANNER);
             } else if (wParam == TIMER_HANDSFREE) {
@@ -1527,6 +1688,7 @@ LRESULT CALLBACK CtrlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 LayeredWindow* FromHwnd(HWND h) {
     if (h == g_toastWin.hwnd) return &g_toastWin;
+    if (h == g_memWin.hwnd) return &g_memWin;
     if (h == g_panelWin.hwnd) return &g_panelWin;
     if (h == g_handsfreeWin.hwnd) return &g_handsfreeWin;
     return nullptr;
@@ -1642,16 +1804,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (!g_ctrl) return 2;
 
     g_toastWin.hwnd     = CreateLayeredHwnd(hInstance);
+    g_memWin.hwnd       = CreateLayeredHwnd(hInstance);
     g_panelWin.hwnd     = CreateLayeredHwnd(hInstance);
     g_configWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_bannerWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_handsfreeWin.hwnd = CreateLayeredHwnd(hInstance);
-    if (!g_toastWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
+    if (!g_toastWin.hwnd || !g_memWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
         !g_bannerWin.hwnd || !g_handsfreeWin.hwnd)
         return 3;
 
     LoadLogo();    // reply-toast avatar (logo.png next to the exe)
     LoadLayout();  // restore saved positions + appearance before first commit
+    RebuildTextFormats();  // apply the saved font + text scale from the layout file
 
     // Ctrl+Shift+O toggles edit mode. Registered on the controller window so its
     // message loop (already running) delivers WM_HOTKEY.
@@ -1686,6 +1850,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
 
     UnregisterHotKey(g_ctrl, HOTKEY_EDIT);
     DiscardSurface(g_toastWin);
+    DiscardSurface(g_memWin);
     DiscardSurface(g_panelWin);
     DiscardSurface(g_configWin);
     DiscardSurface(g_bannerWin);
@@ -1693,6 +1858,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (g_parentProcess) CloseHandle(g_parentProcess);
     CoUninitialize();
     SafeRelease(&g_dashStroke);
+    SafeRelease(&g_fmtUi);
     SafeRelease(&g_fmtCenter);
     SafeRelease(&g_fmtIcon);
     SafeRelease(&g_fmtHead);
