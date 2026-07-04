@@ -1,3 +1,16 @@
+// Maps a rendered `.message` bubble back to its entry in the active chat's messages array,
+// by DOM position - chatLog's children are always exactly the `.message` divs in the same
+// order as chat.messages (the empty-state placeholder is removed before the first is appended,
+// and a still-streaming assistant placeholder is simply past the end of chat.messages until the
+// stream finishes and commits it, which callers must guard against via the null return).
+function getChatMessageForElement(el) {
+  const chat = getActiveChat();
+  if (!chat) return null;
+  const idx = Array.from(chatLog.children).indexOf(el);
+  if (idx === -1 || idx >= chat.messages.length) return null;
+  return { chat, idx, message: chat.messages[idx] };
+}
+
 function appendMessage(role, content, audioId, isNew = false, audioBlob = null, timestamp = null) {
   chatLog.querySelector(".chat-empty-state")?.remove();
   const el = document.createElement("div");
@@ -7,6 +20,8 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   // SVG icon helpers
   const copyIcon  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
   const checkIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 12 4 9"/></svg>`;
+  const editIcon  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>`;
+  const trashIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>`;
 
   // ── Role header ───────────────────────────────────────────
   const meta = document.createElement("div");
@@ -49,6 +64,15 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
       retryBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>`;
       retryBtn.addEventListener("click", () => sendMessage(contentDiv.textContent));
       actionsEl.appendChild(retryBtn);
+
+      // Edit — turn this message back into editable text; saving drops it and everything
+      // after it, then resends the edited text (the "forgot to paste something" flow).
+      const editBtn = document.createElement("button");
+      editBtn.className = "msg-action-btn";
+      editBtn.title = "Edit";
+      editBtn.innerHTML = editIcon;
+      editBtn.addEventListener("click", () => startEditingMessage(el, contentDiv, content));
+      actionsEl.appendChild(editBtn);
     }
 
     if (role === "assistant") {
@@ -66,6 +90,25 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
       actionsEl.appendChild(memBtn);
     }
   }
+
+  // Delete — applies to every message, voice bubbles included. Looked up lazily by DOM
+  // position at click time so it's a no-op on a still-streaming placeholder that hasn't
+  // been committed to chat.messages yet.
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "msg-action-btn";
+  deleteBtn.title = "Delete";
+  deleteBtn.innerHTML = trashIcon;
+  deleteBtn.addEventListener("click", async () => {
+    const info = getChatMessageForElement(el);
+    if (!info) return;
+    if (!(await showConfirm("Delete this message?", { title: "Delete message", danger: true, confirmText: "Delete" }))) return;
+    const { chat, idx, message } = info;
+    if (message.audioId) deleteVoiceBlob(message.audioId);
+    chat.messages.splice(idx, 1);
+    saveChat(chat);
+    renderChatLog();
+  });
+  actionsEl.appendChild(deleteBtn);
 
   meta.appendChild(actionsEl);
   el.appendChild(meta);
@@ -219,6 +262,61 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
   return contentDiv;
+}
+
+// Swaps a user bubble's rendered content for an editable textarea. Saving drops this message
+// and everything after it from the chat (the old reply no longer answers the edited text) and
+// resends the edited text through the normal send path; cancelling just re-renders the log.
+function startEditingMessage(el, contentDiv, rawContent) {
+  if (el.querySelector(".msg-edit-textarea")) return; // already editing
+
+  contentDiv.hidden = true;
+
+  const wrap = document.createElement("div");
+  wrap.className = "msg-edit-wrap";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "msg-edit-textarea";
+  textarea.value = rawContent;
+  wrap.appendChild(textarea);
+
+  const actions = document.createElement("div");
+  actions.className = "msg-edit-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "msg-edit-cancel";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", () => {
+    wrap.remove();
+    contentDiv.hidden = false;
+  });
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "msg-edit-save";
+  saveBtn.textContent = "Save & Resend";
+  saveBtn.addEventListener("click", () => {
+    const newText = textarea.value.trim();
+    if (!newText) return;
+    const info = getChatMessageForElement(el);
+    if (!info) return;
+    const { chat, idx } = info;
+    const removed = chat.messages.splice(idx);
+    for (const message of removed) if (message.audioId) deleteVoiceBlob(message.audioId);
+    saveChat(chat);
+    renderChatLog();
+    stopNarration();
+    sendMessage(newText);
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+  wrap.appendChild(actions);
+
+  contentDiv.after(wrap);
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 }
 
 // Splits a growing text buffer into complete sentences plus a leftover
@@ -426,6 +524,11 @@ async function sendMessage(text) {
       addMessageToChat(chat, "assistant", errText);
     } else if (fullReply) {
       addMessageToChat(chat, "assistant", fullReply);
+    } else {
+      // Stopped before any text arrived: the placeholder bubble is still empty, which the
+      // CSS renders as a pulsing "..." typing indicator - remove it instead of leaving that
+      // indicator (and an empty bubble) stuck on screen forever.
+      assistantEl.closest(".message")?.remove();
     }
   } finally {
     awaitingReply = false;

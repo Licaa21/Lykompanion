@@ -604,6 +604,52 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   color: var(--t1);
 }
 
+/* ── In-place message editing ── */
+.msg-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-end;
+  gap: 6px;
+  width: 100%;
+  max-width: 80%;
+}
+.msg-edit-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border-radius: var(--r3);
+  border: 1px solid var(--accent);
+  background: var(--surface-3);
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.65;
+  resize: vertical;
+}
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.msg-edit-cancel, .msg-edit-save {
+  padding: 5px 12px;
+  border-radius: var(--r1);
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.msg-edit-cancel {
+  background: rgba(255,255,255,0.03);
+  color: var(--t2);
+}
+.msg-edit-cancel:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+.msg-edit-save {
+  background: var(--accent-grad);
+  color: #fff;
+  border-color: transparent;
+}
+.msg-edit-save:hover { box-shadow: 0 2px 10px var(--accent-glow); }
+
 /* User: shrink to content, right-aligned */
 .message.user .msg-meta {
   flex-direction: row-reverse;
