@@ -844,6 +844,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .voice-status.recording { color: #ff8c8c; }
 .voice-status.error     { color: var(--red); }
 
+.voice-hint {
+  font-size: 11px;
+  color: var(--t3);
+  text-align: center;
+  margin-bottom: 5px;
+}
+
 .screenshot-indicator {
   font-size: 11px;
   color: #6fa8ff;

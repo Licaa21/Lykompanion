@@ -410,6 +410,7 @@ async function startLiveMic() {
 
   setVoiceStatus("Listening...");
   setOverlayHandsFree(true);
+  updateVoiceHints();
 }
 
 // Tell the native overlay whether hands-free (live-mic) listening is active so it
@@ -480,8 +481,8 @@ function stopLiveMic() {
   liveRecording = false;
   ringBuffer = null;
   micBtn.classList.remove("recording");
-  setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
   setOverlayHandsFree(false);
+  updateVoiceHints(true);
 }
 
 liveMicToggle.addEventListener("click", () => {

@@ -699,6 +699,7 @@ function applyConfigToForm(cfg) {
     overlayEditPhraseInput.value = overlayEditPhrase;
     updateWakeWordListenerState();
   }
+  updateVoiceHints();
 
   vadThreshold = cfg.vad_threshold ?? 8;
   vadSilenceMs = cfg.vad_silence_ms ?? 1200;

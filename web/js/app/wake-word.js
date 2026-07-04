@@ -215,28 +215,34 @@ if (!wakeWordSupported) {
 wakeWordEnabledInput.addEventListener("change", () => {
   wakeWordEnabled = wakeWordEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-wakeWordPhraseInput.addEventListener("change", () => {
+wakeWordPhraseInput.addEventListener("input", () => {
   wakeWordPhrase = wakeWordPhraseInput.value.trim() || "Hey Buddy";
+  updateVoiceHints();
 });
 
 sleepWordEnabledInput.addEventListener("change", () => {
   sleepWordEnabled = sleepWordEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-sleepWordPhraseInput.addEventListener("change", () => {
+sleepWordPhraseInput.addEventListener("input", () => {
   sleepWordPhrase = sleepWordPhraseInput.value.trim() || "Go to sleep";
+  updateVoiceHints();
 });
 
 overlayEditPhraseEnabledInput.addEventListener("change", () => {
   overlayEditPhraseEnabled = overlayEditPhraseEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-overlayEditPhraseInput.addEventListener("change", () => {
+overlayEditPhraseInput.addEventListener("input", () => {
   overlayEditPhrase = overlayEditPhraseInput.value.trim() || "edit overlay";
+  updateVoiceHints();
 });
 
 updateWakeWordListenerState();

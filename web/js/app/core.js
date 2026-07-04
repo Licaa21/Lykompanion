@@ -38,6 +38,8 @@ const micBtn = document.getElementById("mic-btn");
 const liveMicToggle = document.getElementById("live-mic-toggle");
 const narrationAudio = document.getElementById("narration-audio");
 const voiceStatus = document.getElementById("voice-status");
+const sleepWordHintEl = document.getElementById("sleep-word-hint");
+const overlayEditHintEl = document.getElementById("overlay-edit-hint");
 
 // --- Audio device selection (machine-specific, so client-side in localStorage, not server settings) ---
 const MIC_DEVICE_KEY = "lyko-mic-device";
@@ -158,6 +160,41 @@ let overlayEditPhrase = "edit overlay";
 // Configurable global hotkey (Ctrl+Shift+O by default) that toggles the native overlay's edit
 // mode; the display string shown/edited in Settings.
 let overlayEditHotkey = "Ctrl+Shift+O";
+
+// Keeps the composer's phrase hints in sync with whatever's currently configured. Call this
+// any time a phrase/enabled flag changes (Settings inputs, config load/save) or hands-free
+// toggles - text baked in once and never revisited is exactly the bug that used to make the
+// wake-word hint show a stale phrase until something unrelated happened to refresh it.
+// `force` is true at a genuine hands-free-just-turned-off transition (stopLiveMic, mic-denied),
+// where the wake hint is always the right thing to show; it's false when only a phrase/enabled
+// setting changed, where voiceStatus might currently hold an unrelated in-progress status (e.g.
+// "Converting audio...") that must not be clobbered - only overwrite if it's blank or already
+// showing our own hint.
+function updateVoiceHints(force = false) {
+  // All three phrases rely on the browser's SpeechRecognition API - on an unsupported browser
+  // none of them are ever actually detected, so showing the hints would be misleading.
+  const supported = typeof wakeWordSupported === "undefined" || wakeWordSupported;
+
+  if (supported && typeof liveMicEnabled !== "undefined" && !liveMicEnabled) {
+    const current = voiceStatus.textContent;
+    const isWakeHint = current === "" || /^Say ".*" to resume$/.test(current);
+    if (force || isWakeHint) setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
+  }
+
+  if (sleepWordHintEl) {
+    const showSleepHint = supported && sleepWordEnabled && typeof liveMicEnabled !== "undefined" && liveMicEnabled;
+    sleepWordHintEl.hidden = !showSleepHint;
+    if (showSleepHint) sleepWordHintEl.textContent = `Say "${sleepWordPhrase}" to stop listening`;
+  }
+
+  if (overlayEditHintEl) {
+    const showOverlayHint = supported && overlayEditPhraseEnabled;
+    overlayEditHintEl.hidden = !showOverlayHint;
+    if (showOverlayHint) {
+      overlayEditHintEl.textContent = `Say "${overlayEditPhrase}" to edit the overlay (must be said in-game)`;
+    }
+  }
+}
 
 // Toast manager — max 3 visible, queues the rest as "+N more", deduplicates by id.
 const _toasts = (() => {
