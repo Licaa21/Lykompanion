@@ -204,11 +204,20 @@ async def fetch_art(process: str, force: bool = False) -> dict:
                 result = await _fetch_steam(http_client, term)
             except httpx.HTTPError:
                 result = None
-            if result is None:
+            # Steam matching the game doesn't mean it *has* cover art (e.g. an unreleased title
+            # with a store page but no library image yet) - try IGDB for art in that case too,
+            # rather than only when Steam found nothing at all.
+            if result is None or not result.get("cover_url"):
                 try:
-                    result = await _fetch_igdb(http_client, term)
+                    igdb_result = await _fetch_igdb(http_client, term)
                 except httpx.HTTPError:
-                    result = None
+                    igdb_result = None
+                if igdb_result:
+                    if result is None:
+                        result = igdb_result
+                    else:
+                        result["cover_url"] = result.get("cover_url") or igdb_result.get("cover_url")
+                        result["description"] = result.get("description") or igdb_result.get("description")
     except httpx.HTTPError:
         result = None
 
