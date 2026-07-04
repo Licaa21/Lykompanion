@@ -30,6 +30,7 @@ from app.api import (
     reminders,
     screenshot,
     spotify_oauth,
+    system,
     tts,
     usage,
     voice,
@@ -95,6 +96,7 @@ app.include_router(overlay.router)
 app.include_router(voice.router)
 app.include_router(tts.router)
 app.include_router(screenshot.router)
+app.include_router(system.router)
 app.include_router(config.router)
 app.include_router(models.router)
 app.include_router(instructions.router)

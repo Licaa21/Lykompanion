@@ -93,6 +93,43 @@ function shouldApplyClientSideSpeed() {
   return !supportsSpeed;
 }
 
+// Peak audio level (0-1) below which the foreground game counts as "quiet" for the purposes of
+// starting narration, and how long it must stay quiet before a queued sentence is released - a
+// short debounce so narration doesn't sneak into a brief silent beat mid-dialogue-line. Capped by
+// MAX_WAIT_MS so a game that never goes quiet (e.g. constant music/ambience) can't stall
+// narration forever - it starts anyway once the cap is hit.
+const GAME_QUIET_PEAK_THRESHOLD = 0.02;
+const GAME_QUIET_HOLD_MS = 300;
+const GAME_QUIET_POLL_MS = 150;
+const GAME_QUIET_MAX_WAIT_MS = 6000;
+
+// Holds a queued sentence until the foreground game's live audio peak (not the OCR-derived,
+// ~15s-stale "activity" label) has been quiet for GAME_QUIET_HOLD_MS, so narration starts in an
+// actual gap between game dialogue lines instead of talking over them. A null peak (non-Windows,
+// no foreground game, or no audio session for it) means there's nothing to gate against, so it
+// returns immediately rather than adding a pointless delay to every sentence.
+async function waitForGameQuiet() {
+  const deadline = Date.now() + GAME_QUIET_MAX_WAIT_MS;
+  let quietSince = null;
+  while (Date.now() < deadline) {
+    let peak = null;
+    try {
+      const res = await fetch("/api/system/audio-peak");
+      if (res.ok) peak = (await res.json()).peak;
+    } catch (err) {
+      peak = null;
+    }
+    if (peak === null) return;
+    if (peak < GAME_QUIET_PEAK_THRESHOLD) {
+      if (quietSince === null) quietSince = Date.now();
+      if (Date.now() - quietSince >= GAME_QUIET_HOLD_MS) return;
+    } else {
+      quietSince = null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, GAME_QUIET_POLL_MS));
+  }
+}
+
 async function processTtsQueue() {
   if (ttsPlaying || ttsQueue.length === 0) return;
   ttsPlaying = true;
@@ -107,6 +144,13 @@ async function processTtsQueue() {
       narrationAudio.src = blobUrl;
       narrationAudio.playbackRate = shouldApplyClientSideSpeed() ? narrationSpeed : 1;
       narrationAudio.volume = narrationVolume;
+      // Hold until the foreground game's audio has a real gap (see waitForGameQuiet) BEFORE
+      // pushing the overlay toast or starting playback - otherwise the toast (and any duration
+      // math built on top of it) would fire while we're still waiting, well ahead of the voice.
+      await waitForGameQuiet();
+      // Re-check: stopNarration() may have fired while we were waiting on the game to go quiet
+      // (it can't cancel that wait directly, since playback hasn't started yet to hook into).
+      if (!ttsPlaying) return;
       // Push the overlay toast for this sentence as early as we can — once metadata (duration) is
       // known, and BEFORE the setSinkId await + play() startup — so it lands at or just before the
       // first spoken syllable (accounting for the fetch→pipe→render hop), never seconds early (text

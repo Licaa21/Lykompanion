@@ -43,6 +43,26 @@ def set_app_volume(process_query: str, volume_percent: int) -> list[str]:
         return []
 
 
+def get_peak_level(process_query: str) -> float | None:
+    """Instantaneous peak audio level (0.0-1.0) for process_query's audio session(s) right now -
+    the loudest matching session if there are several. This reads Windows' live per-session peak
+    meter (no polling delay of its own), unlike the OCR-derived game-state "activity" label which
+    lags ~15s behind reality - the intended use is gating narration playback against real game
+    audio (e.g. waiting for a gap between dialogue lines) rather than a stale text classification.
+    None if there's no matching session, on non-Windows, or the read failed - callers should treat
+    that as "nothing to gate against," not as silence."""
+    if sys.platform != "win32":
+        return None
+    try:
+        from pycaw.api.audioclient import IAudioMeterInformation
+
+        peaks = [session._ctl.QueryInterface(IAudioMeterInformation).GetPeakValue() for session in _find_sessions(process_query)]
+        return max(peaks) if peaks else None
+    except Exception:
+        logger.exception("Failed to read peak audio level for %r", process_query)
+        return None
+
+
 def list_app_audio_sessions() -> list[dict]:
     """Currently active per-application audio sessions and their mixer volume - an app only shows
     up here once it has actually played something, since Windows doesn't create a session before
