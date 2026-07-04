@@ -4,8 +4,8 @@ screen observations. Powers the Gaming Journal modal (sidebar, next to Personal 
 
 from fastapi import APIRouter, HTTPException
 
-from app.core import game_state, game_state_processes, memory, observations
-from app.models.schemas import GamingJournalGame, GamingJournalSession
+from app.core import game_art, game_state, game_state_processes, memory, observations
+from app.models.schemas import GameArtRecord, GameArtTitleUpdate, GamingJournalGame, GamingJournalSession
 
 router = APIRouter(tags=["gaming-journal"])
 
@@ -47,8 +47,11 @@ async def get_gaming_journal() -> list[GamingJournalGame]:
                 memories=session_memories,
                 observations=observations.get_observations(proc, s["session_id"]),
             ))
+        art = game_art.get_art(proc)
         games.append(GamingJournalGame(
             process=proc,
+            title=(art or {}).get("title") or proc,
+            cover_url=(art or {}).get("cover_url"),
             tracked=key in whitelist_lower,
             memories=game_memories,
             sessions=sessions,
@@ -61,3 +64,16 @@ async def delete_observation(observation_id: str) -> dict:
     if not observations.remove_observations([observation_id]):
         raise HTTPException(status_code=404, detail="Observation not found.")
     return {"ok": True}
+
+
+@router.post("/api/game-art/{process}/fetch", response_model=GameArtRecord)
+async def fetch_game_art(process: str) -> GameArtRecord:
+    return GameArtRecord(**await game_art.fetch_art(process))
+
+
+@router.put("/api/game-art/{process}/title", response_model=GameArtRecord)
+async def set_game_art_title(process: str, payload: GameArtTitleUpdate) -> GameArtRecord:
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+    return GameArtRecord(**game_art.set_title_override(process, title))

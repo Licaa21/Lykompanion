@@ -336,7 +336,6 @@ async function loadGameStateProcessLists() {
   renderGameStateBlacklist(blacklist);
   renderGameStateWhitelist(whitelist);
   await populateTrackerProcessOptions(whitelist);
-  await populateTrainingDataProcessOptions(whitelist);
 }
 
 function renderGameStateBlacklist(blacklist) {
@@ -596,71 +595,8 @@ gameStateTrackerResetBtn.addEventListener("click", async () => {
   renderTrackersList();
 });
 
-// --- Training Data (Settings > Game Awareness > Training Data) ---
-// A single living reference document per process, self-maintained by the game-state extraction
-// pass (its training_data_update output) - editable directly, but not user-created here, since
-// it's meant to reflect what the model actually learned about the game's UI.
-
-const gameStateTrainingDataProcessEl = document.getElementById("game-state-training-data-process");
-const gameStateTrainingDataContentEl = document.getElementById("game-state-training-data-content");
-
-let currentTrainingDataContent = "";
-
-async function populateTrainingDataProcessOptions(whitelist) {
-  const previousValue = gameStateTrainingDataProcessEl.value;
-  gameStateTrainingDataProcessEl.innerHTML = "";
-
-  if (whitelist.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No approved processes yet";
-    gameStateTrainingDataProcessEl.appendChild(option);
-    gameStateTrainingDataProcessEl.disabled = true;
-    gameStateTrainingDataContentEl.value = "";
-    gameStateTrainingDataContentEl.disabled = true;
-    return;
-  }
-
-  gameStateTrainingDataProcessEl.disabled = false;
-  gameStateTrainingDataContentEl.disabled = false;
-  for (const process of whitelist) {
-    const option = document.createElement("option");
-    option.value = process;
-    option.textContent = process;
-    gameStateTrainingDataProcessEl.appendChild(option);
-  }
-  if (whitelist.includes(previousValue)) {
-    gameStateTrainingDataProcessEl.value = previousValue;
-  }
-  await loadTrainingDataForSelectedProcess();
-}
-
-async function loadTrainingDataForSelectedProcess() {
-  const process = gameStateTrainingDataProcessEl.value;
-  if (!process) {
-    currentTrainingDataContent = "";
-    gameStateTrainingDataContentEl.value = "";
-    return;
-  }
-  const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(process)}`).then((r) => r.json());
-  currentTrainingDataContent = data.content;
-  gameStateTrainingDataContentEl.value = currentTrainingDataContent;
-}
-
-gameStateTrainingDataProcessEl.addEventListener("change", loadTrainingDataForSelectedProcess);
-
-gameStateTrainingDataContentEl.addEventListener("blur", async () => {
-  const process = gameStateTrainingDataProcessEl.value;
-  if (!process) return;
-  const content = gameStateTrainingDataContentEl.value;
-  if (content === currentTrainingDataContent) return;
-  const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(process)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  }).then((r) => r.json());
-  currentTrainingDataContent = data.content;
-});
+// Training Data is now shown per-game in the Gaming Journal detail view (memory-journal.js)
+// instead of a process-picker subtab here.
 
 gameStateBlacklistForm.addEventListener("submit", async (event) => {
   event.preventDefault();
