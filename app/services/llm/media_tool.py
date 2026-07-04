@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search"
 
+# Hard wall-clock cap on the YouTube/YouTube Music search thread, applied at the await site via
+# asyncio.wait_for. Both yt-dlp and ytmusicapi make blocking network calls with no reliable
+# per-call timeout of their own (yt-dlp's socket_timeout bounds the underlying request in the
+# common case, but this is the backstop) - without this, a stalled request to YouTube hangs the
+# whole chat turn indefinitely instead of the tool just reporting failure.
+_SEARCH_TIMEOUT_SECONDS = 12
+
 MEDIA_TOOLS = [
     {
         "type": "function",
@@ -100,6 +107,7 @@ def _search_youtube_sync(query: str) -> dict | None:
         # dialog when yt-dlp tries to invoke it. Equivalent to the --no-js-runtimes CLI flag - the
         # Python API takes the already-parsed form, an empty dict, not the CLI's list syntax.
         "js_runtimes": {},
+        "socket_timeout": _SEARCH_TIMEOUT_SECONDS,
     }
     with YoutubeDL(options) as ydl:
         info = ydl.extract_info(query, download=False)
@@ -134,8 +142,13 @@ async def execute_play_on_youtube(arguments: dict) -> str:
     prefer_audio = bool(arguments.get("prefer_audio"))
     if prefer_audio:
         try:
-            song = await asyncio.to_thread(_search_youtube_music_sync, query)
+            song = await asyncio.wait_for(
+                asyncio.to_thread(_search_youtube_music_sync, query), _SEARCH_TIMEOUT_SECONDS
+            )
         except ImportError:
+            song = None
+        except TimeoutError:
+            logger.warning("YouTube Music search timed out for %r", query)
             song = None
         except Exception:
             logger.exception("YouTube Music search failed for %r", query)
@@ -149,9 +162,14 @@ async def execute_play_on_youtube(arguments: dict) -> str:
             return f"Now playing {label} on YouTube Music."
 
     try:
-        result = await asyncio.to_thread(_search_youtube_sync, query)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_search_youtube_sync, query), _SEARCH_TIMEOUT_SECONDS
+        )
     except ImportError:
         return "YouTube playback isn't available - yt-dlp isn't installed."
+    except TimeoutError:
+        logger.warning("YouTube search timed out for %r", query)
+        return f"YouTube search timed out for '{query}' - try again."
     except Exception as exc:
         logger.exception("YouTube search failed for %r", query)
         return f"Couldn't find that on YouTube: {exc}"
