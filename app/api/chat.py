@@ -364,11 +364,20 @@ def _schedule_memory_extraction(user_message: str, assistant_message: str) -> No
 
 
 def _tool_calls_to_dict(tool_calls: dict[int, dict], content: str | None = None) -> dict:
+    """Gemini (via Google AI Studio's OpenAI-compat endpoint) attaches an
+    extra_content.google.thought_signature to each tool call and rejects the next request if a
+    replayed tool call is missing it - so any such extra_content captured off the streamed delta
+    must be echoed back here verbatim, not just id/name/arguments."""
     return {
         "role": "assistant",
         "content": content,
         "tool_calls": [
-            {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+            {
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                **({"extra_content": tc["extra_content"]} if tc.get("extra_content") else {}),
+            }
             for tc in tool_calls.values()
         ],
     }
@@ -547,6 +556,12 @@ async def _stream_chat_with_tools(
                         entry["name"] += tc.function.name
                     if tc.function and tc.function.arguments:
                         entry["arguments"] += tc.function.arguments
+                    # Gemini's thought_signature (see _tool_calls_to_dict) rides along as an
+                    # unofficial field on the delta - the openai SDK's models are extra="allow" so
+                    # it survives attribute access, but nothing captures it unless we grab it here.
+                    extra_content = getattr(tc, "extra_content", None)
+                    if extra_content:
+                        entry["extra_content"] = extra_content
 
         if not tool_calls:
             return
