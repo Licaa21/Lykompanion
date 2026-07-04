@@ -34,7 +34,12 @@ from app.services.llm.system_info_tool import SYSTEM_INFO_TOOLS, execute_fetch_s
 from app.services.llm.tools import MEMORY_TOOLS, execute_tool_call
 from app.services.llm.transcription import transcribe_audio
 from app.services.llm.volume_tool import VOLUME_TOOLS, execute_set_narration_volume
-from app.services.llm.web_search_tool import WEB_SEARCH_TOOLS, execute_web_search
+from app.services.llm.web_search_tool import (
+    SHOW_IMAGE_TOOLS,
+    WEB_SEARCH_TOOLS,
+    execute_show_image,
+    execute_web_search,
+)
 from app.services.screenshot.capture import capture_primary_monitor_b64
 from app.services.system.processes import get_foreground_process_name
 
@@ -46,6 +51,7 @@ ALL_TOOLS = (
     + VOLUME_TOOLS
     + LISTENING_TOOLS
     + WEB_SEARCH_TOOLS
+    + SHOW_IMAGE_TOOLS
     + IGDB_TOOLS
     + STEAM_TOOLS
     + SYSTEM_INFO_TOOLS
@@ -363,6 +369,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return execute_set_application_volume(arguments), None, None
     if name == "web_search":
         return await execute_web_search(arguments), None, None
+    if name == "show_image":
+        return await execute_show_image(arguments), None, None
     if name == "lookup_game_info":
         return await execute_lookup_game_info(arguments), None, None
     if name == "lookup_steam_game":

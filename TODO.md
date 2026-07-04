@@ -5,5 +5,4 @@
 - [ ] verify how to make the llm respond/use tools and other stuff faster without dropping its performance/smartness and without changing the model
 - [ ] verify the code logic for the toasts in the overlay that show only when the narrator speaks and dissappear when the narrator finishes talking, because when a message is too long, it gets chunked on multiple toasts and sometimes some toasts appear too late.
 - [ ] check if OCR frame skips also skips extraction passes. E.g: User sits in the pause menu for 10 minutes, we don't want to keep extracting during that time.
-- [ ] Overlay Editor -> Add presets for positions, shown in edit mode + a DONE button 
-- [ ] Fetching web pictures doesn't always work. Sometimes it doesn't send anything or says "I'll look for a picture" and then does nothing, or tries to take a screenshot instead. Sometimes it does try to send a picture but it says: [image unavailable: image title].
+- [ ] Overlay Editor -> Add presets for positions, shown in edit mode + a DONE button

@@ -307,6 +307,7 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `stop_listening` | Disable hands-free mic indefinitely — on a sign-off, an explicit request, or unwanted overheard audio. Re-enable via the wake word or the mic toggle. | No |
 | `fetch_system_info` | Check OS/CPU/RAM. | No |
 | `web_search` | Search the web via OpenRouter's plugin or a self-hosted SearXNG instance (controlled by `WEB_SEARCH_PROVIDER`). | No (OpenRouter path billed via OpenRouter) |
+| `show_image` | Find a real web picture and embed it inline (SearXNG image search; validates each candidate actually loads before handing the model a ready-to-paste `![alt](url)` line). SearXNG provider only. | No |
 | `lookup_game_info` | IGDB game data (genre, platforms, release date, rating). | Twitch app credentials |
 | `lookup_steam_game` | Steam store page details. | No |
 | `fetch_steam_library` | User's owned games / playtime. | Steam API key + SteamID64 |

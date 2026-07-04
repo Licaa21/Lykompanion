@@ -27,32 +27,104 @@ WEB_SEARCH_TOOLS = [
 ]
 
 
-async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> str | None:
+SHOW_IMAGE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "show_image",
+            "description": (
+                "Find a real picture of something on the web and display it inline in the chat. "
+                "Use this WHENEVER the user asks to see, show, or pull up a picture/image/photo of "
+                "a thing (a boss, item, location, character, map, real-world object, etc.), or "
+                "whenever a picture would clearly help your answer. This is the ONLY way to show a "
+                "web picture - do NOT use take_screenshot for this (that captures the user's own "
+                "screen, not the web). The tool returns a ready-to-use markdown image line: paste "
+                "it into your reply exactly as given."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "What to find a picture of, e.g. 'Malenia Elden Ring boss'.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+
+async def _image_candidate_loads(http_client: httpx.AsyncClient, absolute_url: str) -> bool:
+    """Confirm a candidate image URL actually returns image bytes server-side, so we never hand
+    the model a dead/hotlink-protected/auth-gated URL that renders as '[image unavailable]'."""
+    try:
+        async with http_client.stream(
+            "GET", absolute_url, headers=SEARXNG_HEADERS, follow_redirects=True, timeout=8
+        ) as response:
+            if response.status_code != 200:
+                return False
+            return response.headers.get("content-type", "").startswith("image/")
+    except Exception:
+        return False
+
+
+async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> tuple[str, str] | None:
+    """Return (proxied_image_url, title) for the first candidate that actually loads, or None.
+    Walks several results and validates each rather than trusting the first blindly."""
     try:
         response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "images"})
         response.raise_for_status()
         results = response.json().get("results", [])
     except Exception:
         return None
-    for result in results:
+    for result in results[:8]:
         image_url = result.get("img_src")
         if not image_url:
             continue
         # Resolve relative SearXNG proxy paths to absolute before proxying through FastAPI.
         absolute = urljoin(settings.searxng_base_url, image_url)
-        return f"/api/proxy/image?url={quote(absolute, safe='')}"
+        if not await _image_candidate_loads(http_client, absolute):
+            continue
+        title = (result.get("title") or query).strip()
+        return f"/api/proxy/image?url={quote(absolute, safe='')}", title
     return None
 
 
 async def execute_image_search(query: str) -> str | None:
-    """Image-only SearXNG lookup — returns a single image URL or None. No LLM call, no
+    """Image-only SearXNG lookup — returns a single proxied image URL or None. No LLM call, no
     result text; used for cheap auto-injection where the model already knows the answer."""
     if settings.web_search_provider != "searxng":
         return None
     async with httpx.AsyncClient(
         base_url=settings.searxng_base_url, timeout=10, headers=SEARXNG_HEADERS
     ) as http_client:
-        return await _search_searxng_images(http_client, query)
+        found = await _search_searxng_images(http_client, query)
+        return found[0] if found else None
+
+
+async def execute_show_image(arguments: dict) -> str:
+    """Agent tool: find a validated web image and return a ready-to-embed markdown line."""
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "No image query given."
+    if settings.web_search_provider != "searxng":
+        return (
+            "Image search is only available with the SearXNG search provider, which isn't "
+            "configured. Tell the user you can't pull up pictures right now."
+        )
+    async with httpx.AsyncClient(
+        base_url=settings.searxng_base_url, timeout=12, headers=SEARXNG_HEADERS
+    ) as http_client:
+        found = await _search_searxng_images(http_client, query)
+    if not found:
+        return (
+            f"No usable picture found for '{query}'. Tell the user you couldn't find a good "
+            "image - do not invent or embed a URL."
+        )
+    url, title = found
+    return f"Embed this image in your reply exactly as written, on its own line:\n![{title}]({url})"
 
 
 SEARXNG_HEADERS = {
@@ -81,9 +153,9 @@ async def _execute_web_search_searxng(query: str) -> str:
                 f"{r.get('title', '')}\n{r.get('url', '')}\n{r.get('content', '')}" for r in results
             )
 
-        image_url = await _search_searxng_images(http_client, query)
-        if image_url:
-            text += f"\n\nImage: {image_url}"
+        found = await _search_searxng_images(http_client, query)
+        if found:
+            text += f"\n\nImage: {found[0]}"
 
         return text
 
