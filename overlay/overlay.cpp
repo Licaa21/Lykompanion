@@ -101,6 +101,9 @@ constexpr int   PANEL_W   = 320;
 constexpr float PAD       = 14.0f;
 constexpr int   MARGIN    = 24;     // gap from the screen edge
 constexpr int   TOAST_GAP = 10;     // vertical gap between stacked toasts
+constexpr size_t MAX_TOASTS = 5;    // cap on g_toasts; oldest is dropped on overflow so the
+                                     // widget always shows what's currently being narrated
+                                     // instead of falling behind on long, multi-sentence replies
 constexpr int   ROW_H     = 24;     // game-state row height
 constexpr DWORD TOAST_MS  = 6000;   // default toast lifetime
 constexpr DWORD IMAGE_MS  = 22000;  // image toasts linger longer than text
@@ -1210,6 +1213,10 @@ void AddToast(const std::wstring& textStr, const std::wstring& kind, ULONGLONG d
     t.kind = kind.empty() ? L"reply" : kind;
     t.expire = GetTickCount64() + (durationMs > 0 ? durationMs : TOAST_MS);
     g_toasts.push_back(std::move(t));
+    // Drop the oldest rather than letting a burst of quick sentences pile up past what's
+    // currently being spoken - a full stack means new ones would render off-widget until an
+    // old one naturally expires, i.e. exactly the "toast appears late" symptom this guards.
+    if (g_toasts.size() > MAX_TOASTS) g_toasts.erase(g_toasts.begin(), g_toasts.end() - MAX_TOASTS);
     RelayoutToasts();
 }
 
@@ -1302,6 +1309,7 @@ void AddImageToast(const std::wstring& url, const std::wstring& alt) {
     t.imageId = ++g_nextImageId;
     t.expire = GetTickCount64() + IMAGE_MS;
     g_toasts.push_back(std::move(t));
+    if (g_toasts.size() > MAX_TOASTS) g_toasts.erase(g_toasts.begin(), g_toasts.end() - MAX_TOASTS);
     std::thread(LoadImageWorker, url, g_nextImageId).detach();
     RelayoutToasts();
 }
