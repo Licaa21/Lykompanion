@@ -37,7 +37,7 @@ async def push_toast(toast: OverlayToast) -> dict:
 
 @router.post("/edit-mode")
 async def enter_edit_mode() -> dict:
-    """Voice-triggered entry into overlay edit mode — the "edit overlay" phrase is detected
+    """Voice-triggered entry into overlay edit mode — the "Edit overlay" phrase is detected
     client-side by wake-word.js, independent of the LLM/chat pipeline. Best-effort; no-ops if the
     overlay isn't running."""
     overlay_process.set_edit_mode(True)

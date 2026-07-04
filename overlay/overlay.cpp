@@ -2222,7 +2222,7 @@ void HandleCommand(const std::wstring& line) {
         // Same ambiguous-toggle logic as the physical hotkey when re-enabling
         // (the pipe caller may not know whether edit mode is already open).
         // "full" defaults to false (in-game/restricted) - only the app's design-mode button sends
-        // full:true; the voice "edit overlay" phrase is in-game and never sends it.
+        // full:true; the voice "Edit overlay" phrase is in-game and never sends it.
         bool wantOn = en ? en->asBool() : false;
         bool wantFull = full ? full->asBool() : false;
         if (wantOn && !g_editMode) ApplyEditMode(true, wantFull);

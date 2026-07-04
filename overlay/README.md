@@ -100,7 +100,7 @@ a materially bigger dependency, out of scope for now. Practically: pause or
 stand still in-game before editing with a gamepad, since your inputs will also
 reach the game.
 
-Saying a configured phrase (Settings → "edit overlay" phrase, off by default)
+Saying a configured phrase (Settings → "Edit overlay" phrase, off by default)
 also opens edit mode directly — detected locally in the browser, never sent to
 the AI; no-ops if the overlay isn't running.
 

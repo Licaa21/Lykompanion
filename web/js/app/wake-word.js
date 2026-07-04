@@ -128,7 +128,7 @@ function startWakeWordRecognition() {
       }
     }
 
-    // The "edit overlay" phrase is checked unconditionally, independent of hands-free state
+    // The "Edit overlay" phrase is checked unconditionally, independent of hands-free state
     // (unlike wake/sleep word above, which are mutually exclusive by mic state) — bypasses the
     // LLM entirely, see handleOverlayEditPhraseDetected().
     if (overlayEditPhraseEnabled) {
@@ -241,7 +241,7 @@ overlayEditPhraseEnabledInput.addEventListener("change", () => {
 });
 
 overlayEditPhraseInput.addEventListener("input", () => {
-  overlayEditPhrase = overlayEditPhraseInput.value.trim() || "edit overlay";
+  overlayEditPhrase = overlayEditPhraseInput.value.trim() || "Edit overlay";
   updateVoiceHints();
 });
 
