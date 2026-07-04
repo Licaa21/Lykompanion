@@ -115,6 +115,22 @@ body.desktop-app .titlebar {
 .titlebar-btn:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
 .titlebar-btn-close:hover { background: #e2384d; color: #fff; }
 
+/* Snap preview — mimics the Windows Aero-Snap gray box while dragging the titlebar to an edge.
+   Frameless windows never get the OS preview, so we draw our own inside the window. It's clamped
+   to the window's own bounds (we can't paint past the window), so it's a hint, not the full OS box. */
+.snap-preview {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.snap-preview.visible { opacity: 1; }
+
 /* Resize grips — desktop app only; thin invisible strips on the window edges/corners. */
 .resize-grip { display: none; }
 body.desktop-app .resize-grip { display: block; position: fixed; z-index: 9999; }

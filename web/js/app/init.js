@@ -61,6 +61,30 @@ function setupDesktopTitlebar() {
       commit(b.x, b.y, b.w, b.h);
     };
 
+    // Windows-Snap-style gray preview box, drawn inside our own (frameless) window while the
+    // titlebar is dragged near an edge. Positioned in client px = snap-target screen rect minus the
+    // window's live screen origin, so it stays pinned to the screen even as the window follows the
+    // cursor. Clamped to the window (we can't paint outside it) — a hint, not the true OS overlay.
+    let previewEl = null;
+    const preview = () => {
+      if (!previewEl) {
+        previewEl = document.createElement('div');
+        previewEl.className = 'snap-preview';
+        document.body.appendChild(previewEl);
+      }
+      return previewEl;
+    };
+    const showPreview = (zone) => {
+      const t = snapTarget(zone);
+      const el = preview();
+      el.style.left = (t.x - window.screenX) + 'px';
+      el.style.top = (t.y - window.screenY) + 'px';
+      el.style.width = t.w + 'px';
+      el.style.height = t.h + 'px';
+      el.classList.add('visible');
+    };
+    const hidePreview = () => { if (previewEl) previewEl.classList.remove('visible'); };
+
     const drag = document.querySelector('.titlebar-drag');
     if (drag) {
       // Double-click titlebar: maximize when floating; when already maximized, shrink to a
@@ -110,16 +134,26 @@ function setupDesktopTitlebar() {
           }
           pending = { x: Math.round(start.x + (ev.screenX - sx)), y: Math.round(start.y + (ev.screenY - sy)), w: start.w, h: start.h };
           const a = workArea();
+          // Keep the titlebar reachable, like the OS does: never let it slip above the work area,
+          // behind the taskbar, or so far off the sides that too little is left to grab. Without this
+          // (frameless + JS-only drag) the titlebar can vanish under the taskbar and become unmovable.
+          const TITLEBAR = 34, EDGE_KEEP = 80;
+          pending.x = Math.min(Math.max(pending.x, a.x - (start.w - EDGE_KEEP)), a.x + a.w - EDGE_KEEP);
+          pending.y = Math.min(Math.max(pending.y, a.y), a.y + a.h - TITLEBAR);
+          const prevZone = zone;
           zone = ev.screenY <= a.y + EDGE ? 'max'
             : ev.screenX <= a.x + EDGE ? 'left'
             : ev.screenX >= a.x + a.w - EDGE ? 'right'
             : null;
+          if (zone) showPreview(zone);        // recompute each frame so it stays pinned to the screen
+          else if (prevZone) hidePreview();
           if (!raf) raf = requestAnimationFrame(flush);
         };
         const onUp = () => {
           try { drag.releasePointerCapture(e.pointerId); } catch (_) {}
           drag.removeEventListener('pointermove', onMove);
           drag.removeEventListener('pointerup', onUp);
+          hidePreview();
           if (!moved) return;
           if (zone) applySnap(zone, start);
           else saveBounds(pending.x, pending.y, pending.w, pending.h);
