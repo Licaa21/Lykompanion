@@ -414,7 +414,13 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return execute_fetch_system_info(arguments), None, None
     if name == "play_on_youtube":
         message, player = await execute_play_on_youtube(arguments)
-        side_effect = {"type": "youtube_play", **player} if player else None
+        side_effect = None
+        if player:
+            # A resolved Mix queue ("videos") reuses the same youtube_playlist side effect/SSE
+            # event and frontend handling as play_youtube_playlist; a bare video (no Mix found)
+            # keeps the original single-video youtube_play shape.
+            side_effect_type = "youtube_playlist" if "videos" in player else "youtube_play"
+            side_effect = {"type": side_effect_type, **player}
         return message, None, side_effect
     if name == "control_youtube_player":
         message, action, volume = await execute_control_youtube_player(arguments)

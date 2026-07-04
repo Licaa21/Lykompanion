@@ -1430,6 +1430,14 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .youtube-player-controls button:hover { background: rgba(255,255,255,0.1); }
 
+.youtube-player-volume {
+  flex: 1;
+  min-width: 0;
+  max-width: 90px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* ════════════════════════════════════════════════════
    TOASTS
 ════════════════════════════════════════════════════ */

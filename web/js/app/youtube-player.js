@@ -8,6 +8,7 @@ const ytFrameMount = document.getElementById("youtube-player-frame-mount");
 const ytPrevBtn = document.getElementById("youtube-player-prev");
 const ytPlayPauseBtn = document.getElementById("youtube-player-playpause");
 const ytNextBtn = document.getElementById("youtube-player-next");
+const ytVolumeSlider = document.getElementById("youtube-player-volume");
 
 let ytPlayer = null;
 let ytApiReady = false;
@@ -42,7 +43,16 @@ function ytPlayQueueEntry(entry) {
   }
   ytPlayer = new YT.Player(ytFrameMount, {
     videoId: entry.videoId,
-    playerVars: { autoplay: 1, rel: 0 },
+    // controls: 0 hides YouTube's own chrome - its native volume slider pops out below the
+    // icon and, in our small floating panel, the pop-out sits outside the iframe's own bounds,
+    // so moving the mouse toward it crosses into our page and the iframe fires a mouseout that
+    // closes the slider before it can be dragged. A custom slider (below) avoids this entirely.
+    playerVars: { autoplay: 1, rel: 0, controls: 0 },
+    events: {
+      onReady: (event) => {
+        if (ytVolumeSlider) ytVolumeSlider.value = event.target.getVolume();
+      },
+    },
   });
 }
 
@@ -126,7 +136,9 @@ window.controlYoutubePlayer = function (action, volume) {
       break;
     case "set_volume":
       if (ytPlayer && ytPlayer.setVolume && Number.isFinite(volume)) {
-        ytPlayer.setVolume(Math.min(100, Math.max(0, volume)));
+        const clamped = Math.min(100, Math.max(0, volume));
+        ytPlayer.setVolume(clamped);
+        if (ytVolumeSlider) ytVolumeSlider.value = clamped;
       }
       break;
   }
@@ -139,6 +151,9 @@ ytPlayPauseBtn.addEventListener("click", () => {
   if (!ytPlayer || !ytPlayer.getPlayerState) return;
   const PLAYING = 1;
   window.controlYoutubePlayer(ytPlayer.getPlayerState() === PLAYING ? "pause" : "play");
+});
+ytVolumeSlider.addEventListener("input", () => {
+  if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(Number(ytVolumeSlider.value));
 });
 
 // Restore a dragged position, or fall back to the default bottom-right CSS anchor - mirrors
