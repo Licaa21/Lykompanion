@@ -316,11 +316,20 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     if divergence_warning:
         variable_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
 
-    system_content = [
-        {"type": "text", "text": stable_content, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": variable_content},
-    ]
-    return [{"role": "system", "content": system_content}]
+    # Only emit the two-block form with an explicit cache_control breakpoint for models that
+    # actually honor it (Anthropic via OpenRouter). For everyone else — notably Gemini, which is
+    # the default — the breakpoint yields no benefit and can push OpenRouter into an explicit-cache
+    # creation round-trip per turn that ADDS latency (worst in the multi-round tool loop, e.g. web
+    # search). Those models get the plain concatenated string, exactly as before the caching pass.
+    model = (settings.openrouter_model or "").lower()
+    if "claude" in model or "anthropic" in model:
+        system_content = [
+            {"type": "text", "text": stable_content, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": variable_content},
+        ]
+        return [{"role": "system", "content": system_content}]
+
+    return [{"role": "system", "content": stable_content + "\n\n" + variable_content}]
 
 
 def _limit_history(messages: list[dict]) -> list[dict]:
