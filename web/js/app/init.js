@@ -72,11 +72,14 @@ function setupDesktopTitlebar() {
         snapZone = null; restoreBounds = null;
         commit(Math.round(a.x + (a.w - w) / 2), Math.round(a.y + (a.h - h) / 2), w, h);
       };
-      drag.addEventListener('dblclick', () => {
+      const toggleMax = () => {
         if (!api()?.window_set_bounds) return;
         if (snapZone === 'max') centerHalf();
         else applySnap('max', curBounds());
-      });
+      };
+      drag.addEventListener('dblclick', toggleMax);
+      const max = document.getElementById('win-max');
+      if (max) max.addEventListener('click', toggleMax);
 
       // Titlebar drag — we own it (no pywebview-drag-region) so we can snap on release. Dragging
       // into a screen edge snaps: top = maximize, left/right = half. Moving = one bridge call/frame.
