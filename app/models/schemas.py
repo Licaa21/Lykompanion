@@ -22,6 +22,8 @@ class ChatResponse(BaseModel):
     narration_volume: float = 1.0
     stop_listening: bool = False
     transcript: str | None = None
+    youtube_play: dict | None = None
+    youtube_control: str | None = None
 
 
 class ChatTitleRequest(BaseModel):

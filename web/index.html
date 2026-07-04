@@ -1003,6 +1003,20 @@
     <div id="game-state-stats" class="game-state-stats"></div>
   </div>
 
+  <!-- ── YOUTUBE PLAYER — floating panel, not a modal ──────────────── -->
+  <div id="youtube-player-panel" class="floating-panel youtube-player-panel" hidden>
+    <div class="floating-panel-header" id="youtube-player-panel-header">
+      <span class="floating-panel-title" id="youtube-player-title">YouTube</span>
+      <button type="button" class="floating-panel-close" id="youtube-player-panel-close">&times;</button>
+    </div>
+    <div class="youtube-player-frame"><div id="youtube-player-frame-mount"></div></div>
+    <div class="youtube-player-controls">
+      <button type="button" id="youtube-player-prev" title="Previous">&#9198;</button>
+      <button type="button" id="youtube-player-playpause" title="Play/Pause">&#9199;</button>
+      <button type="button" id="youtube-player-next" title="Next">&#9197;</button>
+    </div>
+  </div>
+
   <audio id="narration-audio" hidden></audio>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web/dist/bundle.min.js"></script>
@@ -1020,6 +1034,7 @@
   <script src="js/app/memory-journal.js"></script>
   <script src="js/app/reminders.js"></script>
   <script src="js/app/game-state.js"></script>
+  <script src="js/app/youtube-player.js"></script>
   <script src="js/app/usage-backup-debug.js"></script>
   <script src="js/app/quick-setup.js"></script>
   <script src="js/app/init.js"></script>

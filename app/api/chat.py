@@ -26,7 +26,12 @@ from app.services.llm.client import (
 from app.services.llm.app_volume_tool import APP_VOLUME_TOOLS, execute_set_application_volume
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
-from app.services.llm.media_tool import MEDIA_TOOLS, execute_play_on_spotify, execute_play_on_youtube
+from app.services.llm.media_tool import (
+    MEDIA_TOOLS,
+    execute_control_youtube_player,
+    execute_play_on_spotify,
+    execute_play_on_youtube,
+)
 from app.services.llm.memory_extraction import extract_and_apply_memory
 from app.services.llm.reminder_tool import REMINDER_TOOLS, execute_reminder_tool
 from app.services.llm.screenshot_tool import SCREENSHOT_TOOLS, execute_take_screenshot, format_monitors_for_prompt
@@ -402,7 +407,13 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
     if name == "fetch_system_info":
         return execute_fetch_system_info(arguments), None, None
     if name == "play_on_youtube":
-        return await execute_play_on_youtube(arguments), None, None
+        message, player = await execute_play_on_youtube(arguments)
+        side_effect = {"type": "youtube_play", **player} if player else None
+        return message, None, side_effect
+    if name == "control_youtube_player":
+        message, action = await execute_control_youtube_player(arguments)
+        side_effect = {"type": "youtube_control", "action": action} if action else None
+        return message, None, side_effect
     if name == "play_on_spotify":
         return await execute_play_on_spotify(arguments), None, None
     if name in REMINDER_TOOL_NAMES:
@@ -441,23 +452,37 @@ async def _run_tool_calls(messages: list[dict], tool_calls) -> list[dict]:
     return await _execute_parsed_tool_calls(messages, parsed)
 
 
-async def _run_chat_with_tools(messages: list[dict], model: str | None = None, source: str = "chat") -> tuple[str, bool]:
-    """Returns (reply, stop_listening). stop_listening is True if a stop_listening tool call
-    happened this turn, so non-streaming callers can react to it too."""
+async def _run_chat_with_tools(
+    messages: list[dict], model: str | None = None, source: str = "chat"
+) -> tuple[str, bool, dict | None, dict | None]:
+    """Returns (reply, stop_listening, youtube_play, youtube_control). stop_listening is True if a
+    stop_listening tool call happened this turn; youtube_play/youtube_control carry the latest
+    in-app player event of each kind, so non-streaming callers can react to them too."""
     stop_listening = False
+    youtube_play = None
+    youtube_control = None
     for _ in range(MAX_TOOL_ITERATIONS):
         message = await chat_completion_message(
             messages, model=model, tools=ALL_TOOLS, source=source, provider=settings.llm_provider
         )
         if not message.tool_calls:
-            return message.content or "", stop_listening
+            return message.content or "", stop_listening, youtube_play, youtube_control
 
         messages.append(message.model_dump(exclude_none=True))
         for side_effect in await _run_tool_calls(messages, message.tool_calls):
             if side_effect["type"] == "stop_listening":
                 stop_listening = True
+            elif side_effect["type"] == "youtube_play":
+                youtube_play = side_effect
+            elif side_effect["type"] == "youtube_control":
+                youtube_control = side_effect
 
-    return "Sorry, I got stuck juggling tools just now - try asking again?", stop_listening
+    return (
+        "Sorry, I got stuck juggling tools just now - try asking again?",
+        stop_listening,
+        youtube_play,
+        youtube_control,
+    )
 
 
 async def _stream_chat_with_tools(
@@ -521,7 +546,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     last_user_message = request.messages[-1].content if request.messages else ""
 
     try:
-        reply, stop_listening = await _run_chat_with_tools(messages, source="chat")
+        reply, stop_listening, youtube_play, youtube_control = await _run_chat_with_tools(messages, source="chat")
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}") from exc
 
@@ -535,6 +560,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         reply=reply,
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
+        youtube_play=youtube_play,
+        youtube_control=youtube_control.get("action") if youtube_control else None,
     )
 
 
@@ -573,6 +600,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     yield f"data: {json.dumps({'stop_listening': True})}\n\n"
                 elif event["type"] == "tool_sfx":
                     yield f"data: {json.dumps({'tool_sfx': event['name']})}\n\n"
+                elif event["type"] == "youtube_play":
+                    yield f"data: {json.dumps({'youtube_play': {'video_id': event['video_id'], 'title': event['title']}})}\n\n"
+                elif event["type"] == "youtube_control":
+                    yield f"data: {json.dumps({'youtube_control': event['action']})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'LLM request failed: {exc}'})}\n\n"
             return
@@ -624,7 +655,9 @@ async def chat_voice(
 
     model = None if settings.transcription_enabled else settings.openrouter_model
     try:
-        reply, stop_listening = await _run_chat_with_tools(messages, model=model, source="chat_voice")
+        reply, stop_listening, youtube_play, youtube_control = await _run_chat_with_tools(
+            messages, model=model, source="chat_voice"
+        )
     except APIError as exc:
         raise HTTPException(status_code=502, detail=f"Voice LLM request failed: {exc}") from exc
 
@@ -640,6 +673,8 @@ async def chat_voice(
         narration_volume=settings.tts_volume,
         stop_listening=stop_listening,
         transcript=transcript,
+        youtube_play=youtube_play,
+        youtube_control=youtube_control.get("action") if youtube_control else None,
     )
 
 
@@ -702,6 +737,10 @@ async def chat_voice_stream(
                     yield f"data: {json.dumps({'stop_listening': True})}\n\n"
                 elif event["type"] == "tool_sfx":
                     yield f"data: {json.dumps({'tool_sfx': event['name']})}\n\n"
+                elif event["type"] == "youtube_play":
+                    yield f"data: {json.dumps({'youtube_play': {'video_id': event['video_id'], 'title': event['title']}})}\n\n"
+                elif event["type"] == "youtube_control":
+                    yield f"data: {json.dumps({'youtube_control': event['action']})}\n\n"
         except APIError as exc:
             yield f"data: {json.dumps({'error': f'Voice LLM request failed: {exc}'})}\n\n"
             return

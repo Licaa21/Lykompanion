@@ -25,11 +25,12 @@ MEDIA_TOOLS = [
             "name": "play_on_youtube",
             "description": (
                 "Search YouTube for a song OR a video (tutorial, walkthrough, guide, gameplay "
-                "footage, trailer, etc.) and start playing it directly in the browser - no need "
-                "to also call web_search first, this opens the actual video. Use this whenever the "
-                "user asks to play/watch/pull up/find something on YouTube, asks for a video guide "
-                "or tutorial, or just says 'play <song>' with no platform named and Spotify isn't "
-                "clearly implied."
+                "footage, trailer, etc.) and start playing it in the app's own built-in YouTube "
+                "player - no need to also call web_search first, this opens the actual video. Use "
+                "this whenever the user asks to play/watch/pull up/find something on YouTube, asks "
+                "for a video guide or tutorial, or just says 'play <song>' with no platform named "
+                "and Spotify isn't clearly implied. Once something is playing, use "
+                "control_youtube_player to pause/resume/restart/skip it."
             ),
             "parameters": {
                 "type": "object",
@@ -78,7 +79,45 @@ MEDIA_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "control_youtube_player",
+            "description": (
+                "Control the in-app YouTube player that play_on_youtube already opened - pause, "
+                "resume, restart the current video from the beginning, skip to the next/previous "
+                "video played this session, or stop and close the player. Only call this after a "
+                "video has actually been played this session; if nothing has played yet, use "
+                "play_on_youtube instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["play", "pause", "restart", "next", "previous", "stop"],
+                        "description": (
+                            "'play' resumes a paused video, 'pause' pauses, 'restart' seeks the "
+                            "current video back to 0:00, 'next'/'previous' move through this "
+                            "session's play history, 'stop' closes the player entirely."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
 ]
+
+_PLAYER_ACTIONS = {"play", "pause", "restart", "next", "previous", "stop"}
+_PLAYER_ACTION_MESSAGES = {
+    "play": "Resuming the video.",
+    "pause": "Paused.",
+    "restart": "Restarting the video from the beginning.",
+    "next": "Skipping to the next video.",
+    "previous": "Going back to the previous video.",
+    "stop": "Stopped and closed the player.",
+}
 
 
 def _search_youtube_sync(query: str) -> dict | None:
@@ -118,10 +157,12 @@ def _search_youtube_music_sync(query: str) -> dict | None:
     return results[0] if results else None
 
 
-async def execute_play_on_youtube(arguments: dict) -> str:
+async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
+    """Returns (tool_message, player_payload). player_payload (video_id + title, or None on
+    failure) drives the in-app YouTube IFrame player - callers no longer open a browser tab."""
     query = (arguments.get("query") or "").strip()
     if not query:
-        return "No song/video given to play."
+        return "No song/video given to play.", None
 
     # Only try YouTube Music's "song" catalog when the model has told us this is actually a music
     # request. ytmusicapi's filter="songs" doesn't return empty for a non-music query (a tutorial,
@@ -146,34 +187,38 @@ async def execute_play_on_youtube(arguments: dict) -> str:
         if song and song.get("videoId"):
             title = song.get("title") or query
             artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
-            # youtube.com, not music.youtube.com: the videoId resolves to the same official-audio
-            # upload either way, but music.youtube.com is a separate origin without Chromium's
-            # autoplay allowlist entry that youtube.com has, so it opens paused until a manual
-            # click - youtube.com/watch autoplays reliably for the identical video.
-            _open(f"https://www.youtube.com/watch?v={song['videoId']}")
             label = f"'{title}'" + (f" by {artists}" if artists else "")
-            return f"Now playing {label} on YouTube Music."
+            return f"Now playing {label} on YouTube Music.", {"video_id": song["videoId"], "title": title}
 
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(_search_youtube_sync, query), _SEARCH_TIMEOUT_SECONDS
         )
     except ImportError:
-        return "YouTube playback isn't available - yt-dlp isn't installed."
+        return "YouTube playback isn't available - yt-dlp isn't installed.", None
     except TimeoutError:
         logger.warning("YouTube search timed out for %r", query)
-        return f"YouTube search timed out for '{query}' - try again."
+        return f"YouTube search timed out for '{query}' - try again.", None
     except Exception as exc:
         logger.exception("YouTube search failed for %r", query)
-        return f"Couldn't find that on YouTube: {exc}"
+        return f"Couldn't find that on YouTube: {exc}", None
 
     video_id = result.get("id") if result else None
     if not video_id:
-        return f"No YouTube results for '{query}'."
+        return f"No YouTube results for '{query}'.", None
 
     title = result.get("title") or query
-    _open(f"https://www.youtube.com/watch?v={video_id}")
-    return f"Now playing '{title}' on YouTube."
+    return f"Now playing '{title}' on YouTube.", {"video_id": video_id, "title": title}
+
+
+async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | None]:
+    """Returns (tool_message, action). action (or None if invalid/unrecognized) is relayed to the
+    frontend's in-app YouTube player as a side effect - this tool has no way to know the player's
+    actual state (nothing is playing, queue is empty, etc.), it just forwards the request."""
+    action = (arguments.get("action") or "").strip().lower()
+    if action not in _PLAYER_ACTIONS:
+        return f"Unknown player action '{action}'.", None
+    return _PLAYER_ACTION_MESSAGES[action], action
 
 
 async def execute_play_on_spotify(arguments: dict) -> str:

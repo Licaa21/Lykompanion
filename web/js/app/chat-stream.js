@@ -357,6 +357,14 @@ async function sendMessage(text) {
           playToolSfx(payload.tool_sfx);
           continue;
         }
+        if (payload.youtube_play) {
+          window.loadYoutubeVideo(payload.youtube_play.video_id, payload.youtube_play.title);
+          continue;
+        }
+        if (payload.youtube_control) {
+          window.controlYoutubePlayer(payload.youtube_control);
+          continue;
+        }
         if (payload.done) continue;
 
         fullReply += payload.delta;

@@ -312,7 +312,8 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `lookup_game_info` | IGDB game data (genre, platforms, release date, rating). | Twitch app credentials |
 | `lookup_steam_game` | Steam store page details. | No |
 | `fetch_steam_library` | User's owned games / playtime. | Steam API key + SteamID64 |
-| `play_on_youtube` | Search YouTube Music (via `ytmusicapi`, no API key) for the official-audio track and open it — falls back to a plain YouTube search (via `yt-dlp`) if no music-catalog match is found. | No |
+| `play_on_youtube` | Search YouTube Music (via `ytmusicapi`, no API key) for the official-audio track, or a plain YouTube search (via `yt-dlp`) for anything else, and play it in the app's own floating YouTube player (bottom-right, draggable) via the YouTube IFrame Player API — no browser tab is opened. | No |
+| `control_youtube_player` | Play/pause/restart/skip/stop whatever's loaded in the in-app YouTube player. | No |
 | `play_on_spotify` | Search Spotify's catalog and start the track playing on whatever device the connected account is already active on (falls back to a `spotify:track:` deep-link into the local app if no device is active). | Spotify OAuth connection (Settings → API Keys → Spotify) + Spotify Premium for remote playback |
 
 ## Development
