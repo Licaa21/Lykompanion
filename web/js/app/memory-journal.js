@@ -134,6 +134,11 @@ const journalDetailContent = document.getElementById("journal-detail-content");
 const journalDetailBack = document.getElementById("journal-detail-back");
 
 let allJournalGames = [];
+// Which game/profile the detail view currently has open - reset only when a *different* game
+// is opened, so re-renders triggered by refreshJournalDetail() keep the user's selection.
+let journalSelectedProcess = null;
+let journalSelectedProfileId = null;
+let journalShowingCreateProfileForm = false;
 
 gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
@@ -231,7 +236,10 @@ function buildProfileAddForm(process) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (response.ok) await refreshJournalDetail(process);
+    if (response.ok) {
+      journalShowingCreateProfileForm = false;
+      await refreshJournalDetail(process);
+    }
   });
   return form;
 }
@@ -320,6 +328,16 @@ function openGameDetail(game) {
   journalDetailView.hidden = false;
   journalDetailContent.innerHTML = "";
 
+  if (journalSelectedProcess !== game.process) {
+    journalSelectedProcess = game.process;
+    journalSelectedProfileId = (game.sessions.find((s) => s.active) || {}).session_id || null;
+    journalShowingCreateProfileForm = false;
+  }
+  // The selected profile may have just been deleted - fall back to no selection.
+  if (journalSelectedProfileId && !game.sessions.some((s) => s.session_id === journalSelectedProfileId)) {
+    journalSelectedProfileId = null;
+  }
+
   const header = document.createElement("div");
   header.className = "journal-game-header";
 
@@ -390,27 +408,88 @@ function openGameDetail(game) {
   ));
   journalDetailContent.appendChild(header);
 
-  // Game-scope memories: hold across every playthrough of this game.
-  journalDetailContent.appendChild(buildSectionLabel("Game memories (all playthroughs)"));
-  const gameMemList = document.createElement("div");
-  gameMemList.className = "memory-list";
-  if (game.memories.length === 0) {
+  // Cover art (left) + short description (right), fetched from Steam/IGDB.
+  if (game.cover_url || game.description) {
+    const infoRow = document.createElement("div");
+    infoRow.className = "journal-detail-info-row";
+    if (game.cover_url) {
+      const img = document.createElement("img");
+      img.className = "journal-detail-cover";
+      img.src = game.cover_url;
+      img.alt = game.title;
+      infoRow.appendChild(img);
+    }
+    if (game.description) {
+      const desc = document.createElement("p");
+      desc.className = "journal-description";
+      desc.textContent = game.description;
+      infoRow.appendChild(desc);
+    }
+    journalDetailContent.appendChild(infoRow);
+  }
+
+  // My Profiles: clickable cards (playthroughs) - selecting one shows its memories below.
+  journalDetailContent.appendChild(buildSectionLabel("My Profiles"));
+  const profilesRow = document.createElement("div");
+  profilesRow.className = "journal-profiles-row";
+
+  const createCard = document.createElement("button");
+  createCard.type = "button";
+  createCard.className = "journal-profile-card journal-profile-card--create";
+  createCard.textContent = "+ New Profile";
+  createCard.addEventListener("click", () => {
+    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
+    openGameDetail(game);
+  });
+  profilesRow.appendChild(createCard);
+
+  for (const session of game.sessions) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "journal-profile-card" + (session.session_id === journalSelectedProfileId ? " journal-profile-card--selected" : "");
+    const label = document.createElement("span");
+    label.textContent = session.name + (session.active ? " ★" : "");
+    if (session.active) label.title = "The profile new playthrough facts currently go to";
+    card.appendChild(label);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "journal-profile-card-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Delete this profile and its playthrough memories";
+    removeBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
+      const response = await fetch(
+        `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
+        { method: "DELETE" },
+      );
+      if (response.ok) await refreshJournalDetail(game.process);
+    });
+    card.appendChild(removeBtn);
+
+    card.addEventListener("click", () => {
+      journalSelectedProfileId = session.session_id;
+      openGameDetail(game);
+    });
+    profilesRow.appendChild(card);
+  }
+  journalDetailContent.appendChild(profilesRow);
+
+  if (journalShowingCreateProfileForm) {
+    journalDetailContent.appendChild(buildProfileAddForm(game.process));
+  }
+
+  if (game.sessions.length === 0) {
     const hint = document.createElement("div");
     hint.className = "memory-empty-hint";
-    hint.textContent = "Nothing saved for this game yet.";
-    gameMemList.appendChild(hint);
+    hint.textContent = "No profiles yet - create one above.";
+    journalDetailContent.appendChild(hint);
   }
-  for (const entry of game.memories) {
-    gameMemList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
-  }
-  journalDetailContent.appendChild(gameMemList);
-  journalDetailContent.appendChild(buildJournalAddForm(
-    "Add a game memory (true across playthroughs)…",
-    (content) => ({ content, scope: "game", process: game.process })
-  ));
 
-  // Profiles (named sessions), each with its playthrough-scope memories + observations.
-  for (const session of game.sessions) {
+  // Selected profile's playthrough-scope memories + unconfirmed observations.
+  const selectedSession = game.sessions.find((s) => s.session_id === journalSelectedProfileId);
+  if (selectedSession) {
     const profile = document.createElement("div");
     profile.className = "journal-profile";
 
@@ -418,9 +497,9 @@ function openGameDetail(game) {
     pHeader.className = "journal-game-header";
     const pTitle = document.createElement("span");
     pTitle.className = "journal-profile-title";
-    pTitle.textContent = `Profile: ${session.name}`;
+    pTitle.textContent = `Profile: ${selectedSession.name}`;
     pHeader.appendChild(pTitle);
-    if (session.active) {
+    if (selectedSession.active) {
       const badge = document.createElement("span");
       badge.className = "journal-badge journal-badge--active";
       badge.textContent = "active";
@@ -432,50 +511,37 @@ function openGameDetail(game) {
         "Switch to this profile — new playthrough facts will go here",
         async () => {
           const response = await fetch(
-            `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}/active`,
+            `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}/active`,
             { method: "PUT" },
           );
           if (response.ok) await refreshJournalDetail(game.process);
         },
       ));
     }
-    pHeader.appendChild(buildJournalActionBtn(
-      "Delete",
-      "Delete this profile and its playthrough memories",
-      async () => {
-        if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
-        const response = await fetch(
-          `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
-          { method: "DELETE" },
-        );
-        if (response.ok) await refreshJournalDetail(game.process);
-      },
-      true,
-    ));
     profile.appendChild(pHeader);
 
     const sessMemList = document.createElement("div");
     sessMemList.className = "memory-list";
-    if (session.memories.length === 0) {
+    if (selectedSession.memories.length === 0) {
       const hint = document.createElement("div");
       hint.className = "memory-empty-hint";
       hint.textContent = "Nothing saved for this playthrough yet.";
       sessMemList.appendChild(hint);
     }
-    for (const entry of session.memories) {
+    for (const entry of selectedSession.memories) {
       sessMemList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
     }
     profile.appendChild(sessMemList);
     profile.appendChild(buildJournalAddForm(
       "Add a playthrough memory…",
-      (content) => ({ content, scope: "session", process: game.process, session_id: session.session_id })
+      (content) => ({ content, scope: "session", process: game.process, session_id: selectedSession.session_id })
     ));
 
-    if (session.observations.length > 0) {
+    if (selectedSession.observations.length > 0) {
       profile.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
       const obsList = document.createElement("div");
       obsList.className = "memory-list";
-      for (const obs of session.observations) {
+      for (const obs of selectedSession.observations) {
         const item = document.createElement("div");
         item.className = "memory-item journal-observation";
         const text = document.createElement("div");
@@ -499,9 +565,24 @@ function openGameDetail(game) {
     journalDetailContent.appendChild(profile);
   }
 
-  // Add a new profile (playthrough) for this game.
-  journalDetailContent.appendChild(buildSectionLabel("New profile"));
-  journalDetailContent.appendChild(buildProfileAddForm(game.process));
+  // Game-scope memories: hold across every playthrough of this game.
+  journalDetailContent.appendChild(buildSectionLabel("Game memories (all playthroughs)"));
+  const gameMemList = document.createElement("div");
+  gameMemList.className = "memory-list";
+  if (game.memories.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "memory-empty-hint";
+    hint.textContent = "Nothing saved for this game yet.";
+    gameMemList.appendChild(hint);
+  }
+  for (const entry of game.memories) {
+    gameMemList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
+  }
+  journalDetailContent.appendChild(gameMemList);
+  journalDetailContent.appendChild(buildJournalAddForm(
+    "Add a game memory (true across playthroughs)…",
+    (content) => ({ content, scope: "game", process: game.process })
+  ));
 
   // Training data: the living reference document the Game-State Model self-maintains for this
   // process (see app/core/game_state_training_data.py), editable directly.

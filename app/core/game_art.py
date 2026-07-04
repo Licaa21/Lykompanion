@@ -18,6 +18,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 GAME_ART_PATH = DATA_DIR / "game_art.json"
 
 STORE_SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
+APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 
@@ -74,15 +75,26 @@ async def _fetch_steam(http_client: httpx.AsyncClient, term: str) -> dict | None
 
     appid = items[0]["id"]
     title = items[0].get("name") or term
+
+    description = None
+    try:
+        details_response = await http_client.get(APP_DETAILS_URL, params={"appids": appid, "l": "en"})
+        details_response.raise_for_status()
+        app_data = details_response.json().get(str(appid), {})
+        if app_data.get("success"):
+            description = app_data["data"].get("short_description") or None
+    except httpx.HTTPError:
+        pass
+
     for filename in ("library_600x900.jpg", "header.jpg"):
         url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/{filename}"
         try:
             head = await http_client.head(url)
             if head.status_code == 200:
-                return {"title": title, "cover_url": url, "source": "steam"}
+                return {"title": title, "cover_url": url, "description": description, "source": "steam"}
         except httpx.HTTPError:
             continue
-    return {"title": title, "cover_url": None, "source": "steam"}
+    return {"title": title, "cover_url": None, "description": description, "source": "steam"}
 
 
 _cached_igdb_token: str | None = None
@@ -119,7 +131,7 @@ async def _fetch_igdb(http_client: httpx.AsyncClient, term: str) -> dict | None:
     if not token:
         return None
 
-    query = f'search "{term}"; fields name,cover.image_id; limit 1;'
+    query = f'search "{term}"; fields name,summary,cover.image_id; limit 1;'
     response = await http_client.post(
         IGDB_GAMES_URL,
         headers={"Client-ID": settings.igdb_client_id, "Authorization": f"Bearer {token}"},
@@ -134,7 +146,7 @@ async def _fetch_igdb(http_client: httpx.AsyncClient, term: str) -> dict | None:
     title = game.get("name") or term
     image_id = (game.get("cover") or {}).get("image_id")
     cover_url = f"https://images.igdb.com/igdb/image/upload/t_cover_big/{image_id}.jpg" if image_id else None
-    return {"title": title, "cover_url": cover_url, "source": "igdb"}
+    return {"title": title, "cover_url": cover_url, "description": game.get("summary"), "source": "igdb"}
 
 
 async def _resolve_official_title(term: str) -> str | None:
@@ -212,7 +224,7 @@ async def fetch_art(process: str, force: bool = False) -> dict:
                 result = None
 
     if result is None:
-        result = {"title": official_title or term, "cover_url": None, "source": None}
+        result = {"title": official_title or term, "cover_url": None, "description": None, "source": None}
 
     # A user-corrected title survives a re-fetch (e.g. one triggered to retry missing art).
     if existing and existing.get("title_overridden"):

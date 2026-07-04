@@ -52,6 +52,7 @@ async def get_gaming_journal() -> list[GamingJournalGame]:
             process=proc,
             title=(art or {}).get("title") or proc,
             cover_url=(art or {}).get("cover_url"),
+            description=(art or {}).get("description"),
             tracked=key in whitelist_lower,
             memories=game_memories,
             sessions=sessions,

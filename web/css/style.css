@@ -2380,7 +2380,83 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   right: 6px;
   z-index: 1;
 }
-#journal-detail-view {
+
+.journal-detail-info-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.journal-detail-cover {
+  width: 110px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--r2);
+  border: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+.journal-description {
+  color: var(--t2);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* My Profiles — compact clickable cards (a game's playthroughs), not the full inline detail
+   the old flat Journal list used. Selecting one reveals its memories/observations below. */
+.journal-profiles-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.journal-profile-card {
+  position: relative;
+  padding: 10px 14px;
+  border-radius: var(--r2);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--t2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.journal-profile-card:hover {
+  border-color: rgba(91,95,199,0.4);
+  color: var(--t1);
+}
+.journal-profile-card--selected {
+  border-color: rgba(91,95,199,0.6);
+  background: rgba(91,95,199,0.1);
+  color: var(--t1);
+}
+.journal-profile-card--create {
+  border-style: dashed;
+  color: var(--t3);
+}
+.journal-profile-card-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  background: rgba(224,92,92,0.85);
+  color: #fff;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.journal-profile-card:hover .journal-profile-card-remove {
+  opacity: 1;
+}
+
+#journal-detail-view:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 10px;

@@ -243,6 +243,7 @@ class GamingJournalGame(BaseModel):
     process: str
     title: str
     cover_url: str | None = None
+    description: str | None = None
     tracked: bool = False
     memories: list[MemoryEntry] = []
     sessions: list[GamingJournalSession] = []
@@ -251,6 +252,7 @@ class GamingJournalGame(BaseModel):
 class GameArtRecord(BaseModel):
     title: str
     cover_url: str | None = None
+    description: str | None = None
     source: str | None = None
     title_overridden: bool = False
     updated_at: str | None = None
