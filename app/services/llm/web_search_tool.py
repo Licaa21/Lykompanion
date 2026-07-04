@@ -146,18 +146,20 @@ async def _execute_web_search_searxng(query: str) -> str:
             return f"Web search failed: {exc}"
 
         results = response.json().get("results", [])[:5]
-        if not results:
-            text = f"No web search results found for '{query}'."
-        else:
-            text = "\n\n".join(
+        if results:
+            return "\n\n".join(
                 f"{r.get('title', '')}\n{r.get('url', '')}\n{r.get('content', '')}" for r in results
             )
 
-        found = await _search_searxng_images(http_client, query)
-        if found:
-            text += f"\n\nImage: {found[0]}"
-
-        return text
+        # No general-category hits. Over-restrictive queries (exact-phrase quotes, long AND/OR
+        # chains) are the usual cause and make the model reword and re-search in a loop — tell it
+        # so it broadens instead. Deliberately no image lookup here: web_search is a text tool
+        # called in the hot agent loop, and validating image candidates (streaming up to 8 URLs)
+        # added seconds per call for no text value. The model has show_image for pictures.
+        return (
+            f"No results for '{query}'. If the query used quoted phrases or many required terms, "
+            "retry ONCE with a shorter, unquoted version; otherwise tell the user you couldn't find it."
+        )
 
 
 async def execute_web_search(arguments: dict) -> str:
