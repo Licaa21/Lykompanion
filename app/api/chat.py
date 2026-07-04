@@ -51,7 +51,7 @@ from app.services.llm.web_search_tool import (
     execute_show_image,
     execute_web_search,
 )
-from app.services.screenshot.capture import capture_primary_monitor_b64
+from app.services.screenshot.capture import resize_uploaded_image_b64
 from app.services.system.processes import get_foreground_process_name
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -229,16 +229,19 @@ async def _peel_transcript(inner: AsyncIterator[dict]) -> AsyncIterator[dict]:
         yield {"type": "delta", "text": buffer}
 
 
-def _screenshot_message() -> dict:
-    """A user-role message carrying a fresh screenshot. Appended adjacent to the newest message
-    (not before the whole history) so the model reads it as current context, not as something
-    that was on screen dozens of messages ago."""
-    screenshot_b64 = capture_primary_monitor_b64()
+def _uploaded_image_message(image_data_url: str) -> dict:
+    """A user-role message carrying an image the user attached via the Send Image modal (browsed,
+    dragged, or pasted). Appended adjacent to the newest message (not before the whole history)
+    so the model reads it as current context, not as something shown dozens of messages ago."""
+    try:
+        image_b64 = resize_uploaded_image_b64(image_data_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid image attached.") from exc
     return {
         "role": "user",
         "content": [
-            {"type": "text", "text": load_prompt("screenshot_context")},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}},
+            {"type": "text", "text": load_prompt("image_upload_context")},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
         ],
     }
 
@@ -602,9 +605,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
     history = _limit_history([m.model_dump() for m in request.messages])
     messages = _build_base_messages(history)
     messages.extend(history)
-    if request.include_screenshot:
-        # Right before the newest user message: screenshot as context, then the question.
-        messages.insert(max(1, len(messages) - 1), _screenshot_message())
+    if request.image:
+        # Right before the newest user message: image as context, then the question.
+        messages.insert(max(1, len(messages) - 1), _uploaded_image_message(request.image))
     last_user_message = request.messages[-1].content if request.messages else ""
 
     try:
@@ -635,8 +638,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     history = _limit_history([m.model_dump() for m in request.messages])
     messages = _build_base_messages(history)
     messages.extend(history)
-    if request.include_screenshot:
-        messages.insert(max(1, len(messages) - 1), _screenshot_message())
+    if request.image:
+        messages.insert(max(1, len(messages) - 1), _uploaded_image_message(request.image))
     last_user_message = request.messages[-1].content if request.messages else ""
 
     async def event_generator():
@@ -694,7 +697,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 async def chat_voice(
     audio: UploadFile,
     history: str = Form("[]"),
-    include_screenshot: bool = Form(False),
+    image: str | None = Form(None),
 ) -> ChatResponse:
     """Sends voice audio to the LLM. In transcription mode, a dedicated audio-input model
     transcribes it first and the main model only ever sees text; otherwise the raw audio goes
@@ -702,9 +705,9 @@ async def chat_voice(
     history_messages = _parse_history_form(history)
     messages = _build_base_messages(history_messages)
     messages.extend(history_messages)
-    if include_screenshot:
-        # Right before the voice message it accompanies: screenshot as context, then the question.
-        messages.append(_screenshot_message())
+    if image:
+        # Right before the voice message it accompanies: image as context, then the question.
+        messages.append(_uploaded_image_message(image))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None
@@ -750,7 +753,7 @@ async def chat_voice(
 async def chat_voice_stream(
     audio: UploadFile,
     history: str = Form("[]"),
-    include_screenshot: bool = Form(False),
+    image: str | None = Form(None),
     client_overlay_toasts: bool = Form(False),
 ) -> StreamingResponse:
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
@@ -758,8 +761,8 @@ async def chat_voice_stream(
     history_messages = _parse_history_form(history)
     messages = _build_base_messages(history_messages)
     messages.extend(history_messages)
-    if include_screenshot:
-        messages.append(_screenshot_message())
+    if image:
+        messages.append(_uploaded_image_message(image))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None

@@ -10,7 +10,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    include_screenshot: bool = False
+    # Data URL (or raw base64) of an image the user attached via the Send Image modal.
+    image: str | None = None
     # When true (narration is on), the frontend pushes reply toasts to the overlay itself, timed to
     # each narrated sentence — so the backend skips its own fixed-timer reply-toast push to avoid
     # duplicates. See app/api/chat.py / web/js/app/narration.js.
@@ -58,7 +59,7 @@ class CompanionConfig(BaseModel):
     overlay_enabled: bool = False
     overlay_edit_hotkey: str = "Ctrl+Shift+O"
     overlay_edit_phrase_enabled: bool = False
-    overlay_edit_phrase: str = "edit overlay"
+    overlay_edit_phrase: str = "Edit overlay"
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
@@ -240,9 +241,23 @@ class GamingJournalSession(BaseModel):
 
 class GamingJournalGame(BaseModel):
     process: str
+    title: str
+    cover_url: str | None = None
     tracked: bool = False
     memories: list[MemoryEntry] = []
     sessions: list[GamingJournalSession] = []
+
+
+class GameArtRecord(BaseModel):
+    title: str
+    cover_url: str | None = None
+    source: str | None = None
+    title_overridden: bool = False
+    updated_at: str | None = None
+
+
+class GameArtTitleUpdate(BaseModel):
+    title: str
 
 
 class ReminderEntry(BaseModel):

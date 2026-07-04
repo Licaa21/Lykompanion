@@ -31,8 +31,13 @@ function apiUrl(path) {
 const chatLog = document.getElementById("chat-log");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
-const screenshotToggle = document.getElementById("screenshot-toggle");
-const screenshotIndicator = document.getElementById("screenshot-indicator");
+const sendImageBtn = document.getElementById("send-image-btn");
+const attachedImageIndicator = document.getElementById("attached-image-indicator");
+const attachedImageThumb = document.getElementById("attached-image-thumb");
+const attachedImageRemoveBtn = document.getElementById("attached-image-remove");
+const sendImageModal = document.getElementById("send-image-modal");
+const imageDropzone = document.getElementById("image-dropzone");
+const imageFileInput = document.getElementById("image-file-input");
 const stopNarrationBtn = document.getElementById("stop-narration-btn");
 const micBtn = document.getElementById("mic-btn");
 const liveMicToggle = document.getElementById("live-mic-toggle");
@@ -96,7 +101,7 @@ const debugDetailBodyEl = document.getElementById("debug-detail-body");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
-let includeScreenshot = false;
+let attachedImageDataUrl = null;
 
 // User's uploaded profile picture (shown in chat in place of the initial-letter fallback).
 // Cache-busted with a version stamp each time it's changed, since the URL itself never changes.
@@ -155,7 +160,7 @@ let sleepWordPhrase = "Go to sleep";
 // "Edit overlay" phrase - opens the native overlay's edit mode directly, bypassing the LLM
 // entirely. Detected the same way as wake/sleep word, but independent of hands-free mic state.
 let overlayEditPhraseEnabled = false;
-let overlayEditPhrase = "edit overlay";
+let overlayEditPhrase = "Edit overlay";
 
 // Configurable global hotkey (Ctrl+Shift+O by default) that toggles the native overlay's edit
 // mode; the display string shown/edited in Settings.

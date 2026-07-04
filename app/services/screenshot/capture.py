@@ -127,3 +127,12 @@ def capture_monitor_b64(monitor_index: int | None = None, max_width: int | None 
 def capture_primary_monitor_b64(max_width: int | None = None, quality: int | None = None) -> str:
     """Capture the user's active/focused monitor (kept for backward-compat call sites)."""
     return capture_monitor_b64(get_active_monitor_index(), max_width, quality)
+
+
+def resize_uploaded_image_b64(data_url: str) -> str:
+    """Downscale/re-encode a user-uploaded image (data URL or raw base64) using the same
+    settings as screenshots, so a large browsed/dropped/pasted image doesn't blow up
+    image-token cost before it reaches the LLM."""
+    raw_b64 = data_url.split(",", 1)[1] if data_url.startswith("data:") else data_url
+    image = Image.open(io.BytesIO(base64.b64decode(raw_b64))).convert("RGB")
+    return image_to_b64(image)

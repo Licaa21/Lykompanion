@@ -99,13 +99,15 @@
         <div id="voice-status" class="voice-status"></div>
         <div id="sleep-word-hint" class="voice-hint" hidden></div>
         <div id="overlay-edit-hint" class="voice-hint" hidden></div>
-        <div id="screenshot-indicator" class="screenshot-indicator" hidden>
-          Screenshot will be included with your next message
+        <div id="attached-image-indicator" class="screenshot-indicator" hidden>
+          <img id="attached-image-thumb" class="attached-image-thumb" alt="" />
+          <span>Image attached — it will be sent with your next message</span>
+          <button type="button" id="attached-image-remove" class="attached-image-remove" aria-label="Remove attached image" title="Remove attached image">&times;</button>
         </div>
         <form id="chat-form" class="chat-form">
-          <!-- Screenshot toggle -->
-          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off" aria-label="Include screenshot with next message">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <!-- Send Image -->
+          <button type="button" id="send-image-btn" class="icon-btn" title="Send Image" aria-label="Attach an image to your next message">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
           </button>
           <!-- Hands-free / live mic toggle -->
           <button type="button" id="live-mic-toggle" class="icon-btn" title="Hands-free: auto-record and send when you speak" aria-label="Toggle hands-free listening">
@@ -568,13 +570,13 @@
           <div id="overlay-edit-phrase-controls">
             <label class="checkbox">
               <input id="cfg-overlay-edit-phrase-enabled" type="checkbox" />
-              Enable "edit overlay" phrase
+              Enable "Edit overlay" phrase
               <button type="button" class="cfg-help" data-tip="Say this phrase to open the in-game overlay's edit mode directly — detected locally, never sent to the AI. No-ops if the overlay isn't running.">?</button>
             </label>
             <div id="overlay-edit-phrase-dependent">
               <label>
                 <span class="cfg-label">Phrase <button type="button" class="cfg-help" data-tip="The phrase that opens overlay edit mode when spoken, regardless of hands-free state.">?</button></span>
-                <input id="cfg-overlay-edit-phrase" type="text" value="edit overlay" autocomplete="off" />
+                <input id="cfg-overlay-edit-phrase" type="text" value="Edit overlay" autocomplete="off" />
               </label>
             </div>
           </div>
@@ -672,22 +674,30 @@
       </div>
       <div class="modal-layout">
         <nav class="modal-tabs">
-          <button type="button" class="tab-btn active" data-tab="journal">Journal</button>
-          <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
+          <button type="button" class="tab-btn active" data-tab="journal">My Games</button>
+          <button type="button" class="tab-btn" data-tab="game-awareness">Journal Settings</button>
           <button type="button" class="tab-btn" data-tab="overlay-layout">Customize Overlay</button>
         </nav>
         <div class="modal-main modal-body">
 
           <section class="tab-panel" data-tab="journal">
-            <p class="modal-hint">
-              Everything your companion knows per game: general facts that hold across all playthroughs,
-              and per-profile facts tied to one playthrough. Unconfirmed observations are things it noticed
-              on screen but hasn't confirmed with you yet — they fade in and out on their own.
-            </p>
-            <div id="gaming-journal-list" class="gaming-journal-list"></div>
-            <div class="memory-add-controls">
-              <button type="button" id="journal-delete-all" class="secondary-btn secondary-btn--danger">Delete all journal memories</button>
+
+            <div id="journal-library-view">
+              <p class="modal-hint">
+                Every game your companion knows something about. Click one to see its memories,
+                playthrough profiles, and training data.
+              </p>
+              <div id="gaming-journal-list" class="journal-library-grid"></div>
+              <div class="memory-add-controls">
+                <button type="button" id="journal-delete-all" class="secondary-btn secondary-btn--danger">Delete all journal memories</button>
+              </div>
             </div>
+
+            <div id="journal-detail-view" hidden>
+              <button type="button" id="journal-detail-back" class="secondary-btn">&larr; Back to My Games</button>
+              <div id="journal-detail-content"></div>
+            </div>
+
           </section>
 
         <!-- GAME AWARENESS tab -->
@@ -696,7 +706,6 @@
             <button type="button" class="subtab-btn active" data-subtab="ga-awareness">Awareness</button>
             <button type="button" class="subtab-btn" data-subtab="ga-processes">Tracked Processes</button>
             <button type="button" class="subtab-btn" data-subtab="ga-trackers">Trackers</button>
-            <button type="button" class="subtab-btn" data-subtab="ga-training-data">Training Data</button>
           </div>
 
           <div class="subtab-panel" data-subtab="ga-awareness">
@@ -794,15 +803,6 @@
               <button type="submit" class="secondary-btn">Add</button>
             </form>
             <button type="button" id="game-state-tracker-reset" class="secondary-btn">Reset to Defaults</button>
-          </div>
-
-          <div class="subtab-panel" data-subtab="ga-training-data" hidden>
-            <label>
-              <span class="cfg-label">Training Data <button type="button" class="cfg-help" data-tip="A living reference document the Game-State Model maintains per process, explaining how to interpret that game's OCR output and UI. Fed into every future extraction pass for that process. Edit it directly if something's wrong or stale.">?</button></span>
-              <p class="modal-hint">Notes the Game-State Model keeps for itself about a process. Pick one below to review or edit.</p>
-            </label>
-            <select id="game-state-training-data-process"></select>
-            <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - the Game-State Model writes it automatically as it learns the game's UI (requires self-training to be enabled)."></textarea>
           </div>
         </section>
 
@@ -921,6 +921,24 @@
     </div>
   </div>
 
+  <!-- ── SEND IMAGE MODAL ───────────────────────────────────────────── -->
+  <div id="send-image-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Send Image</h2>
+        <button type="button" class="modal-close" data-close="send-image-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="image-dropzone" class="image-dropzone" tabindex="0" role="button" aria-label="Browse, drag and drop, or paste an image">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <p>Drag and drop an image here, click to browse, or paste it from your clipboard.</p>
+        </div>
+        <input id="image-file-input" type="file" accept="image/*" hidden />
+        <p class="modal-hint">You can always ask the companion to take a screenshot of your active screen if you'd like to quickly share something.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- ── QUICK SETUP WIZARD ─────────────────────────────────────────── -->
   <!-- Auto-opens on first run (no API key configured yet); re-launchable from Settings. -->
   <div id="quick-setup-modal" class="modal-overlay" hidden>
@@ -1003,7 +1021,7 @@
           <ul class="qs-tips">
             <li><strong>Push-to-talk</strong> — the mic button records until you click it again.</li>
             <li><strong>Hands-free</strong> — the headset toggle keeps the mic open while you game; just start talking.</li>
-            <li><strong>Screenshots</strong> — the camera toggle attaches your screen to the next message.</li>
+            <li><strong>Send Image</strong> — attach a screenshot, photo, or any picture to your next message; the companion can also take its own screenshot on request.</li>
             <li><strong>Memory</strong> — it saves useful facts automatically; review them under Personal Data.</li>
             <li><strong>Game Awareness</strong> — optional background OCR that follows your quest/location; enable it in Settings.</li>
           </ul>
@@ -1069,6 +1087,7 @@
   <script src="js/app/chat-store.js"></script>
   <script src="js/app/narration.js"></script>
   <script src="js/app/chat-stream.js"></script>
+  <script src="js/app/send-image.js"></script>
   <script src="js/app/voice.js"></script>
   <script src="js/app/wake-word.js"></script>
   <script src="js/app/settings.js"></script>

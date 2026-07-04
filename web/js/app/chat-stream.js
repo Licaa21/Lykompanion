@@ -414,6 +414,9 @@ async function sendMessage(text) {
   let fullReply = "";
   let sentenceBuffer = "";
 
+  const imageToSend = attachedImageDataUrl;
+  clearAttachedImage();
+
   awaitingReply = true;
   chatAbortController = new AbortController();
   setStreaming(true);
@@ -421,7 +424,7 @@ async function sendMessage(text) {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chat.messages, include_screenshot: includeScreenshot, client_overlay_toasts: narrateEnabled }),
+      body: JSON.stringify({ messages: chat.messages, image: imageToSend, client_overlay_toasts: narrateEnabled }),
       signal: chatAbortController.signal,
     });
 
@@ -547,13 +550,6 @@ chatForm.addEventListener("submit", (event) => {
   if (!text) return;
   chatInput.value = "";
   sendMessage(text);
-});
-
-screenshotToggle.addEventListener("click", () => {
-  includeScreenshot = !includeScreenshot;
-  screenshotToggle.classList.toggle("active", includeScreenshot);
-  screenshotToggle.title = `Include screenshot: ${includeScreenshot ? "on" : "off"}`;
-  screenshotIndicator.hidden = !includeScreenshot;
 });
 
 // --- Voice input: always sent directly to an audio-capable LLM. Local

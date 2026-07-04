@@ -18,7 +18,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, sendImageModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -689,7 +689,7 @@ function applyConfigToForm(cfg) {
   sleepWordEnabled = cfg.sleep_word_enabled;
   sleepWordPhrase = cfg.sleep_word_phrase || "Go to sleep";
   overlayEditPhraseEnabled = cfg.overlay_edit_phrase_enabled;
-  overlayEditPhrase = cfg.overlay_edit_phrase || "edit overlay";
+  overlayEditPhrase = cfg.overlay_edit_phrase || "Edit overlay";
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
@@ -917,7 +917,7 @@ async function saveSettings(saveButton) {
     overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     overlay_edit_hotkey: overlayEditHotkey || "Ctrl+Shift+O",
     overlay_edit_phrase_enabled: overlayEditPhraseEnabledInput.checked,
-    overlay_edit_phrase: overlayEditPhraseInput.value.trim() || "edit overlay",
+    overlay_edit_phrase: overlayEditPhraseInput.value.trim() || "Edit overlay",
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
