@@ -380,6 +380,13 @@ gameStateCaptureIntervalInput.addEventListener("input", () => {
   gameStateCaptureIntervalValue.textContent = gameStateCaptureIntervalInput.value;
 });
 
+const gameStateHeartbeatInput = document.getElementById("cfg-game-state-heartbeat");
+const gameStateHeartbeatValue = document.getElementById("cfg-game-state-heartbeat-value");
+
+gameStateHeartbeatInput.addEventListener("input", () => {
+  gameStateHeartbeatValue.textContent = gameStateHeartbeatInput.value === "0" ? "off" : gameStateHeartbeatInput.value;
+});
+
 const avatarPreviewEl = document.getElementById("cfg-avatar-preview");
 const avatarInputEl = document.getElementById("cfg-avatar-input");
 const avatarUploadBtn = document.getElementById("cfg-avatar-upload-btn");
@@ -573,6 +580,8 @@ function applyConfigToForm(cfg) {
   gameStateIntervalValue.textContent = cfg.game_state_poll_interval_seconds;
   gameStateCaptureIntervalInput.value = cfg.game_state_capture_interval_seconds;
   gameStateCaptureIntervalValue.textContent = cfg.game_state_capture_interval_seconds;
+  gameStateHeartbeatInput.value = cfg.game_state_heartbeat_minutes ?? 10;
+  gameStateHeartbeatValue.textContent = (cfg.game_state_heartbeat_minutes ?? 10) === 0 ? "off" : cfg.game_state_heartbeat_minutes ?? 10;
   restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
 
   document.getElementById("cfg-debug-mode-enabled").checked = cfg.debug_mode_enabled;
@@ -712,6 +721,7 @@ async function saveSettings(saveButton) {
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
+    game_state_heartbeat_minutes: parseInt(gameStateHeartbeatInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
     game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
     proactive_messages_enabled: document.getElementById("cfg-proactive-enabled").checked,

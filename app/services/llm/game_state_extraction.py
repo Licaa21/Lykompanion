@@ -44,6 +44,7 @@ _OCR_MAX_WIDTH = 1600
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
+_last_kept_at: float | None = None
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
@@ -84,10 +85,11 @@ def _reset_window() -> None:
     """Resets the per-process OCR-batching buffers (frames collected this poll window, dedupe
     state). Doesn't touch persisted tracker values - those live independently in game_state.py,
     keyed by process, and survive a process switch or the companion restarting."""
-    global _frames, _last_kept_text, _window_started_at, _empty_ocr_streak
+    global _frames, _last_kept_text, _last_kept_at, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64
     _frames = []
     _last_kept_text = None
+    _last_kept_at = None
     _window_started_at = None
     _empty_ocr_streak = 0
     _first_frame_b64 = None
@@ -300,7 +302,7 @@ async def extract_and_apply_game_state(
 async def _capture_tick() -> None:
     """Captures+OCRs one frame locally (no LLM call) and, once a full poll window's worth of
     frames has accumulated, batches them into a single structuring LLM call."""
-    global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
+    global _last_process, _last_kept_text, _last_kept_at, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
@@ -376,10 +378,26 @@ async def _capture_tick() -> None:
     if ocr_text and ocr_text.strip():
         ocr_text = ocr_text.strip()
         _empty_ocr_streak = 0
+        now = time.time()
         normalized = " ".join(ocr_text.split())
-        if _last_kept_text is None or not _frames_similar(normalized, _last_kept_text):
-            _frames.append((time.time(), ocr_text))
+        changed = _last_kept_text is None or not _frames_similar(normalized, _last_kept_text)
+        heartbeat_due = (
+            not changed
+            and settings.game_state_heartbeat_minutes > 0
+            and _last_kept_at is not None
+            and now - _last_kept_at >= settings.game_state_heartbeat_minutes * 60
+        )
+        if changed or heartbeat_due:
+            if heartbeat_due:
+                logger.info(
+                    "Game-state poll: text unchanged for %.0fs, force-keeping frame for process=%r "
+                    "(heartbeat)",
+                    now - _last_kept_at,
+                    process,
+                )
+            _frames.append((now, ocr_text))
             _last_kept_text = normalized
+            _last_kept_at = now
             # Keep the pixels too (downscaled per the screenshot settings) - the first and most
             # recent kept frames of the window get attached to the extraction call as images.
             frame_b64 = image_to_b64(image)

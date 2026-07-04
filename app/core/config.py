@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     # How often (seconds) the poller captures+OCRs a frame locally while building up the batch
     # sent to the LLM once per poll interval. Cheap - no LLM call happens per capture.
     game_state_capture_interval_seconds: int = 1
+    # A frame whose OCR text is near-identical to the last kept one is normally dropped (an
+    # unchanging HUD/menu) - see _SIMILARITY_THRESHOLD in game_state_extraction.py. Without a
+    # ceiling, a minimalist-UI game with genuine but textless progress (exploration, cutscenes)
+    # would never get re-examined. Once this many minutes have passed since the last kept frame,
+    # the next captured frame is force-kept (via pixels, not text) regardless of similarity, so
+    # the extraction pass still gets a periodic look. 0 = disabled (old behavior: dedupe forever).
+    game_state_heartbeat_minutes: int = 10
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # Self-training: lets the extraction pass maintain a per-process notes document (how to decode
