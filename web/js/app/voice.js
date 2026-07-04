@@ -288,6 +288,14 @@ const MAX_UTTERANCE_MS = 60000;
 // preRollMs (max 2500ms) + MAX_UTTERANCE_MS = 62.5s. 65s leaves a safety margin.
 const RING_BUFFER_SECONDS = 65;
 
+// Barge-in (interrupting narration by talking over it) needs a much higher bar than normal
+// utterance detection now that echoCancellation is off (see core.js's micAudioConstraints) -
+// without AEC filtering it out, the mic picks up narration bleeding from the speakers, which used
+// to false-trigger stopNarration() on the narration's own audio (an abrupt pause/cut that sounds
+// like a pop). Speaker bleed-through is quieter at the mic than the user's own voice, so a higher
+// multiplier lets deliberate interruption through while filtering out the echo.
+const BARGE_IN_THRESHOLD_MULTIPLIER = 3;
+
 let liveMicEnabled = false;
 let liveMicStream = null;
 let liveSource = null;
@@ -393,9 +401,10 @@ async function startLiveMic() {
       return;
     }
 
-    const loud = computeAmplitude(samples) > vadThreshold / 127;
+    const amplitude = computeAmplitude(samples);
+    const loud = amplitude > vadThreshold / 127;
 
-    if (isNarrating && loud) {
+    if (isNarrating && amplitude > (vadThreshold * BARGE_IN_THRESHOLD_MULTIPLIER) / 127) {
       stopNarration();
     }
 
