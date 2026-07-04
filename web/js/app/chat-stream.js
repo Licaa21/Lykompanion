@@ -231,6 +231,11 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
 // patterns. Punctuation at the very end of the buffer stays in the remainder
 // (more of the same token may still arrive); callers flush the remainder when
 // the stream ends.
+// Matches a *complete* markdown image/link span starting at the current scan position (sticky,
+// no backtracking risk - single bounded char classes). Used to skip over the whole pattern
+// atomically during sentence splitting, below.
+const MARKDOWN_LINK_RE = /!?\[[^\]]*\]\([^\s)]*\)/y;
+
 function extractCompleteSentences(buffer) {
   const holdAt = buffer.search(/!?\[[^\]]*(?:\]\([^)\s]*)?$/);
   const splittable = holdAt === -1 ? buffer : buffer.slice(0, holdAt);
@@ -244,6 +249,19 @@ function extractCompleteSentences(buffer) {
   let i = 0;
   while (i < splittable.length) {
     const ch = splittable[i];
+    // A complete image/link's alt text or label can itself contain ".!?" (e.g. "Red Heart
+    // icon... background. Love ..."), which would otherwise look like a sentence boundary and
+    // chop the markdown pattern in half - leaving a fragment stripMarkdownForNarration can no
+    // longer recognize as an image, so the raw fragment (URL included) gets narrated as prose.
+    // Skip the whole pattern atomically so only text outside it is eligible as a boundary.
+    if (ch === "!" || ch === "[") {
+      MARKDOWN_LINK_RE.lastIndex = i;
+      const match = MARKDOWN_LINK_RE.exec(splittable);
+      if (match) {
+        i += match[0].length;
+        continue;
+      }
+    }
     if (ch === "\n") {
       let end = i + 1;
       while (end < splittable.length && splittable[end] === "\n") end++;
