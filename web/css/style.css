@@ -2406,7 +2406,14 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .journal-profiles-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
+}
+.journal-profiles-row-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--t3);
 }
 .journal-profile-card {
   position: relative;
@@ -2458,8 +2465,9 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 
 .journal-detail-separator {
   height: 1px;
-  background: var(--glass-border);
-  margin: 2px 0;
+  background: rgba(255,255,255,0.16);
+  margin: 6px 0;
+  flex-shrink: 0;
 }
 
 /* Content pane for the currently-selected tab-card below it - a clearly tinted background

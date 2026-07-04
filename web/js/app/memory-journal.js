@@ -434,7 +434,87 @@ function openGameDetail(game) {
 
   journalDetailContent.appendChild(buildSeparator());
 
-  // Content pane: whichever single tab-card is selected below - universal game memories, one
+  // Tab-cards row: Universal Info, one card per profile, + New Profile, and Training Data -
+  // a single selector row. The content pane below shows whichever one is selected.
+  const tabsRow = document.createElement("div");
+  tabsRow.className = "journal-profiles-row";
+
+  const universalCard = document.createElement("button");
+  universalCard.type = "button";
+  universalCard.className = "journal-profile-card journal-profile-card--universal" + (journalSelectedTab === "universal" ? " journal-profile-card--selected" : "");
+  universalCard.textContent = "Universal Info";
+  universalCard.addEventListener("click", () => {
+    journalSelectedTab = "universal";
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(universalCard);
+
+  const profilesLabel = document.createElement("span");
+  profilesLabel.className = "journal-profiles-row-label";
+  profilesLabel.textContent = "Profiles:";
+  tabsRow.appendChild(profilesLabel);
+
+  for (const session of game.sessions) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "journal-profile-card" + (session.session_id === journalSelectedTab ? " journal-profile-card--selected" : "");
+    const label = document.createElement("span");
+    label.textContent = session.name + (session.active ? " ★" : "");
+    if (session.active) label.title = "The profile new playthrough facts currently go to";
+    card.appendChild(label);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "journal-profile-card-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Delete this profile and its playthrough memories";
+    removeBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
+      const response = await fetch(
+        `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
+        { method: "DELETE" },
+      );
+      if (response.ok) await refreshJournalDetail(game.process);
+    });
+    card.appendChild(removeBtn);
+
+    card.addEventListener("click", () => {
+      journalSelectedTab = session.session_id;
+      openGameDetail(game);
+    });
+    tabsRow.appendChild(card);
+  }
+
+  const createCard = document.createElement("button");
+  createCard.type = "button";
+  createCard.className = "journal-profile-card journal-profile-card--create";
+  createCard.textContent = "+ New Profile";
+  createCard.addEventListener("click", () => {
+    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(createCard);
+
+  const trainingCardTab = document.createElement("button");
+  trainingCardTab.type = "button";
+  trainingCardTab.className = "journal-profile-card journal-profile-card--training" + (journalSelectedTab === "training" ? " journal-profile-card--selected" : "");
+  trainingCardTab.textContent = "Training Data";
+  trainingCardTab.addEventListener("click", () => {
+    journalSelectedTab = "training";
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(trainingCardTab);
+
+  journalDetailContent.appendChild(tabsRow);
+
+  if (journalShowingCreateProfileForm) {
+    journalDetailContent.appendChild(buildProfileAddForm(game.process));
+  }
+
+  journalDetailContent.appendChild(buildSeparator());
+
+  // Content pane: whichever single tab-card is selected above - universal game memories, one
   // profile's memories + observations, or the training data textbox. Never more than one at once.
   const selectedSession = journalSelectedTab !== "universal" && journalSelectedTab !== "training"
     ? game.sessions.find((s) => s.session_id === journalSelectedTab)
@@ -549,82 +629,6 @@ function openGameDetail(game) {
       memoriesCard.appendChild(obsList);
     }
     journalDetailContent.appendChild(memoriesCard);
-  }
-
-  journalDetailContent.appendChild(buildSeparator());
-
-  // Tab-cards row: Universal Info, one card per profile, + New Profile, and Training Data -
-  // a single selector row instead of separate stacked sections. Clicking a card swaps the
-  // content pane above to match.
-  const tabsRow = document.createElement("div");
-  tabsRow.className = "journal-profiles-row";
-
-  const universalCard = document.createElement("button");
-  universalCard.type = "button";
-  universalCard.className = "journal-profile-card journal-profile-card--universal" + (journalSelectedTab === "universal" ? " journal-profile-card--selected" : "");
-  universalCard.textContent = "Universal Info";
-  universalCard.addEventListener("click", () => {
-    journalSelectedTab = "universal";
-    openGameDetail(game);
-  });
-  tabsRow.appendChild(universalCard);
-
-  for (const session of game.sessions) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "journal-profile-card" + (session.session_id === journalSelectedTab ? " journal-profile-card--selected" : "");
-    const label = document.createElement("span");
-    label.textContent = session.name + (session.active ? " ★" : "");
-    if (session.active) label.title = "The profile new playthrough facts currently go to";
-    card.appendChild(label);
-
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "journal-profile-card-remove";
-    removeBtn.textContent = "×";
-    removeBtn.title = "Delete this profile and its playthrough memories";
-    removeBtn.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
-      const response = await fetch(
-        `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
-        { method: "DELETE" },
-      );
-      if (response.ok) await refreshJournalDetail(game.process);
-    });
-    card.appendChild(removeBtn);
-
-    card.addEventListener("click", () => {
-      journalSelectedTab = session.session_id;
-      openGameDetail(game);
-    });
-    tabsRow.appendChild(card);
-  }
-
-  const createCard = document.createElement("button");
-  createCard.type = "button";
-  createCard.className = "journal-profile-card journal-profile-card--create";
-  createCard.textContent = "+ New Profile";
-  createCard.addEventListener("click", () => {
-    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
-    openGameDetail(game);
-  });
-  tabsRow.appendChild(createCard);
-
-  const trainingCardTab = document.createElement("button");
-  trainingCardTab.type = "button";
-  trainingCardTab.className = "journal-profile-card journal-profile-card--training" + (journalSelectedTab === "training" ? " journal-profile-card--selected" : "");
-  trainingCardTab.textContent = "Training Data";
-  trainingCardTab.addEventListener("click", () => {
-    journalSelectedTab = "training";
-    openGameDetail(game);
-  });
-  tabsRow.appendChild(trainingCardTab);
-
-  journalDetailContent.appendChild(tabsRow);
-
-  if (journalShowingCreateProfileForm) {
-    journalDetailContent.appendChild(buildProfileAddForm(game.process));
   }
 }
 
