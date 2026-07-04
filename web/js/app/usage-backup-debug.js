@@ -213,6 +213,12 @@ backupImportInput?.addEventListener("change", async () => {
 
 const debugRequestsListEl = document.getElementById("debug-requests-list");
 
+// This checkbox lives in the Diagnostics modal, not the Settings modal, so it has no "Save"
+// button of its own - persist it immediately on toggle (like the Gaming Journal's Game
+// Awareness tab does via its own save button), otherwise flipping it here silently does
+// nothing until the user separately opens Settings and clicks Save.
+document.getElementById("cfg-debug-mode-enabled").addEventListener("change", () => saveSettings());
+
 function formatDebugMessage(message) {
   const block = document.createElement("div");
   block.className = "debug-message-block";

@@ -809,6 +809,7 @@ async function saveSettings(saveButton) {
     delete el.dataset.cleared;
   }
   applyConfigToForm(updatedCfg);
+  if (!saveButton) return;
   flashSaved(saveButton);
   // Close the modal this Save lives in (Settings, or the Gaming Journal's Game Awareness tab)
   // after a beat, so the "Saved" confirmation is visible before it dismisses.
