@@ -57,12 +57,15 @@ function setSelectedOutputId(id) { localStorage.setItem(OUTPUT_DEVICE_KEY, id ||
 
 // Base capture constraints plus the chosen input device (if the user picked one; empty = system default).
 // echoCancellation stays on - narration.js's barge-in logic depends on it to avoid speaker
-// bleed-through triggering a false interrupt. noiseSuppression/autoGainControl are deliberately
-// left OFF: Chromium's WebRTC audio processing module can gate/duck real speech through them,
-// producing intermittent mid-utterance dropouts that don't happen with unprocessed capture (e.g.
-// Windows' own mic test tool, which bypasses this pipeline entirely).
+// bleed-through triggering a false interrupt. noiseSuppression is deliberately left OFF:
+// Chromium's WebRTC audio processing module can gate/duck real speech through it, producing
+// intermittent mid-utterance dropouts that don't happen with unprocessed capture (e.g. Windows'
+// own mic test tool, which bypasses this pipeline entirely). autoGainControl stays ON - the
+// hands-free live-mic VAD gate (voice.js's computeAmplitude > vadThreshold/127) is calibrated
+// assuming AGC-normalized levels; turning it off silently broke hands-free detection because raw
+// mic amplitude fell below the threshold and "loud" never triggered.
 function micAudioConstraints() {
-  const constraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
+  const constraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: true };
   const id = getSelectedMicId();
   if (id) constraints.deviceId = { exact: id };
   return constraints;
