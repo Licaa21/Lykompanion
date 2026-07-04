@@ -94,9 +94,9 @@ async def _search_searxng_images(http_client: httpx.AsyncClient, query: str) -> 
 
 async def execute_image_search(query: str) -> str | None:
     """Image-only SearXNG lookup — returns a single proxied image URL or None. No LLM call, no
-    result text; used for cheap auto-injection where the model already knows the answer."""
-    if settings.web_search_provider != "searxng":
-        return None
+    result text; used for cheap auto-injection where the model already knows the answer. Uses
+    SearXNG regardless of web_search_provider — it's the only image-capable path, so when text
+    search runs through OpenRouter's web plugin (no images) this still lets pictures work."""
     async with httpx.AsyncClient(
         base_url=settings.searxng_base_url, timeout=10, headers=SEARXNG_HEADERS
     ) as http_client:
@@ -109,11 +109,10 @@ async def execute_show_image(arguments: dict) -> str:
     query = (arguments.get("query") or "").strip()
     if not query:
         return "No image query given."
-    if settings.web_search_provider != "searxng":
-        return (
-            "Image search is only available with the SearXNG search provider, which isn't "
-            "configured. Tell the user you can't pull up pictures right now."
-        )
+    # Always use SearXNG for images regardless of web_search_provider: OpenRouter's web plugin
+    # returns text only, so this is the fallback that lets pictures work even when text search
+    # runs through OpenRouter. If SearXNG is unreachable, _search_searxng_images returns None
+    # below and we report "no picture found" (same graceful degrade as an empty result set).
     async with httpx.AsyncClient(
         base_url=settings.searxng_base_url, timeout=12, headers=SEARXNG_HEADERS
     ) as http_client:
