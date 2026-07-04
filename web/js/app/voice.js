@@ -374,6 +374,12 @@ async function startLiveMic() {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     channelCount: 1,
+    // "explicit" forces the Web Audio API to actually downmix a stereo (or wider) input to mono
+    // before process() sees it - the default "max" mode does NOT downmix, so a stereo capture
+    // device would leave channel 1 silently discarded (mic-worklet-processor.js only reads
+    // inputs[0][0]) instead of merged in. The ScriptProcessorNode this replaced forced true mono
+    // via its (4096, 1, 1) constructor args; this restores that behavior for AudioWorkletNode.
+    channelCountMode: "explicit",
   });
   liveSilentGain = audioCtx.createGain();
   liveSilentGain.gain.value = 0; // keep the processor alive without echoing mic audio to speakers
