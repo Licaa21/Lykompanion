@@ -336,6 +336,10 @@ function extractFromRing(startAbs, endAbs) {
   return result;
 }
 
+// Loaded once per shared AudioContext (see sfx.js's ensureAudioCtx - the context persists for the
+// whole session, so re-adding the module on every startLiveMic() call would be wasted work).
+let micWorkletLoadedFor = null;
+
 async function startLiveMic() {
   try {
     liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
@@ -351,6 +355,11 @@ async function startLiveMic() {
     await audioCtx.resume();
   }
 
+  if (micWorkletLoadedFor !== audioCtx) {
+    await audioCtx.audioWorklet.addModule("js/app/mic-worklet-processor.js");
+    micWorkletLoadedFor = audioCtx;
+  }
+
   ringSampleRate = audioCtx.sampleRate;
   ringBuffer = new Float32Array(Math.ceil(RING_BUFFER_SECONDS * ringSampleRate));
   absoluteSampleCount = 0;
@@ -358,12 +367,19 @@ async function startLiveMic() {
   liveSilenceStart = null;
 
   liveSource = audioCtx.createMediaStreamSource(liveMicStream);
-  liveProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+  // AudioWorkletNode's process() runs on the dedicated audio rendering thread, so unlike the
+  // ScriptProcessorNode this replaces, main-thread jank can't delay or drop capture buffers -
+  // that was silently losing chunks of audio mid-utterance during hands-free listening.
+  liveProcessor = new AudioWorkletNode(audioCtx, "mic-capture-processor", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    channelCount: 1,
+  });
   liveSilentGain = audioCtx.createGain();
   liveSilentGain.gain.value = 0; // keep the processor alive without echoing mic audio to speakers
 
-  liveProcessor.onaudioprocess = (event) => {
-    const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+  liveProcessor.port.onmessage = (event) => {
+    const samples = event.data;
     writeToRing(samples);
 
     if (awaitingReply) {
@@ -463,7 +479,7 @@ async function finalizeLiveUtterance() {
 
 function stopLiveMic() {
   if (liveProcessor) {
-    liveProcessor.onaudioprocess = null;
+    liveProcessor.port.onmessage = null;
     liveProcessor.disconnect();
     liveProcessor = null;
   }
