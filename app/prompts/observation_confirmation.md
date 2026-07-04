@@ -10,6 +10,7 @@ Promotion bar — an observation earns "save" when at least one of these holds:
 - **Corroborated**: two or more observations (or an observation plus a known fact or the snapshot) independently support the same fact — e.g. a character name seen on different screens, a level seen rising consistently over time.
 - **Specific and durable with high confidence**: a concrete milestone (boss defeated, area completed, major item gained), a named character detail, or a persistent stat, recorded with high confidence — these are safe to promote alone.
 - **A progression update**: the newest of several observations tracking the same increasing stat (level, rank, playtime, wins) — promote the latest value, clear the older ones, and put the superseded known fact (if any) in "remove".
+- **A behavioral pattern**: two or more separate "playstyle-revealing" observations that point the same direction — e.g. fully cleared an optional area, then also backtracked for a missable item, then chose the cautious approach to a fight — add up to a real tendency, not just isolated moments. Synthesize them into one general trait statement (e.g. "Tends to fully explore areas and finish side content before advancing — a completionist playstyle" or "Tends to pick the compassionate/altruistic option in games with moral choices") and clear the individual instances you merged. **Never promote a trait from a single instance** — one thorough playthrough of one area proves nothing; wait for at least two independent instances before calling it a pattern. Personality/playstyle traits are `"user"` scope even when every supporting instance came from this one game — a completionist streak is a fact about the person, not the game. If a new saved trait would just restate/narrow one already in the known facts, strengthen or leave the existing one instead of duplicating it.
 
 Never promote:
 - Anything phrased like a guess about a **choice or decision** without unambiguous outcome evidence (an option merely on screen tells you nothing about what was picked).
@@ -22,7 +23,7 @@ When several observations tell one story (e.g. three beats of the same questline
 **Tag each saved fact with a `scope`:**
 - `"session"` — specific to this playthrough only: level, story/quest progress, decisions made this run, in-game relationships. Would NOT survive starting a fresh playthrough. Most screen observations land here.
 - `"game"` — true across all the player's runs of this game: how they typically approach it, build tendencies for this title. Ask: *would this still be true if they wiped their save and started over?*
-- `"user"` — about the person regardless of game. Rare from screen observations; use it only for cross-game facts the screen genuinely establishes (e.g. their platform account name).
+- `"user"` — about the person regardless of game: cross-game facts the screen genuinely establishes (e.g. their platform account name), and personality/playstyle traits synthesized from a behavioral pattern (see above) — the latter is the main way `"user"` scope gets used from screen observations.
 
 Do not duplicate something already in the known facts — if an observation just restates a known fact, clear it without saving.
 

@@ -22,6 +22,7 @@ For any field tracking a **choice or decision** (e.g. a field with id "notable_c
 - Confirmed character details the first time they're visible (name/class/race/build).
 - Significant milestones (boss defeated, major item/ability gained, area completed).
 - **Progress stats that persist and matter** — character level, rank/tier, prestige, total playtime/wins, currency milestones — including values that update an existing known fact (e.g. a new level; the later pass handles replacing the old fact).
+- **Playstyle-revealing behavior** — a single concrete instance of how the player approaches the game, beyond this moment alone: thoroughly cleared optional content before moving on (or the opposite — skipped past it to push the main objective), backtracked for a missable/optional item, picked the cautious/stealthy approach to a fight (or the aggressive/reckless one), a specific crafting/itemization habit. Report the instance itself (e.g. "Fully cleared the optional catacombs before continuing the main quest"), not a conclusion about their personality — a later pass decides whether enough instances add up to a real pattern.
 
 **Fold researched context into the observation instead of writing it bare.** If you looked something up (or the training data already told you) what a named boss/area/item/quest actually is, use that to write the specific version — "Defeated the Ashen Idol, a mid-game boss known for its poison phase" beats "Defeated a boss" — rather than reporting the generic fact and the context separately.
 
