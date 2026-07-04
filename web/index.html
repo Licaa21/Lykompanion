@@ -347,9 +347,11 @@
             starts the track on whatever device you're already using (phone, desktop app, web player), not just a
             link. Requires <strong>Spotify Premium</strong> (Spotify's playback-control API is Premium-only) and a
             free app from <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a> —
-            add a Redirect URI of <code>http://127.0.0.1:6692/api/spotify/oauth/callback</code> (adjust the port if
-            you run the server on a different one) in that app's settings, then paste its Client ID below and click
-            Connect. No Client Secret needed — the connection uses PKCE, which doesn't require one.
+            add a Redirect URI of <code>http://127.0.0.1:6692/api/spotify/oauth/callback</code> if you run the dev
+            server directly (adjust the port if different), or <code>http://localhost:6692/api/spotify/oauth/callback</code>
+            if you're using the desktop app (<code>RUN.cmd</code>, which always loads via <code>localhost</code>) — add
+            both if unsure which — in that app's settings, then paste its Client ID below and click Connect. No
+            Client Secret needed — the connection uses PKCE, which doesn't require one.
           </p>
           <div class="cfg-row">
             <label>
@@ -371,11 +373,14 @@
             Lets the companion list and play your own YouTube playlists ("play my road trip playlist") in the
             in-app player, instead of just searching public YouTube. Needs a free OAuth client from
             <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>
-            (enable the "YouTube Data API v3", create an OAuth client of type "Desktop app") — add a Redirect URI of
-            <code>http://127.0.0.1:6692/api/youtube/oauth/callback</code> (adjust the port if you run the server on a
-            different one), then paste its Client ID and Client Secret below and click Connect. Unlike Spotify,
-            Google's flow still requires the Client Secret even for a desktop app — it isn't sensitive in this
-            context per Google's own docs, but the field is still there.
+            (enable the "YouTube Data API v3", create an OAuth client of type <strong>"Web application"</strong> —
+            "Desktop app" won't work here, it doesn't let you register a custom redirect path) — add an Authorized
+            redirect URI of <code>http://127.0.0.1:6692/api/youtube/oauth/callback</code> if you run the dev server
+            directly (adjust the port if different), or <code>http://localhost:6692/api/youtube/oauth/callback</code>
+            if you're using the desktop app (<code>RUN.cmd</code>, which always loads via <code>localhost</code>) —
+            add both if unsure which — then paste its Client ID and Client Secret below and click Connect. Unlike
+            Spotify, Google's flow still requires the Client Secret even here — it isn't treated as sensitive in
+            this context per Google's own docs, but the field is still required.
           </p>
           <div class="cfg-row">
             <label>
