@@ -8,12 +8,6 @@ from app.services.tts import chirp3, kokoro, openrouter_tts
 # A fade this short is inaudible on the voice itself.
 _FADE_MS = 12
 
-# A "click" is one sample that jumps far from its neighbors and back again within a
-# couple samples - a decoder/concatenation glitch, not a natural loud attack (which
-# ramps over many samples). Threshold is in raw int16 units.
-_CLICK_JUMP_THRESHOLD = 6000
-_CLICK_NEIGHBOR_THRESHOLD = 2000
-
 # Peak-normalize toward this fraction of full scale (~-1 dBFS) so volume is consistent
 # across providers/voices that synthesize at different natural loudness. Scale factor is
 # clamped so a corrupt/near-silent buffer can't get amplified into noise.
@@ -52,24 +46,6 @@ def _find_pcm16_data(wav_bytes: bytes) -> tuple[int, int, int, int] | None:
     return None
 
 
-def _declick(samples: list[int]) -> None:
-    """Smooth isolated single-sample spikes in place (decoder/concatenation glitches).
-
-    A real click stands out on both sides (jumps away from its neighbor and the
-    neighbor beyond it jumps back), whereas a genuine loud attack ramps up and stays
-    up. Only that narrow signature gets replaced, via linear interpolation across it.
-    """
-    n = len(samples)
-    for i in range(1, n - 1):
-        prev_s, cur, next_s = samples[i - 1], samples[i], samples[i + 1]
-        if (
-            abs(cur - prev_s) > _CLICK_JUMP_THRESHOLD
-            and abs(cur - next_s) > _CLICK_JUMP_THRESHOLD
-            and abs(next_s - prev_s) < _CLICK_NEIGHBOR_THRESHOLD
-        ):
-            samples[i] = (prev_s + next_s) // 2
-
-
 def _normalize(samples: list[int]) -> None:
     """Scale samples in place toward a consistent peak level, clamped to a safe range."""
     peak = max((abs(s) for s in samples), default=0)
@@ -106,7 +82,6 @@ def _postprocess(wav_bytes: bytes) -> bytes:
             return wav_bytes
         out = bytearray(wav_bytes)
         samples = list(struct.unpack_from(f"<{count}h", out, data_start))
-        _declick(samples)
         _normalize(samples)
         _apply_fades(samples, sample_rate, channels)
         struct.pack_into(f"<{count}h", out, data_start, *samples)

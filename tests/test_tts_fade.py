@@ -1,10 +1,11 @@
 """Tests for the TTS post-processing pipeline (app/services/tts/__init__.py) -
-the fade-in/out, declick, and normalize passes applied to every synthesized WAV
-before playback."""
+the fade-in/out and normalize passes applied to every synthesized WAV before
+playback. (A declick pass was tried and reverted - see CLAUDE.md - it misfired
+on legitimate high-frequency speech content like fricatives, producing static.)"""
 
 import struct
 
-from app.services.tts import _FADE_MS, _apply_fades, _declick, _normalize, _postprocess
+from app.services.tts import _FADE_MS, _apply_fades, _normalize, _postprocess
 
 
 def make_wav(samples: list[int], sample_rate: int = 24000, channels: int = 1) -> bytes:
@@ -62,23 +63,6 @@ def test_clip_shorter_than_fade_window_still_ramps():
     _apply_fades(samples, sample_rate=24000, channels=1)
     assert samples[0] == 0
     assert all(abs(s) < 5000 for s in samples)
-
-
-# --- _declick ---
-
-
-def test_declick_smooths_isolated_spike():
-    samples = [100, 120, 30000, 110, 90] + [100] * 10
-    _declick(samples)
-    assert samples[2] == 115  # replaced with (prev + next) // 2
-
-
-def test_declick_leaves_natural_loud_attack_alone():
-    # A real onset ramps up over several samples and stays up - not an isolated spike.
-    samples = [0, 5000, 15000, 25000, 30000, 30000, 30000]
-    before = list(samples)
-    _declick(samples)
-    assert samples == before
 
 
 # --- _normalize ---
