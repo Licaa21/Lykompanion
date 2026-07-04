@@ -76,6 +76,15 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
     }
 
     if (role === "assistant") {
+      // Narrate — manually replays this message's TTS without re-sending it to the LLM, so
+      // narration/voice settings can be tested against existing replies without burning tokens.
+      const narrateBtn = document.createElement("button");
+      narrateBtn.className = "msg-action-btn";
+      narrateBtn.title = "Narrate";
+      narrateBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
+      narrateBtn.addEventListener("click", () => narrate(contentDiv.textContent));
+      actionsEl.appendChild(narrateBtn);
+
       // Add to Memory — pre-fills the memory modal input
       const memBtn = document.createElement("button");
       memBtn.className = "msg-action-btn";
