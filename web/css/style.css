@@ -1400,6 +1400,28 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   bottom: 16px;
   right: 16px;
   width: 320px;
+  position: fixed;
+}
+
+.youtube-player-resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 1;
+}
+.youtube-player-resize-grip::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--t3);
+  border-bottom: 2px solid var(--t3);
+  opacity: 0.6;
 }
 
 .youtube-player-frame {

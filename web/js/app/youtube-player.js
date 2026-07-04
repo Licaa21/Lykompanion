@@ -156,16 +156,36 @@ ytVolumeSlider.addEventListener("input", () => {
   if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(Number(ytVolumeSlider.value));
 });
 
-// Restore a dragged position, or fall back to the default bottom-right CSS anchor - mirrors
-// game-state.js's floating panel exactly (same corrupt/off-screen guards).
+const ytResizeGrip = document.getElementById("youtube-player-resize-grip");
+const YT_PANEL_MIN_WIDTH = 240;
+const YT_PANEL_MAX_WIDTH = 640;
+const YT_PANEL_DEFAULT_WIDTH = 320;
+
+function ytSavePanelState() {
+  // Read the actual rendered position (not style.top/left, which stay unset while the panel is
+  // still sitting at its default bottom-right CSS anchor) so a resize-only interaction - no drag
+  // ever happened - still has something concrete to persist alongside the new width.
+  const rect = ytPanel.getBoundingClientRect();
+  localStorage.setItem(
+    YOUTUBE_PANEL_POS_KEY,
+    JSON.stringify({ top: rect.top, left: rect.left, width: ytPanel.offsetWidth })
+  );
+}
+
+// Restore a dragged position + resized width, or fall back to the default bottom-right CSS
+// anchor - mirrors game-state.js's floating panel exactly (same corrupt/off-screen guards).
 (() => {
   let saved = null;
   try {
     saved = JSON.parse(localStorage.getItem(YOUTUBE_PANEL_POS_KEY) || "null");
   } catch (err) { /* corrupt entry - fall through to the CSS anchor */ }
   if (saved && Number.isFinite(saved.top) && Number.isFinite(saved.left)) {
-    const maxLeft = Math.max(0, window.innerWidth - 320);  // panel CSS width
+    const width = Number.isFinite(saved.width)
+      ? Math.min(Math.max(YT_PANEL_MIN_WIDTH, saved.width), YT_PANEL_MAX_WIDTH)
+      : YT_PANEL_DEFAULT_WIDTH;
+    const maxLeft = Math.max(0, window.innerWidth - width);
     const maxTop = Math.max(0, window.innerHeight - 40);   // keep at least the header on-screen
+    ytPanel.style.width = `${width}px`;
     ytPanel.style.top = `${Math.min(Math.max(0, saved.top), maxTop)}px`;
     ytPanel.style.left = `${Math.min(Math.max(0, saved.left), maxLeft)}px`;
     ytPanel.style.right = "auto";
@@ -204,12 +224,38 @@ ytVolumeSlider.addEventListener("input", () => {
   window.addEventListener("mouseup", () => {
     if (!dragging) return;
     dragging = false;
-    const top = parseFloat(ytPanel.style.top);
-    const left = parseFloat(ytPanel.style.left);
-    // A click on the header without any movement never sets style.top/left - only persist an
-    // actual dragged position (see game-state.js's identical guard for why).
-    if (Number.isFinite(top) && Number.isFinite(left)) {
-      localStorage.setItem(YOUTUBE_PANEL_POS_KEY, JSON.stringify({ top, left }));
-    }
+    ytSavePanelState();
+  });
+})();
+
+// Bottom-right corner grip resizes the panel width - the video frame's aspect-ratio CSS keeps
+// height in lockstep, so only width needs to be tracked/persisted.
+(() => {
+  let resizing = false;
+  let startWidth = 0;
+  let startX = 0;
+
+  ytResizeGrip.addEventListener("mousedown", (event) => {
+    resizing = true;
+    startWidth = ytPanel.offsetWidth;
+    startX = event.clientX;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (!resizing) return;
+    // Clamped so the panel can't grow past the right edge of the screen from wherever it
+    // currently sits - Math.max keeps this from collapsing below the min width when there's
+    // little room (e.g. panel already dragged close to the right edge).
+    const maxWidth = Math.max(YT_PANEL_MIN_WIDTH, Math.min(YT_PANEL_MAX_WIDTH, window.innerWidth - ytPanel.offsetLeft));
+    const width = Math.min(Math.max(YT_PANEL_MIN_WIDTH, startWidth + (event.clientX - startX)), maxWidth);
+    ytPanel.style.width = `${width}px`;
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!resizing) return;
+    resizing = false;
+    ytSavePanelState();
   });
 })();
