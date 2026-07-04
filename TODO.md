@@ -3,6 +3,8 @@
 - [ ] `play_on_spotify` needs to be properly tested.
 - [ ] when changing the wake word from Hey Buddy to "Hey Lykan" i still see this, update it real time and also add a tip like this for wake word and edit overlay(and state that this needs to be in-game i thing)
 - [ ] Expand the "Include Screenshot" button: Rename it to "Send Image". When clicked, show a modal allowing the user to browse locally for an image or drag and drop an image file inside it. Pasting an image crom clipboard should also work. Add a hint in the modal -> "You can always ask the companion to take a screenshot of your active screen if you want to quickly show something." Reword it to sound proffesional.
+- [ ] The stop button doesn't do anything. Once a message was entered and a request has been sent, there's no way to stop it. Note: This is unrelated to the STOP NARRATION button.
+- [ ] Add support for editing and deleting chat messages. (E.g: User asks something but forgets to paste something, they should be able to stop -> edit message -> Retry).
 - [ ] Design/build a proactive-nudge feature: companion notices something worth pointing out on screen (via the OCR poller's existing screenshot pass) and asks "Can I show you something?" through an overlay toast; a "yes" answered through the normal voice pipeline should make it elaborate using what the poller saw. Note it can only react to what's visible in a screenshot/OCR, not true off-screen world-space location.
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
