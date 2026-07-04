@@ -49,6 +49,7 @@ def set_title_override(process: str, title: str) -> dict:
     record = data.get(key, {"cover_url": None, "source": None})
     record["title"] = title
     record["title_overridden"] = True
+    record.setdefault("first_seen_at", datetime.now(timezone.utc).isoformat())
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
     data[key] = record
     _save_all(data)
@@ -303,6 +304,8 @@ async def fetch_art(process: str, force: bool = False) -> dict:
         result["title"] = existing["title"]
         result["title_overridden"] = True
 
+    # "date added" to the journal - stamped once on first fetch, never touched by a later re-fetch.
+    result["first_seen_at"] = (existing or {}).get("first_seen_at") or datetime.now(timezone.utc).isoformat()
     result["updated_at"] = datetime.now(timezone.utc).isoformat()
     data[key] = result
     _save_all(data)

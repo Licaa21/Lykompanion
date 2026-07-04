@@ -184,6 +184,12 @@ def push_game_state(title: str, rows: list[list[str]]) -> None:
     push({"type": "game_state", "title": title, "rows": rows})
 
 
+def push_stats(title: str, rows: list[list[str]]) -> None:
+    """OpenRouter balance / current-session cost panel - its own widget area in the
+    overlay, independent of whether a game-state panel is showing."""
+    push({"type": "stats", "title": title, "rows": rows})
+
+
 def set_edit_mode(enabled: bool, full: bool = False) -> None:
     """full=True is the app's "Customize Overlay Layout" design-mode session (no game running,
     everything unlocked); False (the default, used by the voice/hotkey in-game triggers) is a

@@ -696,6 +696,14 @@
           <section class="tab-panel" data-tab="journal">
 
             <div id="journal-library-view">
+              <div class="journal-library-toolbar">
+                <select id="journal-sort-select" title="Sort My Games">
+                  <option value="last_played">Last played</option>
+                  <option value="title">Name (A-Z)</option>
+                  <option value="date_added">Date added</option>
+                </select>
+                <button type="button" id="journal-sort-dir" class="secondary-btn" title="Toggle ascending/descending">&darr;</button>
+              </div>
               <div id="gaming-journal-list" class="journal-library-grid"></div>
             </div>
 

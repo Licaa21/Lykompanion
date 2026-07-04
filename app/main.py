@@ -40,6 +40,7 @@ from app.core.chats import prune_empty_chats
 from app.services import overlay_process
 from app.services.llm.game_state_extraction import run_game_state_poller
 from app.services.llm.reminder_poller import run_reminder_poller
+from app.services.usage_overlay import run_usage_overlay_poller
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -49,13 +50,15 @@ async def lifespan(_app: FastAPI):
     prune_empty_chats()
     poller_task = asyncio.create_task(run_game_state_poller())
     reminder_task = asyncio.create_task(run_reminder_poller())
+    usage_overlay_task = asyncio.create_task(run_usage_overlay_poller())
     try:
         yield
     finally:
         poller_task.cancel()
         reminder_task.cancel()
+        usage_overlay_task.cancel()
         # Await the cancelled tasks so shutdown doesn't log "Task was destroyed but it is pending".
-        await asyncio.gather(poller_task, reminder_task, return_exceptions=True)
+        await asyncio.gather(poller_task, reminder_task, usage_overlay_task, return_exceptions=True)
         # Kill the native overlay if it's still running.
         overlay_process.stop()
 

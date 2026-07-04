@@ -335,6 +335,7 @@ bool  g_showToasts    = true;   // reply / reminder / image toasts
 bool  g_showMemories  = true;   // memory save/remove toasts (own area)
 bool  g_showPanel     = true;   // game-state panel
 bool  g_showHandsfree = true;   // live-mic indicator
+bool  g_showStats     = true;   // OpenRouter balance / session-cost panel
 
 // Color helpers: every widget color routes through these so opacity/accent
 // apply uniformly. `a` is the color's own alpha before the opacity multiply.
@@ -386,6 +387,7 @@ HWND          g_prevForeground = nullptr;  // foreground window before edit mode
 LayeredWindow g_toastWin;
 LayeredWindow g_memWin;            // memory save/remove toasts (separate area)
 LayeredWindow g_panelWin;
+LayeredWindow g_statsWin;          // OpenRouter balance / session-cost panel
 LayeredWindow g_configWin;         // edit-mode appearance toolbar
 LayeredWindow g_bannerWin;         // startup fade-in/out hint
 ULONGLONG     g_bannerStart = 0;
@@ -399,6 +401,7 @@ ULONGLONG     g_handsfreeStart = 0;       // animation clock
 std::vector<Toast> g_toasts;     // reply / reminder / image toasts
 std::vector<Toast> g_memToasts;  // memory toasts (rendered in g_memWin)
 Panel         g_panel;
+Panel         g_stats;  // OpenRouter balance / session-cost rows (rendered in g_statsWin)
 bool          g_editMode = false;
 // true = full editor (opened from the app's Settings, no game running - safe to expose
 // everything on any input); false = an in-game session (native hotkey or voice phrase).
@@ -420,11 +423,12 @@ struct LayoutPreset {
     int memX=0, memY=0; bool memHasPos=false;
     int panelX=0, panelY=0; bool panelHasPos=false;
     int handsfreeX=0, handsfreeY=0; bool handsfreeHasPos=false;
+    int statsX=0, statsY=0; bool statsHasPos=false;
     float opacity = 0.92f;
     int accentIdx = 0;
     int fontIdx = 0;
     float fontScale = 1.0f;
-    bool showToasts=true, showMemories=true, showPanel=true, showHandsfree=true;
+    bool showToasts=true, showMemories=true, showPanel=true, showHandsfree=true, showStats=true;
 };
 std::vector<LayoutPreset> g_presets;
 int           g_activePreset = 0;
@@ -446,8 +450,10 @@ enum InputModality { ModalityMouse, ModalityGamepad };
 InputModality g_lastModality = ModalityMouse;
 
 // Indexable widget registry (gamepad cycling target), parallel arrays.
-LayeredWindow* g_widgets[4] = { nullptr, nullptr, nullptr, nullptr };  // filled in wWinMain
-const wchar_t* g_widgetLabels[4] = { L"Chat toasts", L"Memory toasts", L"Game panel", L"Mic indicator" };
+constexpr int kWidgetCount = 5;
+LayeredWindow* g_widgets[kWidgetCount] = { nullptr, nullptr, nullptr, nullptr, nullptr };  // filled in wWinMain
+const wchar_t* g_widgetLabels[kWidgetCount] =
+    { L"Chat toasts", L"Memory toasts", L"Game panel", L"Mic indicator", L"Stats panel" };
 int           g_selectedWidgetIdx = 0;   // gamepad-only concept, independent of mouse drag
 
 WORD          g_prevButtons = 0;         // previous-frame XInput button state (edge detection)
@@ -465,7 +471,7 @@ D2D1_RECT_F   g_rcTextPlus  = {};
 D2D1_RECT_F   g_rcFontPrev  = {};
 D2D1_RECT_F   g_rcFontNext  = {};
 D2D1_RECT_F   g_rcSwatch[kAccentCount] = {};
-D2D1_RECT_F   g_rcToggle[4] = {};   // show: toasts / memories / panel / mic
+D2D1_RECT_F   g_rcToggle[kWidgetCount] = {};   // show: toasts / memories / panel / mic / stats
 D2D1_RECT_F   g_rcPresetNew = {};
 D2D1_RECT_F   g_rcPresetDelete = {};
 D2D1_RECT_F   g_rcPresetRename = {};
@@ -561,12 +567,14 @@ LayoutPreset CaptureSnapshot() {
     p.panelX = g_panelWin.posX; p.panelY = g_panelWin.posY; p.panelHasPos = g_panelWin.hasPos;
     p.handsfreeX = g_handsfreeWin.posX; p.handsfreeY = g_handsfreeWin.posY;
     p.handsfreeHasPos = g_handsfreeWin.hasPos;
+    p.statsX = g_statsWin.posX; p.statsY = g_statsWin.posY; p.statsHasPos = g_statsWin.hasPos;
     p.opacity = g_opacity;
     p.accentIdx = g_accentIdx;
     p.fontIdx = g_fontIdx;
     p.fontScale = g_fontScale;
     p.showToasts = g_showToasts; p.showMemories = g_showMemories;
     p.showPanel = g_showPanel; p.showHandsfree = g_showHandsfree;
+    p.showStats = g_showStats;
     if (g_activePreset >= 0 && g_activePreset < (int)g_presets.size())
         p.name = g_presets[g_activePreset].name;
     return p;
@@ -579,6 +587,7 @@ LayoutPreset CaptureSnapshot() {
 void RelayoutToasts();
 void RelayoutMemories();
 void RenderPanel();
+void RenderStats();
 void RenderHandsFree();
 void RenderConfig();
 void ApplySnapshot(const LayoutPreset& p) {
@@ -587,16 +596,19 @@ void ApplySnapshot(const LayoutPreset& p) {
     g_panelWin.posX = p.panelX; g_panelWin.posY = p.panelY; g_panelWin.hasPos = p.panelHasPos;
     g_handsfreeWin.posX = p.handsfreeX; g_handsfreeWin.posY = p.handsfreeY;
     g_handsfreeWin.hasPos = p.handsfreeHasPos;
+    g_statsWin.posX = p.statsX; g_statsWin.posY = p.statsY; g_statsWin.hasPos = p.statsHasPos;
     g_opacity = p.opacity;
     g_accentIdx = p.accentIdx;
     g_fontIdx = p.fontIdx;
     g_fontScale = p.fontScale;
     g_showToasts = p.showToasts; g_showMemories = p.showMemories;
     g_showPanel = p.showPanel; g_showHandsfree = p.showHandsfree;
+    g_showStats = p.showStats;
     RebuildTextFormats();
     RelayoutToasts();
     RelayoutMemories();
     RenderPanel();
+    RenderStats();
     RenderHandsFree();
     if (g_editMode) RenderConfig();  // toolbar visibility/showing is owned by ApplyEditMode
 }
@@ -624,6 +636,7 @@ std::string SerializePreset(const LayoutPreset& p) {
            ",\"memory\":{\"x\":" + std::to_string(p.memX) + ",\"y\":" + std::to_string(p.memY) + "}" +
            ",\"panel\":{\"x\":" + std::to_string(p.panelX) + ",\"y\":" + std::to_string(p.panelY) + "}" +
            ",\"handsfree\":{\"x\":" + std::to_string(p.handsfreeX) + ",\"y\":" + std::to_string(p.handsfreeY) + "}" +
+           ",\"stats\":{\"x\":" + std::to_string(p.statsX) + ",\"y\":" + std::to_string(p.statsY) + "}" +
            ",\"opacity\":" + std::to_string(p.opacity) +
            ",\"accent\":" + std::to_string(p.accentIdx) +
            ",\"font\":" + std::to_string(p.fontIdx) +
@@ -631,7 +644,8 @@ std::string SerializePreset(const LayoutPreset& p) {
            ",\"showToasts\":" + (p.showToasts ? "true" : "false") +
            ",\"showMemories\":" + (p.showMemories ? "true" : "false") +
            ",\"showPanel\":" + (p.showPanel ? "true" : "false") +
-           ",\"showHandsfree\":" + (p.showHandsfree ? "true" : "false") + "}";
+           ",\"showHandsfree\":" + (p.showHandsfree ? "true" : "false") +
+           ",\"showStats\":" + (p.showStats ? "true" : "false") + "}";
 }
 
 void SaveLayout() {
@@ -681,6 +695,7 @@ LayoutPreset ParsePreset(const JsonValue& v) {
     applyPos(L"memory", p.memX, p.memY, p.memHasPos);
     applyPos(L"panel", p.panelX, p.panelY, p.panelHasPos);
     applyPos(L"handsfree", p.handsfreeX, p.handsfreeY, p.handsfreeHasPos);
+    applyPos(L"stats", p.statsX, p.statsY, p.statsHasPos);
 
     const JsonValue* op = v.find(L"opacity");
     if (op && op->type == JsonValue::Num) {
@@ -714,6 +729,7 @@ LayoutPreset ParsePreset(const JsonValue& v) {
     applyBool(L"showMemories", p.showMemories);
     applyBool(L"showPanel", p.showPanel);
     applyBool(L"showHandsfree", p.showHandsfree);
+    applyBool(L"showStats", p.showStats);
     return p;
 }
 
@@ -920,7 +936,7 @@ void DrawSelectionRing(ID2D1RenderTarget* rt, int w, int h) {
 // at the point some widgets render for the first time during startup).
 bool IsGamepadSelected(const LayeredWindow& lw) {
     if (g_lastModality != ModalityGamepad) return false;
-    if (g_selectedWidgetIdx < 0 || g_selectedWidgetIdx >= 4) return false;
+    if (g_selectedWidgetIdx < 0 || g_selectedWidgetIdx >= kWidgetCount) return false;
     return g_widgets[g_selectedWidgetIdx] == &lw;
 }
 
@@ -1363,13 +1379,14 @@ std::vector<std::wstring> SplitValueParts(const std::wstring& value) {
 
 // Each row is a stacked sub-card: an uppercase dim label above a wrapping value
 // (bulleted when the value is ';'-separated) — matching web/js/app/game-state.js.
-void RenderPanel() {
-    if (!g_showPanel) { HideWindow(g_panelWin); return; }
-    if (!g_panel.valid ||
-        (g_panel.title.empty() && g_panel.rows.empty())) {
-        if (g_editMode) RenderPlaceholder(g_panelWin, L"Game state panel",
-                                          AnchorTopLeft, PANEL_W);
-        else HideWindow(g_panelWin);
+// Shared by the game-state panel and the usage-stats (OpenRouter balance / session
+// cost) panel — both are just a titled list of label/value rows.
+void RenderLabelValuePanel(LayeredWindow& win, const Panel& panel, bool show,
+                            const wchar_t* placeholder, Anchor anchor) {
+    if (!show) { HideWindow(win); return; }
+    if (!panel.valid || (panel.title.empty() && panel.rows.empty())) {
+        if (g_editMode) RenderPlaceholder(win, placeholder, anchor, PANEL_W);
+        else HideWindow(win);
         return;
     }
 
@@ -1380,8 +1397,8 @@ void RenderPanel() {
 
     float titleH = 0;
     IDWriteTextLayout* titleLayout = nullptr;
-    if (!g_panel.title.empty())
-        titleLayout = MakeLayout(g_panel.title, g_fmtTitle, innerW, &titleH);
+    if (!panel.title.empty())
+        titleLayout = MakeLayout(panel.title, g_fmtTitle, innerW, &titleH);
 
     struct RowLayout {
         IDWriteTextLayout* label = nullptr;
@@ -1391,9 +1408,9 @@ void RenderPanel() {
         float rowH = 0;
     };
     std::vector<RowLayout> rows;
-    rows.reserve(g_panel.rows.size());
+    rows.reserve(panel.rows.size());
 
-    for (auto& row : g_panel.rows) {
+    for (auto& row : panel.rows) {
         RowLayout r;
         std::wstring upper = row.first;
         for (auto& ch : upper) ch = (wchar_t)towupper(ch);
@@ -1427,13 +1444,13 @@ void RenderPanel() {
         }
     };
 
-    if (!EnsureSurface(g_panelWin, PANEL_W, height)) {
+    if (!EnsureSurface(win, PANEL_W, height)) {
         SafeRelease(&titleLayout);
         freeRows();
         return;
     }
 
-    ID2D1DCRenderTarget* rt = g_panelWin.rt;
+    ID2D1DCRenderTarget* rt = win.rt;
     rt->BeginDraw();
     rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 
@@ -1483,14 +1500,22 @@ void RenderPanel() {
 
     if (g_editMode) {
         DrawEditDecoration(rt, PANEL_W, height);
-        if (IsGamepadSelected(g_panelWin)) DrawSelectionRing(rt, PANEL_W, height);
+        if (IsGamepadSelected(win)) DrawSelectionRing(rt, PANEL_W, height);
     }
 
     if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
-        DiscardSurface(g_panelWin);
+        DiscardSurface(win);
         return;
     }
-    CommitWindow(g_panelWin, AnchorTopLeft);
+    CommitWindow(win, anchor);
+}
+
+void RenderPanel() {
+    RenderLabelValuePanel(g_panelWin, g_panel, g_showPanel, L"Game state panel", AnchorTopLeft);
+}
+
+void RenderStats() {
+    RenderLabelValuePanel(g_statsWin, g_stats, g_showStats, L"Usage stats panel", AnchorBottomRight);
 }
 
 bool InRect(const D2D1_RECT_F& r, int x, int y) {
@@ -1871,12 +1896,12 @@ void RenderConfig() {
 
     // --- Show toggles: one chip per area, filled (accent) when visible.
     rt->DrawText(L"Show", 4, g_fmtUi, D2D1::RectF(PAD, 158, 90, 178), white);
-    const wchar_t* labels[4] = {L"Chat", L"Memory", L"Panel", L"Mic"};
-    bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
+    const wchar_t* labels[kWidgetCount] = {L"Chat", L"Memory", L"Panel", L"Mic", L"Stats"};
+    bool* flags[kWidgetCount] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree, &g_showStats};
     const float chy = 178, chh = 26, chgap = 6;
     const float innerW = CONFIG_W - 2 * PAD;
-    const float chw = (innerW - 3 * chgap) / 4.0f;
-    for (int i = 0; i < 4; ++i) {
+    const float chw = (innerW - (kWidgetCount - 1) * chgap) / (float)kWidgetCount;
+    for (int i = 0; i < kWidgetCount; ++i) {
         float cx = PAD + i * (chw + chgap);
         g_rcToggle[i] = D2D1::RectF(cx, chy, cx + chw, chy + chh);
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcToggle[i], 7, 7);
@@ -1900,6 +1925,7 @@ void RerenderAll() {
     RelayoutToasts();
     RelayoutMemories();
     RenderPanel();
+    RenderStats();
     RenderHandsFree();
     RenderConfig();
 }
@@ -2033,8 +2059,8 @@ bool ConfigClick(int x, int y) {
     } else {
         for (int i = 0; i < kAccentCount; ++i)
             if (InRect(g_rcSwatch[i], x, y)) { g_accentIdx = i; changed = true; break; }
-        bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
-        for (int i = 0; !changed && i < 4; ++i)
+        bool* flags[kWidgetCount] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree, &g_showStats};
+        for (int i = 0; !changed && i < kWidgetCount; ++i)
             if (InRect(g_rcToggle[i], x, y)) { *flags[i] = !*flags[i]; changed = true; break; }
         for (size_t i = 0; !changed && i < g_rcPresetChips.size(); ++i)
             if (InRect(g_rcPresetChips[i], x, y)) { SwitchPreset((int)i); changed = true; break; }
@@ -2073,6 +2099,7 @@ void ApplyEditMode(bool on, bool full) {
     SetClickThrough(g_panelWin, !on);
     SetClickThrough(g_configWin, !on);
     SetClickThrough(g_handsfreeWin, !on);
+    SetClickThrough(g_statsWin, !on);
     // The toolbar is normally WS_EX_NOACTIVATE (never steals focus from the
     // game). Edit mode is the exception: taking foreground/focus stops the
     // game's own window from receiving keyboard/mouse input while editing
@@ -2096,6 +2123,7 @@ void ApplyEditMode(bool on, bool full) {
     RelayoutToasts();
     RelayoutMemories();
     RenderPanel();
+    RenderStats();
     RenderHandsFree();  // shows a positionable placeholder in edit mode
     if (on) {
         RenderConfig();
@@ -2139,15 +2167,29 @@ void RenderBanner() {
     rt->FillRoundedRectangle(card, bg);
     rt->DrawRoundedRectangle(card, acc, 1.4f);
 
+    // Same logo bitmap as the reply-toast avatar, sized up a bit for the banner's taller card.
+    constexpr float kBannerLogo = 40.0f;
+    float textLeft = PAD, textRight = w - PAD;
+    if (g_logoOk) {
+        ID2D1Bitmap* bmp = MakeBitmap(rt, g_logo);
+        if (bmp) {
+            float ly = (h - kBannerLogo) / 2.0f;
+            D2D1_RECT_F av = D2D1::RectF(PAD, ly, PAD + kBannerLogo, ly + kBannerLogo);
+            rt->DrawBitmap(bmp, av, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            SafeRelease(&bmp);
+        }
+        textLeft = PAD + kBannerLogo + 10.0f;
+    }
+
     rt->DrawText(L"Lykompanion overlay active", 26, g_fmtCenter,
-                 D2D1::RectF(PAD, 14, w - PAD, 40), white);
+                 D2D1::RectF(textLeft, 14, textRight, 40), white);
     std::wstring sub = L"Press " + FormatHotkeyCombo() + L" to move widgets & customize appearance";
     IDWriteTextLayout* subLayout = nullptr;
     if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(
-            sub.c_str(), (UINT32)sub.size(), g_fmtUi, w - 2 * PAD, 26.0f, &subLayout)) &&
+            sub.c_str(), (UINT32)sub.size(), g_fmtUi, textRight - textLeft, 26.0f, &subLayout)) &&
         subLayout) {
         subLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        rt->DrawTextLayout(D2D1::Point2F(PAD, 44), subLayout, dim);
+        rt->DrawTextLayout(D2D1::Point2F(textLeft, 44), subLayout, dim);
         SafeRelease(&subLayout);
     }
 
@@ -2216,6 +2258,19 @@ void HandleCommand(const std::wstring& line) {
             }
         }
         RenderPanel();
+    } else if (type == L"stats") {
+        g_stats = Panel{};
+        g_stats.valid = true;
+        const JsonValue* title = v.find(L"title");
+        if (title && title->type == JsonValue::Str) g_stats.title = title->str;
+        const JsonValue* rows = v.find(L"rows");
+        if (rows && rows->type == JsonValue::Arr) {
+            for (auto& r : rows->arr) {
+                if (r.type == JsonValue::Arr && r.arr.size() >= 2)
+                    g_stats.rows.emplace_back(r.arr[0].asStr(), r.arr[1].asStr());
+            }
+        }
+        RenderStats();
     } else if (type == L"edit_mode") {
         const JsonValue* en = v.find(L"enabled");
         const JsonValue* full = v.find(L"full");
@@ -2345,10 +2400,10 @@ void PollRenameKeys() {
 // ---------------------------------------------------------------------------
 
 void CycleSelectedWidget(int dir) {
-    for (int step = 0; step < 4; ++step) {
-        g_selectedWidgetIdx = ((g_selectedWidgetIdx + dir) % 4 + 4) % 4;
+    bool* flags[kWidgetCount] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree, &g_showStats};
+    for (int step = 0; step < kWidgetCount; ++step) {
+        g_selectedWidgetIdx = ((g_selectedWidgetIdx + dir) % kWidgetCount + kWidgetCount) % kWidgetCount;
         LayeredWindow* w = g_widgets[g_selectedWidgetIdx];
-        bool* flags[4] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree};
         if (w && *flags[g_selectedWidgetIdx]) break;  // skip hidden widgets
     }
     RerenderAll();
@@ -2506,6 +2561,7 @@ LayeredWindow* FromHwnd(HWND h) {
     if (h == g_memWin.hwnd) return &g_memWin;
     if (h == g_panelWin.hwnd) return &g_panelWin;
     if (h == g_handsfreeWin.hwnd) return &g_handsfreeWin;
+    if (h == g_statsWin.hwnd) return &g_statsWin;
     return nullptr;
 }
 
@@ -2582,6 +2638,8 @@ void InjectDemo() {
     HandleCommand(L"{\"type\":\"memory\",\"action\":\"save\",\"scope\":\"user\","
                   L"\"text\":\"Prefers concise answers and plays on hard difficulty.\"}");
     HandleCommand(L"{\"type\":\"handsfree\",\"active\":true}");
+    HandleCommand(L"{\"type\":\"stats\",\"title\":\"Usage\",\"rows\":"
+                  L"[[\"Balance\",\"$12.34\"],[\"Session cost\",\"$0.042\"]]}");
     // Image toast (needs network; shows "[image unavailable]" if offline).
     HandleCommand(L"{\"type\":\"image\",\"alt\":\"Sample map image\","
                   L"\"url\":\"https://picsum.photos/400/240\"}");
@@ -2634,8 +2692,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     g_configWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_bannerWin.hwnd    = CreateLayeredHwnd(hInstance);
     g_handsfreeWin.hwnd = CreateLayeredHwnd(hInstance);
+    g_statsWin.hwnd     = CreateLayeredHwnd(hInstance);
     if (!g_toastWin.hwnd || !g_memWin.hwnd || !g_panelWin.hwnd || !g_configWin.hwnd ||
-        !g_bannerWin.hwnd || !g_handsfreeWin.hwnd)
+        !g_bannerWin.hwnd || !g_handsfreeWin.hwnd || !g_statsWin.hwnd)
         return 3;
     // All layered windows share one class with an empty title, so give the config toolbar a
     // distinct one - it's the only window Python needs to identify from outside: its visibility
@@ -2648,6 +2707,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     g_widgets[1] = &g_memWin;
     g_widgets[2] = &g_panelWin;
     g_widgets[3] = &g_handsfreeWin;
+    g_widgets[4] = &g_statsWin;
 
     LoadLogo();    // reply-toast avatar (logo.png next to the exe)
     LoadLayout();  // restore saved presets + appearance (also applies the font/scale/hotkey)

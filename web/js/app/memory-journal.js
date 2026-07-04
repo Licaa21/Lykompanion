@@ -132,8 +132,48 @@ const journalLibraryView = document.getElementById("journal-library-view");
 const journalDetailView = document.getElementById("journal-detail-view");
 const journalDetailContent = document.getElementById("journal-detail-content");
 const journalDetailBack = document.getElementById("journal-detail-back");
+const journalSortSelect = document.getElementById("journal-sort-select");
+const journalSortDirBtn = document.getElementById("journal-sort-dir");
 
 let allJournalGames = [];
+
+const JOURNAL_SORT_KEY = "lyko-journal-sort";
+const JOURNAL_SORT_DIR_KEY = "lyko-journal-sort-dir";
+let journalSortBy = localStorage.getItem(JOURNAL_SORT_KEY) || "last_played";
+let journalSortDir = localStorage.getItem(JOURNAL_SORT_DIR_KEY) || "desc";
+journalSortSelect.value = journalSortBy;
+journalSortDirBtn.textContent = journalSortDir === "asc" ? "↑" : "↓";
+
+function sortJournalGames(games) {
+  const dir = journalSortDir === "desc" ? -1 : 1;
+  const sorted = [...games];
+  sorted.sort((a, b) => {
+    if (journalSortBy === "title") {
+      return dir * (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+    }
+    // last_played / date_added: null/missing values always sort last, regardless of direction.
+    const av = a[journalSortBy];
+    const bv = b[journalSortBy];
+    if (!av && !bv) return 0;
+    if (!av) return 1;
+    if (!bv) return -1;
+    return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+  return sorted;
+}
+
+journalSortSelect.addEventListener("change", () => {
+  journalSortBy = journalSortSelect.value;
+  localStorage.setItem(JOURNAL_SORT_KEY, journalSortBy);
+  renderLibrary(sortJournalGames(allJournalGames));
+});
+
+journalSortDirBtn.addEventListener("click", () => {
+  journalSortDir = journalSortDir === "asc" ? "desc" : "asc";
+  localStorage.setItem(JOURNAL_SORT_DIR_KEY, journalSortDir);
+  journalSortDirBtn.textContent = journalSortDir === "asc" ? "↑" : "↓";
+  renderLibrary(sortJournalGames(allJournalGames));
+});
 // Which game's detail view is open, and which single tab-card is selected in it - one of
 // "universal" (game-scope memories), "training", or a profile's session_id. Reset only when a
 // *different* game is opened, so re-renders triggered by refreshJournalDetail() keep the place.
@@ -171,7 +211,7 @@ async function loadGamingJournal() {
     games = [];
   }
   allJournalGames = games;
-  renderLibrary(games);
+  renderLibrary(sortJournalGames(games));
 }
 
 function buildJournalAddForm(placeholder, buildBody) {

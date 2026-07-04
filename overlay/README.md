@@ -26,6 +26,7 @@ just one client. Commands:
 {"type":"toast","text":"...","kind":"reply"|"reminder"}
 {"type":"image","url":"https://...","alt":"caption"}
 {"type":"game_state","title":"...","rows":[["Label","Value"], ...]}
+{"type":"stats","title":"...","rows":[["Label","Value"], ...]}
 {"type":"edit_mode","enabled":true}
 {"type":"set_hotkey","mods":["ctrl","shift"],"key":"o"}
 {"type":"quit"}
@@ -40,6 +41,12 @@ server is guaranteed to be listening).
 `image` commands download the URL on a background thread (WIC decode + downscale)
 and render it as a toast with an optional caption — so companion replies that
 embed a web image (e.g. a map screenshot) show up in the overlay too.
+
+`stats` renders a second label/value panel (title + rows, same look as
+`game_state`) for content that isn't tied to a specific game — currently the
+OpenRouter account balance and the current app-session's LLM cost. It's its
+own draggable/toggleable widget ("Stats" in the edit-mode Show row), independent
+of whether a game-state panel is showing.
 
 Quick manual test (PowerShell, no Python involved):
 
@@ -59,7 +66,8 @@ Settings — see below) to toggle edit mode: widgets become draggable, empty one
 show a placeholder, and a top-center toolbar exposes **opacity**, **text
 size**, **font**, an **accent-color** picker, per-area **show/hide** toggles
 (Chat = reply/reminder/image toasts, Memory = memory save/remove toasts, Panel
-= game-state panel, Mic = hands-free indicator), a **presets** row, and
+= game-state panel, Mic = hands-free indicator, Stats = OpenRouter balance /
+session-cost panel), a **presets** row, and
 **Save** / **Discard & Close** buttons. The memory toasts live in their **own
 draggable area** (bottom-right by default), separate from the reply/reminder
 toasts (top-right).

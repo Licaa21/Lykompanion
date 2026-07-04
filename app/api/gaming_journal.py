@@ -48,6 +48,7 @@ async def get_gaming_journal() -> list[GamingJournalGame]:
                 observations=observations.get_observations(proc, s["session_id"]),
             ))
         art = game_art.get_art(proc)
+        last_played = max((s.updated_at for s in sessions if s.updated_at), default=None)
         games.append(GamingJournalGame(
             process=proc,
             title=(art or {}).get("title") or proc,
@@ -56,6 +57,8 @@ async def get_gaming_journal() -> list[GamingJournalGame]:
             tracked=key in whitelist_lower,
             memories=game_memories,
             sessions=sessions,
+            date_added=(art or {}).get("first_seen_at"),
+            last_played=last_played,
         ))
     return games
 

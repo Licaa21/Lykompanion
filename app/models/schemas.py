@@ -249,6 +249,8 @@ class GamingJournalGame(BaseModel):
     tracked: bool = False
     memories: list[MemoryEntry] = []
     sessions: list[GamingJournalSession] = []
+    date_added: str | None = None
+    last_played: str | None = None
 
 
 class GameArtRecord(BaseModel):
