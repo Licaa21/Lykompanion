@@ -42,6 +42,17 @@ def get_art(process: str) -> dict | None:
     return _load_all().get(process.lower())
 
 
+def get_display_title(process: str) -> str:
+    """Best-effort human-readable game title for a process, for prompts/UI labels. Prefers the
+    cached (or user-overridden) library title; falls back to a cleaned-up form of the executable
+    name when art was never fetched (e.g. 'EldenRing.exe' -> 'Elden Ring'). Never hits the network."""
+    record = _load_all().get(process.lower())
+    title = (record or {}).get("title")
+    if title and title.strip():
+        return title.strip()
+    return _clean_search_term(process) or process
+
+
 def set_title_override(process: str, title: str) -> dict:
     title = title.strip()
     data = _load_all()

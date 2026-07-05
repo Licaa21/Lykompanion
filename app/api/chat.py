@@ -12,7 +12,9 @@ from fastapi.responses import StreamingResponse
 from openai import APIError
 from pydantic import ValidationError
 
-from app.core import debug_log, game_state, memory, observations, reminders as reminders_store
+from datetime import datetime, timezone
+
+from app.core import debug_log, game_art, game_state, memory, observations, reminders as reminders_store
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -261,10 +263,28 @@ def _retrieval_query(history: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def _session_duration_note() -> str:
+    """Coarse "how long into this gaming session" line for the chat prompt. Deliberately fuzzy —
+    the underlying timer marks when this game became the tracked one (survives alt-tabs to the
+    companion, resets on a real game switch/exit), so false precision would be misleading."""
+    started = game_state.get_tracking_started_at()
+    if not started:
+        return ""
+    minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+    if minutes < 5:
+        phrasing = "just started this session"
+    elif minutes < 90:
+        phrasing = f"about {round(minutes / 5) * 5} minutes into this session"
+    else:
+        phrasing = f"about {minutes / 60:.1f} hours into this session"
+    return f" They're {phrasing}."
+
+
 def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     # Split into a stable prefix (rarely changes turn-to-turn: base prompt, custom instructions,
-    # sleep-word backstop, monitor list) and a variable suffix (datetime, foreground app, memories,
-    # reminders, game state, observations - different on every single call). Sent as two separate
+    # sleep-word backstop) and a variable suffix (datetime, monitors, foreground app, currently-
+    # playing game, memories, reminders, game state, observations - different on every single call).
+    # Sent as two separate
     # content blocks with an explicit cache_control breakpoint on the stable one: providers that
     # support prompt caching (e.g. Anthropic models via OpenRouter) can then reuse the cached
     # prefix instead of reprocessing it every turn. Harmless elsewhere - an unrecognized
@@ -277,21 +297,24 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
 
     # LLM backstop for the client-side sleep word: if the browser's speech recognition misses the
     # phrase (or isn't available) and it reaches the model instead, treat it as a stop command
-    # rather than a question to answer.
+    # rather than a question to answer. The full stop-listening behavior lives in the persona
+    # prompt's Awareness Tools section - this only binds the user's specific configured phrase to
+    # it, so keep it terse to avoid restating the whole rule.
     if settings.sleep_word_enabled and settings.sleep_word_phrase.strip():
         stable_content += (
-            f'\n\n[Sleep word] If the user\'s message is essentially just "{settings.sleep_word_phrase.strip()}" '
-            "(or a clear stop-listening request), treat it purely as a command to stop hands-free listening: "
-            'call stop_listening and reply with exactly "Signing off..." and nothing else. Never answer it as a '
-            "question or repeat it back."
+            f'\n\n[Sleep word] Treat a message that is essentially just "{settings.sleep_word_phrase.strip()}" '
+            "as a stop-listening command, exactly like any other sign-off (see Awareness Tools)."
         )
-
-    monitors = format_monitors_for_prompt()
-    if monitors:
-        stable_content += "\n\n" + monitors
 
     # Variable content from here on — kept out of the cached block above.
     variable_content = current_datetime_context()
+
+    # Monitor list drives take_screenshot's monitor index. Kept in the VARIABLE block (not the
+    # cached prefix) because the "(active)" marker is runtime state that would otherwise stale the
+    # cache or bust the whole cached prefix every time the active monitor changes.
+    monitors = format_monitors_for_prompt()
+    if monitors:
+        variable_content += "\n\n" + monitors
 
     # Injected instead of a fetch_active_process tool call — it's a few tokens, and having the
     # model fetch it doubled the LLM cost of every conversation that needed it.
@@ -308,6 +331,19 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     gs = game_state.get_game_state()
     tracked_process = gs["process"] if gs else None
     tracked_session = gs["session_id"] if gs else None
+
+    # Name the tracked game by its real title, not just its executable — the model shouldn't have
+    # to map "eldenring.exe" -> "Elden Ring" itself (impossible for launcher/obfuscated exe names),
+    # and this anchors every "(game: <exe>)" memory suffix to something human. Plus a coarse
+    # how-long-they've-been-playing signal so the companion can react to just-launched vs deep-in.
+    if tracked_process:
+        title = game_art.get_display_title(tracked_process)
+        variable_content += (
+            f"\n\n[Currently playing] {title} (process: {tracked_process}). This is the game being "
+            "tracked right now; the game/session facts and screen observations below are about it."
+        )
+        variable_content += _session_duration_note()
+
     memories = memory.format_memories_for_prompt(
         tracked_process,
         tracked_session,
