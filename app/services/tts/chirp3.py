@@ -1,10 +1,13 @@
 import asyncio
 import base64
+import logging
 import struct
 
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://texttospeech.googleapis.com"
 _SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -103,16 +106,20 @@ async def list_voices() -> list[dict]:
     try:
         headers, params = await _request_auth()
     except Exception as exc:
-        print(f"[chirp3] list_voices auth failed: {exc!r}")
+        logger.info("[chirp3] list_voices auth failed: %r", exc)
         return []
     try:
         async with httpx.AsyncClient(base_url=_BASE_URL, timeout=10) as client:
             response = await client.get("/v1/voices", headers=headers, params=params)
             response.raise_for_status()
             voices = response.json().get("voices", [])
-        print(f"[chirp3] fetched {len(voices)} total voices, {sum(1 for v in voices if 'Chirp3-HD' in v['name'])} Chirp3-HD")
+        logger.info(
+            "[chirp3] fetched %d total voices, %d Chirp3-HD",
+            len(voices),
+            sum(1 for v in voices if "Chirp3-HD" in v["name"]),
+        )
         return [{"id": v["name"], "name": v["name"]} for v in voices if "Chirp3-HD" in v["name"]]
     except Exception as exc:
         body = getattr(getattr(exc, "response", None), "text", "")
-        print(f"[chirp3] list_voices request failed: {exc!r} – {body}")
+        logger.info("[chirp3] list_voices request failed: %r – %s", exc, body)
         return []
