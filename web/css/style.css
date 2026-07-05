@@ -1660,6 +1660,13 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   padding: 0 6px;
   transition: opacity 300ms ease;
 }
+/* YouTube's own fullscreen chrome (title/share/related bar, endscreen cards - see the
+   .youtube-player-frame comment) claims the edges of the video, not the middle - our own controls
+   collapsing into it there is what this is protecting against, not a raw z-index/click problem
+   (ytVideoGuard already sits above it for input). So unlike the normal docked layout, which spreads
+   the left/right button groups out to the bar's edges via the grid in the base rule, fullscreen
+   overrides that to a plain centered flex row: every group (playlist/search, transport, volume/
+   fullscreen) huddles together in the middle, clear of where YouTube draws over the corners. */
 .youtube-player-panel--fullscreen .youtube-player-controls {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -1668,6 +1675,9 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   background: linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%);
   border-top: none;
   transition: opacity 300ms ease;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
 }
 .youtube-player-panel--fullscreen #youtube-player-panel-popout,
 .youtube-player-panel--fullscreen #youtube-player-panel-toggle {
