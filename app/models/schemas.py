@@ -64,6 +64,7 @@ class CompanionConfig(BaseModel):
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
     game_state_visual_diff_threshold_percent: float = 12.0
+    game_state_visual_diff_noise_floor_percent: float = 1.5
     game_state_model: str | None = None
     game_state_ocr_similarity_threshold: float = 0.9
     game_state_ocr_max_width: int = 1600

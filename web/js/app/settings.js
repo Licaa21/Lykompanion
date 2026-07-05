@@ -501,6 +501,9 @@ document.querySelectorAll(".provider-picker-btn").forEach((btn) => {
 
 document.getElementById("pr-save").addEventListener("click", async (event) => {
   if (!prCurrentModelId) return;
+  // Capture the button before the await - event.currentTarget is only valid during synchronous
+  // event dispatch and is already null by the time an awaited fetch() resolves.
+  const button = event.currentTarget;
   const body = {
     only: [...prChecked],
     sort: prSortSelect.value || null,
@@ -513,7 +516,7 @@ document.getElementById("pr-save").addEventListener("click", async (event) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  flashSaved(event.currentTarget);
+  flashSaved(button);
   setTimeout(() => closeModal(providerRoutingModal), 650);
 });
 
@@ -645,6 +648,13 @@ const gameStateOcrSimilarityValue = document.getElementById("cfg-game-state-ocr-
 
 gameStateOcrSimilarityInput.addEventListener("input", () => {
   gameStateOcrSimilarityValue.textContent = parseFloat(gameStateOcrSimilarityInput.value).toFixed(2);
+});
+
+const gameStateVisualDiffNoiseFloorInput = document.getElementById("cfg-game-state-visual-diff-noise-floor");
+const gameStateVisualDiffNoiseFloorValue = document.getElementById("cfg-game-state-visual-diff-noise-floor-value");
+
+gameStateVisualDiffNoiseFloorInput.addEventListener("input", () => {
+  gameStateVisualDiffNoiseFloorValue.textContent = gameStateVisualDiffNoiseFloorInput.value;
 });
 
 const gameStateOcrWidthInput = document.getElementById("cfg-game-state-ocr-width");
@@ -874,6 +884,8 @@ function applyConfigToForm(cfg) {
   gameStateCaptureIntervalValue.textContent = cfg.game_state_capture_interval_seconds;
   gameStateVisualDiffInput.value = cfg.game_state_visual_diff_threshold_percent ?? 12;
   gameStateVisualDiffValue.textContent = cfg.game_state_visual_diff_threshold_percent ?? 12;
+  gameStateVisualDiffNoiseFloorInput.value = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
+  gameStateVisualDiffNoiseFloorValue.textContent = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
   gameStateOcrSimilarityInput.value = cfg.game_state_ocr_similarity_threshold ?? 0.9;
   gameStateOcrSimilarityValue.textContent = (cfg.game_state_ocr_similarity_threshold ?? 0.9).toFixed(2);
   gameStateOcrWidthInput.value = cfg.game_state_ocr_max_width ?? 1600;
@@ -1132,6 +1144,7 @@ async function saveSettings(saveButton) {
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_visual_diff_threshold_percent: parseFloat(gameStateVisualDiffInput.value),
+    game_state_visual_diff_noise_floor_percent: parseFloat(gameStateVisualDiffNoiseFloorInput.value),
     game_state_model: document.getElementById("cfg-game-state-model").value,
     game_state_ocr_similarity_threshold: parseFloat(gameStateOcrSimilarityInput.value),
     game_state_ocr_max_width: parseInt(gameStateOcrWidthInput.value, 10),

@@ -787,6 +787,10 @@
                   <input id="cfg-game-state-ocr-similarity" type="range" min="0.5" max="1" step="0.01" value="0.9" />
                 </label>
                 <label>
+                  <span class="cfg-label">Visual Diff Noise Floor: <span id="cfg-game-state-visual-diff-noise-floor-value">1.5</span>% <button type="button" class="cfg-help" data-tip="OCR text similarity is noisy - misreads can flag a frame as 'changed' even when the screen barely moved. If OCR says a window changed but the pixel diff between its frames falls below this floor, it's treated as OCR noise and the LLM pass is skipped. Keep well below the Visual Diff Threshold above - this only catches near-zero-diff noise, not real small HUD changes.">?</button></span>
+                  <input id="cfg-game-state-visual-diff-noise-floor" type="range" min="0" max="20" step="0.5" value="1.5" />
+                </label>
+                <label>
                   <span class="cfg-label">OCR Capture Width: <span id="cfg-game-state-ocr-width-value">1600</span>px <button type="button" class="cfg-help" data-tip="Each captured frame is downscaled to this width before OCR (independent of the Screenshot Max Width used for vision LLM calls). Lower cuts OCR CPU time with negligible accuracy loss for HUD-sized text.">?</button></span>
                   <input id="cfg-game-state-ocr-width" type="range" min="640" max="3840" step="80" value="1600" />
                 </label>

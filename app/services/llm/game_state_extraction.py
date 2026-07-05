@@ -489,6 +489,28 @@ async def _capture_tick() -> None:
         settings.game_state_visual_diff_threshold_percent,
     )
 
+    if (
+        frames_to_send
+        and diff_percent is not None
+        and settings.game_state_visual_diff_noise_floor_percent > 0
+        and diff_percent < settings.game_state_visual_diff_noise_floor_percent
+    ):
+        # OCR flagged text as "changed," but the pixels barely moved at all - almost certainly OCR
+        # misread jitter on an otherwise static screen (a stable HUD number/glyph read slightly
+        # differently between ticks), not a real on-screen change. Discard it and fall through to
+        # the same "nothing changed" handling below rather than wasting an LLM call on noise.
+        logger.info(
+            "Game-state poll: OCR flagged %d changed frame(s) for process=%r but pixel diff is "
+            "only %.1f%% (below noise floor=%.1f%%) - treating as OCR noise, not a real change",
+            len(frames_to_send),
+            process,
+            diff_percent,
+            settings.game_state_visual_diff_noise_floor_percent,
+        )
+        frames_to_send = []
+        first_b64 = None
+        last_b64 = None
+
     if not frames_to_send:
         if diff_percent is not None and diff_percent >= settings.game_state_visual_diff_threshold_percent:
             # OCR text never changed all window, but the actual pixels did (camera movement,

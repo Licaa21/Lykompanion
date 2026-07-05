@@ -148,6 +148,13 @@ class Settings(BaseSettings):
     # through anyway on pixels alone. A real frozen screen has ~0% diff and stays skipped. Set to
     # 100 to disable (never force a window through on visual diff alone).
     game_state_visual_diff_threshold_percent: float = 12.0
+    # A frame kept as "changed" by OCR-text similarity alone is still discarded if the same
+    # window's visual diff (see above) falls below this much lower floor - OCR similarity is noisy
+    # (misreads jitter a few characters between otherwise-identical frames) and used to trigger
+    # LLM passes on windows where the pixels barely moved at all. Keep this well below the main
+    # threshold: it's only meant to catch near-zero-diff noise, not veto genuine small HUD changes
+    # (e.g. an HP number ticking down), which do move some pixels even in a small thumbnail.
+    game_state_visual_diff_noise_floor_percent: float = 1.5
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this
