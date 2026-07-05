@@ -23,15 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image, ImageChops, ImageStat  # noqa: E402
 
+from app.core.config import settings  # noqa: E402
 from app.services.ocr import windows_ocr  # noqa: E402
 from app.services.screenshot.wgc_capture import capture_monitor_frame  # noqa: E402
 
-OCR_MAX_WIDTH = 1600  # mirrors GAME_STATE_OCR_MAX_WIDTH default
-THUMBNAIL_SIZE = 64  # mirrors GAME_STATE_VISUAL_DIFF_THUMBNAIL_SIZE default
-
 
 def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
-    size = (THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+    size = (settings.game_state_visual_diff_thumbnail_size, settings.game_state_visual_diff_thumbnail_size)
     a_thumb = a.convert("L").resize(size)
     b_thumb = b.convert("L").resize(size)
     diff = ImageChops.difference(a_thumb, b_thumb)
@@ -39,8 +37,13 @@ def _visual_diff_percent(a: Image.Image, b: Image.Image) -> float:
 
 
 async def main() -> None:
-    interval = float(sys.argv[1]) if len(sys.argv) > 1 else 3.0
-    print(f"OCR debug tool - capturing every {interval}s. Ctrl+C to stop.\n")
+    interval = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
+    ocr_max_width = settings.game_state_ocr_max_width
+    print(
+        f"OCR debug tool - capturing every {interval}s (GAME_STATE_OCR_MAX_WIDTH={ocr_max_width}, "
+        f"GAME_STATE_VISUAL_DIFF_THUMBNAIL_SIZE={settings.game_state_visual_diff_thumbnail_size}). "
+        "Ctrl+C to stop.\n"
+    )
 
     last_image: Image.Image | None = None
     last_text: str | None = None
@@ -50,9 +53,9 @@ async def main() -> None:
         if image is None:
             print(f"[{time.strftime('%H:%M:%S')}] capture returned no frame\n")
         else:
-            if image.width > OCR_MAX_WIDTH:
-                ratio = OCR_MAX_WIDTH / image.width
-                image = image.resize((OCR_MAX_WIDTH, int(image.height * ratio)))
+            if image.width > ocr_max_width:
+                ratio = ocr_max_width / image.width
+                image = image.resize((ocr_max_width, int(image.height * ratio)))
             text = (await windows_ocr.extract_text(image) or "").strip()
             normalized = " ".join(text.split())
 
