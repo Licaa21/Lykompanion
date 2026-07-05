@@ -20,10 +20,10 @@ Never promote:
 
 When several observations tell one story (e.g. three beats of the same questline), prefer saving **one synthesized fact** that captures the outcome over saving each beat separately — and clear all the ids you merged.
 
-**Tag each saved fact with a `scope`:**
-- `"session"` — specific to this playthrough only: level, story/quest progress, decisions made this run, in-game relationships. Would NOT survive starting a fresh playthrough. Most screen observations land here.
-- `"game"` — true across all the player's runs of this game: how they typically approach it, build tendencies for this title. Ask: *would this still be true if they wiped their save and started over?*
-- `"user"` — about the person regardless of game: cross-game facts the screen genuinely establishes (e.g. their platform account name), and personality/playstyle traits synthesized from a behavioral pattern (see above) — the latter is the main way `"user"` scope gets used from screen observations.
+**Tag each saved fact with a `scope`** (would it survive a fresh playthrough? a new game?):
+- `"session"` — this playthrough only: level, quest/story progress, decisions this run, relationships built. Most screen observations land here.
+- `"game"` — true across all runs of this game: how they typically approach it, build tendencies for this title.
+- `"user"` — about the person regardless of game: cross-game facts the screen establishes (e.g. a platform account name) and personality/playstyle traits synthesized from a behavioral pattern (see above) — the latter is the main reason `"user"` scope comes up here.
 
 Do not duplicate something already in the known facts — if an observation just restates a known fact, clear it without saving.
 
