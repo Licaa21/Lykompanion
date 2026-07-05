@@ -750,8 +750,14 @@ function ytPipPoll() {
     state = JSON.parse(localStorage.getItem(YT_PIP_STATE_KEY) || "null");
   } catch (err) { /* not written yet / corrupt - wait for the next heartbeat */ }
   if (!state) return;
-  // Track the pop-out's queue walking + volume live, so a later resume (and the LLM's view of
-  // "what's playing") stays correct without waiting for the close handoff.
+  // Track the pop-out's queue/index/volume live, so a later resume (and the LLM's view of "what's
+  // playing") stays correct without waiting for the close handoff. The queue itself is included,
+  // not just an index into this window's own copy - the pop-out's playlists/search buttons can
+  // extend ITS queue independently (a fresh pick, not just walking next/previous), which would
+  // otherwise leave this side with a stale/shorter queue the new index doesn't line up with.
+  if (Array.isArray(state.queue) && state.queue.length) {
+    ytQueue = state.queue;
+  }
   if (Number.isFinite(state.index) && ytQueue.length) {
     ytQueueIndex = Math.min(Math.max(0, state.index), ytQueue.length - 1);
   }

@@ -362,15 +362,16 @@ def main() -> None:
 
     # Pop-out YouTube player: a real second OS window (so the OS gives dragging to another
     # monitor for free) but frameless like the main window, for visual consistency - it draws its
-    # own header/controls (web/player.html) instead of a native Windows title bar. The page is
-    # static so no API token is needed; playback state travels through localStorage, which both
-    # windows share (same WebView2 profile). documentPictureInPicture doesn't exist in WebView2,
-    # so this native window IS the desktop app's pop-out mechanism - the frontend branches on
-    # window.pywebview.
+    # own header/controls (web/player.html) instead of a native Windows title bar. Playback state
+    # travels through localStorage, which both windows share (same WebView2 profile).
+    # documentPictureInPicture doesn't exist in WebView2, so this native window IS the desktop
+    # app's pop-out mechanism - the frontend branches on window.pywebview. Needs the same ?token=
+    # handoff as the main window (player-window.js reads/strips it the same way core.js does) -
+    # its playlists/search buttons call authenticated /api/* endpoints too.
     def open_player_window() -> None:
         child = webview.create_window(
             "Lykompanion Player",
-            f"{URL}/player.html",
+            f"{URL}/player.html?token={API_TOKEN}",
             width=640,
             height=480,
             min_size=(380, 300),

@@ -21,6 +21,21 @@
 // defaults to resume:true, the safer of the two for an close path the user didn't explicitly pick.
 // writeState()'s closedWritten guard makes calling it from multiple paths harmless.
 
+// This window is opened fresh (never reloaded) with ?token=... on its URL (run_app.py's
+// open_player_window) - unlike core.js's version of this same patch, there's no need to persist
+// the token across reloads, just read it once and patch fetch for the playlists/search buttons'
+// authenticated /api/* calls.
+const API_TOKEN = new URLSearchParams(location.search).get("token") || "";
+if (API_TOKEN) {
+  history.replaceState(null, "", location.pathname);
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    headers.set("X-Lyko-Token", API_TOKEN);
+    return _origFetch(input, { ...init, headers });
+  };
+}
+
 const BOOT_KEY = "lyko-yt-pip-boot";
 const STATE_KEY = "lyko-yt-pip-state";
 const CMD_KEY = "lyko-yt-pip-cmd";
@@ -45,6 +60,14 @@ const fullscreenIconExpand = fullscreenBtn.querySelector(".youtube-player-fullsc
 const fullscreenIconCompress = fullscreenBtn.querySelector(".youtube-player-fullscreen-icon-compress");
 const closeBtn = document.getElementById("player-close-btn");
 const dockBtn = document.getElementById("player-dock-btn");
+const playlistsBtn = document.getElementById("player-playlists-btn");
+const searchBtn = document.getElementById("player-search-btn");
+const playlistsPanel = document.getElementById("player-playlists");
+const playlistsList = document.getElementById("player-playlists-list");
+const browsePanel = document.getElementById("player-browse");
+const browseForm = document.getElementById("player-browse-form");
+const browseInput = document.getElementById("player-browse-input");
+const browseResults = document.getElementById("player-browse-results");
 
 let boot = null;
 try {
@@ -99,6 +122,10 @@ function writeState(closed, resume) {
   const playing = player && player.getPlayerState ? player.getPlayerState() === 1 : false;
   localStorage.setItem(STATE_KEY, JSON.stringify({
     ts: Date.now(),
+    // The playlists/search buttons can extend this window's own queue past what the main window
+    // booted it with (picking a new video/playlist here isn't just walking next/previous) - send
+    // the queue itself back too, not just an index into the main window's now-stale copy of it.
+    queue,
     index,
     time: player && player.getCurrentTime ? player.getCurrentTime() || 0 : 0,
     playing,
@@ -228,6 +255,130 @@ function playIndex(newIndex, startSeconds, paused) {
   if (paused && player.cueVideoById) player.cueVideoById(args);
   else player.loadVideoById(args);
 }
+
+// Playlists/search picks a video directly in THIS window's own queue - there's no main-window
+// loadYoutubeVideo/loadYoutubePlaylist to call from here, this window owns playback on its own.
+function loadVideo(videoId, title, channel) {
+  queue = queue.slice(0, index + 1);
+  queue.push({ videoId, title, channel });
+  index = queue.length - 1;
+  updateChrome();
+  if (player && player.loadVideoById) player.loadVideoById({ videoId, startSeconds: 0 });
+}
+function loadPlaylist(videos, title) {
+  if (!videos || !videos.length) return;
+  queue = queue.slice(0, index + 1);
+  for (const video of videos) {
+    queue.push({ videoId: video.video_id, title: video.title, channel: video.channel });
+  }
+  index = queue.length - videos.length;
+  updateChrome();
+  const first = queue[index];
+  if (player && player.loadVideoById) player.loadVideoById({ videoId: first.videoId, startSeconds: 0 });
+}
+
+// Renders a list of {title, ...} items, each row itself clickable to play - mirrors
+// youtube-player.js's ytRenderResultsList (same row shape, different data source).
+function renderResultsList(container, items, emptyText, onPlay) {
+  if (!items.length) {
+    container.innerHTML = `<div class="youtube-player-list-empty">${emptyText}</div>`;
+    return;
+  }
+  container.innerHTML = "";
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "youtube-player-list-item";
+    row.title = `Play '${item.title}'`;
+    row.addEventListener("click", () => onPlay(item));
+    const name = document.createElement("span");
+    name.className = "youtube-player-list-name";
+    name.textContent = item.title;
+    row.appendChild(name);
+    container.appendChild(row);
+  }
+}
+
+function closeListPanels() {
+  playlistsPanel.hidden = true;
+  browsePanel.hidden = true;
+}
+
+// Only shown once the user has connected their YouTube account (Settings -> API Keys -> YouTube),
+// mirrors youtube-player.js's ytRefreshPlaylistsButtonVisibility.
+async function refreshPlaylistsButtonVisibility() {
+  try {
+    const cfg = await fetch("/api/config").then((r) => r.json());
+    playlistsBtn.hidden = !cfg.youtube_connected;
+  } catch (err) {
+    playlistsBtn.hidden = true;
+  }
+}
+refreshPlaylistsButtonVisibility();
+
+async function openPlaylistsPanel() {
+  browsePanel.hidden = true;
+  playlistsPanel.hidden = false;
+  playlistsList.innerHTML = '<div class="youtube-player-list-empty">Loading…</div>';
+  let playlists = [];
+  try {
+    const data = await fetch("/api/youtube/oauth/playlists").then((r) => r.json());
+    playlists = data.playlists || [];
+  } catch (err) {
+    playlistsList.innerHTML = '<div class="youtube-player-list-empty">Couldn\'t load playlists.</div>';
+    return;
+  }
+  renderResultsList(playlistsList, playlists, "No playlists found.", async (playlist) => {
+    let videos = [];
+    try {
+      const data = await fetch(`/api/youtube/oauth/playlists/${encodeURIComponent(playlist.id)}/videos`).then((r) => r.json());
+      videos = data.videos || [];
+    } catch (err) {
+      return;
+    }
+    if (!videos.length) return;
+    loadPlaylist(videos, playlist.title);
+    closeListPanels();
+  });
+}
+playlistsBtn.addEventListener("click", () => {
+  if (playlistsPanel.hidden) openPlaylistsPanel();
+  else closeListPanels();
+});
+
+function openBrowsePanel() {
+  playlistsPanel.hidden = true;
+  browsePanel.hidden = false;
+  browseInput.focus();
+}
+searchBtn.addEventListener("click", () => {
+  if (browsePanel.hidden) openBrowsePanel();
+  else closeListPanels();
+});
+
+browseForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = browseInput.value.trim();
+  if (!query) return;
+  browseResults.innerHTML = '<div class="youtube-player-list-empty">Searching…</div>';
+  let results = [];
+  try {
+    const data = await fetch(`/api/youtube/search?q=${encodeURIComponent(query)}`).then((r) => r.json());
+    results = data.results || [];
+  } catch (err) {
+    browseResults.innerHTML = '<div class="youtube-player-list-empty">Search failed.</div>';
+    return;
+  }
+  renderResultsList(browseResults, results, "No results found.", async (result) => {
+    closeListPanels();
+    let payload = { video_id: result.video_id, title: result.title };
+    try {
+      const url = `/api/youtube/mix?video_id=${encodeURIComponent(result.video_id)}&title=${encodeURIComponent(result.title)}`;
+      payload = await fetch(url).then((r) => r.json());
+    } catch (err) { /* fall back to just the picked video below */ }
+    if (payload.videos) loadPlaylist(payload.videos, payload.title);
+    else loadVideo(payload.video_id || result.video_id, payload.title || result.title);
+  });
+});
 
 function handleCommand(cmd) {
   switch (cmd.action) {
