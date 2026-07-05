@@ -44,7 +44,14 @@ from app.services.llm.game_state_extraction import run_game_state_poller
 from app.services.llm.reminder_poller import run_reminder_poller
 from app.services.usage_overlay import run_usage_overlay_poller
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# Reuse uvicorn's own colorized formatter (green INFO, yellow WARNING, red ERROR/CRITICAL) so
+# app-level logs (game-state poller, memory extraction, ...) look consistent with uvicorn's
+# own request-log lines instead of appearing as plain uncolored text alongside them.
+from uvicorn.logging import ColourizedFormatter
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(ColourizedFormatter(fmt="%(levelprefix)s %(asctime)s %(name)s: %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 
 @asynccontextmanager

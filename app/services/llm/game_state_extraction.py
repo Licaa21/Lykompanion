@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
+
+# Last non-approved foreground process the poller already logged a "skipping" message for, so
+# _capture_tick (which ticks every game_state_capture_interval_seconds, default 1s) logs a
+# transition once instead of flooding INFO every tick while idling on the same app/game.
+_last_logged_skip: str | None = None
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
@@ -307,6 +312,7 @@ async def _capture_tick() -> None:
     frames has accumulated, batches them into a single structuring LLM call."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
+    global _last_logged_skip
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -329,10 +335,13 @@ async def _capture_tick() -> None:
             if is_foreground_window_fullscreen():
                 if game_state_processes.add_pending_process(foreground):
                     logger.info("Game-state poll: unfamiliar fullscreen process=%r queued for user approval", foreground)
-            else:
+            elif _last_logged_skip != foreground:
                 logger.info("Game-state poll: skipping unfamiliar windowed process=%r (not fullscreen, not queued for approval)", foreground)
+                _last_logged_skip = foreground
         elif not is_game:
-            logger.info("Game-state poll: skipping foreground process=%r (not recognized as a game / blacklisted)", foreground)
+            if _last_logged_skip != foreground:
+                logger.info("Game-state poll: skipping foreground process=%r (not recognized as a game / blacklisted)", foreground)
+                _last_logged_skip = foreground
 
         if _last_process is not None and not is_process_running(_last_process):
             logger.info(
