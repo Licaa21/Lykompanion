@@ -14,6 +14,7 @@ from app.core import game_state, memory, observations
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
+from app.services.llm.web_search_tool import execute_web_search
 
 logger = logging.getLogger(__name__)
 
@@ -51,30 +52,62 @@ async def confirm_observations(process: str, session_id: str | None) -> None:
 
         known_facts = memory.format_memories_for_prompt(process, session_id) or "Known facts about the user: none yet."
         game_state_text = game_state.format_game_state_for_prompt()
+        user_content = (
+            f"{current_datetime_context()}\n\nTracked game process: {process}\n\n{known_facts}\n\n"
+            + (f"{game_state_text}\n\n" if game_state_text else "")
+            + _format_observations_full(entries)
+        )
         messages = [
             {"role": "system", "content": load_prompt("observation_confirmation")},
-            {
-                "role": "user",
-                "content": (
-                    f"{current_datetime_context()}\n\nTracked game process: {process}\n\n{known_facts}\n\n"
-                    + (f"{game_state_text}\n\n" if game_state_text else "")
-                    + _format_observations_full(entries)
-                ),
-            },
+            {"role": "user", "content": user_content},
         ]
+        model = settings.memory_extraction_model or None
+        provider = settings.memory_extraction_provider or settings.llm_provider
 
         try:
             raw = await chat_completion(
                 messages,
-                model=settings.memory_extraction_model or None,
+                model=model,
                 response_format={"type": "json_object"},
                 source="observation_confirmation",
-                provider=settings.memory_extraction_provider or settings.llm_provider,
+                provider=provider,
             )
             data = json.loads(raw)
         except Exception:
             logger.exception("Observation confirmation pass failed for process=%r", process)
             return
+
+        # One research round: the model flagged something it can't judge/word correctly on its
+        # own (an unfamiliar boss/quest/area name, a possible flashback/misattribution) - run the
+        # search and re-call with results so it can finalize its save/remove/clear decisions.
+        search_query = data.get("web_search_query")
+        if isinstance(search_query, str) and search_query.strip():
+            search_query = search_query.strip()
+            logger.info("Observation confirmation: requested web search %r for process=%r", search_query, process)
+            try:
+                results = await execute_web_search({"query": search_query})
+                enriched_messages = messages + [
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Web search results for your query \"{search_query}\" (requested by your own "
+                            f"previous pass - use them to finalize your save/remove/clear decisions; do not "
+                            f"request another search):\n{results}"
+                        ),
+                    },
+                ]
+                raw = await chat_completion(
+                    enriched_messages,
+                    model=model,
+                    response_format={"type": "json_object"},
+                    source="observation_confirmation",
+                    provider=provider,
+                )
+                data = json.loads(raw)
+            except Exception:
+                # Keep the first pass's output - a failed search must not cost us the whole review.
+                logger.exception("Observation confirmation web-search round failed for process=%r", process)
 
         saved = 0
         for fact in data.get("save") or []:
