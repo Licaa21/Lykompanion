@@ -280,20 +280,18 @@ def main() -> None:
 
     # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
     # minimize/close buttons. easy_drag=False; the titlebar drives its own move/snap from JS.
-    # Always launches filling the CURRENT screen's work area (visually "maximized," taskbar still
-    # visible) - computed fresh via Win32 every time, so it's never stale across a resolution/
-    # monitor/taskbar change. Deliberately NOT native WindowState.Maximized: on a frameless window
-    # that covers the ENTIRE monitor INCLUDING the taskbar (a known WinForms borderless-window
-    # quirk), which looked like unwanted true fullscreen instead of a normal maximize - confirmed
-    # on-device. A plain Normal-state window explicitly sized to the work area avoids that entirely
-    # while still filling the screen the same way. window_state.json (still written by
-    # window_save_bounds on every drag/resize) is intentionally not read for this initial size -
-    # every launch always starts fit-to-screen, no stale saved size to ever get out of sync with.
+    # Launches at half the work-area width, then init.js's setupDesktopTitlebar snaps it to full
+    # (via the same JS maximize path as the titlebar's maximize button) ~100ms after the page is
+    # ready. Starting full-size directly used to show a visible white-flash transition; starting
+    # smaller and letting JS drive the maximize keeps snapZone state in sync (it's tracked
+    # frontend-side) and avoids that flash. window_state.json (still written by window_save_bounds
+    # on every drag/resize) is intentionally not read for this initial size - every launch always
+    # starts at half-width, no stale saved size to ever get out of sync with.
     x, y, w, h = _primary_work_area_logical()
     win = webview.create_window(
         "Lykompanion",
         f"{URL}/?token={API_TOKEN}",
-        width=w,
+        width=w // 2,
         height=h,
         x=x,
         y=y,
