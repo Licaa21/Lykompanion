@@ -2,12 +2,20 @@ const YOUTUBE_PANEL_POS_KEY = "lyko-youtube-panel-pos";
 const YOUTUBE_VOLUME_KEY = "lyko-youtube-volume";
 const YOUTUBE_DOCKED_KEY = "lyko-youtube-docked";
 const YOUTUBE_COLLAPSED_KEY = "lyko-youtube-collapsed";
+// Remembers what was playing across app restarts - the panel itself stays closed (hidden by
+// default in index.html) until the toolbar button or a play_on_youtube tool call opens it; this
+// only decides what shows up once it IS opened, it never auto-opens or auto-plays on load.
+const YOUTUBE_QUEUE_KEY = "lyko-youtube-queue";
 
 const ytPanel = document.getElementById("youtube-player-panel");
 const ytPanelHeader = document.getElementById("youtube-player-panel-header");
 const ytPanelClose = document.getElementById("youtube-player-panel-close");
 const ytPanelPin = document.getElementById("youtube-player-panel-pin");
 const ytPanelToggle = document.getElementById("youtube-player-panel-toggle");
+const ytPanelFullscreenBtn = document.getElementById("youtube-player-panel-fullscreen");
+const ytFullscreenIconExpand = ytPanel.querySelector(".youtube-player-fullscreen-icon-expand");
+const ytFullscreenIconCompress = ytPanel.querySelector(".youtube-player-fullscreen-icon-compress");
+const ytPanelPopoutBtn = document.getElementById("youtube-player-panel-popout");
 const ytPanelPlaylistsBtn = document.getElementById("youtube-player-panel-playlists");
 const ytPanelSearchBtn = document.getElementById("youtube-player-panel-search");
 const ytPlaylistsPanel = document.getElementById("youtube-player-playlists");
@@ -20,6 +28,8 @@ const ytPanelTitle = document.getElementById("youtube-player-title");
 const ytFrameMount = document.getElementById("youtube-player-frame-mount");
 const ytPrevBtn = document.getElementById("youtube-player-prev");
 const ytPlayPauseBtn = document.getElementById("youtube-player-playpause");
+const ytPlayIcon = ytPlayPauseBtn.querySelector(".youtube-player-playpause-icon-play");
+const ytPauseIcon = ytPlayPauseBtn.querySelector(".youtube-player-playpause-icon-pause");
 const ytNextBtn = document.getElementById("youtube-player-next");
 const ytPrevLabel = document.getElementById("youtube-player-prev-label");
 const ytNextLabel = document.getElementById("youtube-player-next-label");
@@ -27,6 +37,7 @@ const ytVolumeSlider = document.getElementById("youtube-player-volume");
 const ytSeekBar = document.getElementById("youtube-player-seekbar");
 const ytTimeCurrent = document.getElementById("youtube-player-time-current");
 const ytTimeDuration = document.getElementById("youtube-player-time-duration");
+const ytQualitySelect = document.getElementById("youtube-player-quality-select");
 
 let ytPlayer = null;
 let ytApiReady = false;
@@ -38,6 +49,17 @@ let ytQueueIndex = -1;
 let ytSeeking = false;
 let ytDocked = false;
 let ytCollapsed = false;
+// True while the panel has been moved into a separate documentPictureInPicture window (see
+// ytPanelPopoutBtn below) - suspends header-drag/resize-grip handling, since the OS window itself
+// is what the user drags/resizes at that point, not our in-page positioning.
+let ytPoppedOut = false;
+let ytPipWindow = null;
+// True from page load until the restored entry (see ytLoadPersistedQueue below) actually gets a
+// live player - tells the first ytPlayQueueEntry call for it to cue paused at the remembered
+// position instead of autoplaying from 0, since the user hasn't asked for playback yet, only to
+// see what was last playing.
+let ytRestoredNeedsCue = false;
+let ytRestoredTime = 0;
 
 function ytGetSavedVolume() {
   const saved = Number(localStorage.getItem(YOUTUBE_VOLUME_KEY));
@@ -52,20 +74,74 @@ function ytFormatTime(seconds) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+// YouTube's own internal quality-level identifiers, mapped to human labels.
+const YT_QUALITY_LABELS = {
+  highres: "4K+", hd2160: "2160p", hd1440: "1440p", hd1080: "1080p", hd720: "720p",
+  large: "480p", medium: "360p", small: "240p", tiny: "144p", auto: "Auto",
+};
+
+// Best-effort quality selector: YouTube deprecated real user control over playback quality in
+// 2018 - setPlaybackQuality() below is largely a suggestion the player is free to ignore in
+// favor of its own adaptive-bitrate logic, and there is no way to force it. What we CAN do
+// honestly is only ever list resolutions getAvailableQualityLevels() reports as actually existing
+// for THIS video (so a 1080p-max video never offers a fake 4K option), via the IFrame API itself.
+function ytPopulateQualityOptions(player, selectEl) {
+  if (!player || !player.getAvailableQualityLevels) return;
+  let levels = [];
+  try { levels = player.getAvailableQualityLevels() || []; } catch (err) { return; }
+  if (!levels.length) levels = ["auto"];
+  else if (!levels.includes("auto")) levels = [...levels, "auto"];
+  let current = "auto";
+  try { current = (player.getPlaybackQuality && player.getPlaybackQuality()) || "auto"; } catch (err) { /* default to auto */ }
+  selectEl.innerHTML = "";
+  for (const level of levels) {
+    const opt = document.createElement("option");
+    opt.value = level;
+    opt.textContent = YT_QUALITY_LABELS[level] || level;
+    if (level === current) opt.selected = true;
+    selectEl.appendChild(opt);
+  }
+}
+ytQualitySelect.addEventListener("change", () => {
+  if (ytPlayer && ytPlayer.setPlaybackQuality) ytPlayer.setPlaybackQuality(ytQualitySelect.value);
+});
+
 // Polls current time/duration instead of relying on an IFrame API event - the API has no
 // "timeupdate" event of its own, unlike an HTML5 <video> element.
+// --fill drives the gradient-filled portion of the track (see style.css) - kept in sync with the
+// value here because CSS alone can't read a range input's position.
+function ytSyncSeekFill() {
+  const max = Number(ytSeekBar.max) || 0;
+  const pct = max > 0 ? (Number(ytSeekBar.value) / max) * 100 : 0;
+  ytSeekBar.style.setProperty("--fill", `${pct}%`);
+}
+function ytSyncVolumeFill() {
+  ytVolumeSlider.style.setProperty("--fill", `${Number(ytVolumeSlider.value)}%`);
+}
+ytSyncVolumeFill();
+
 setInterval(() => {
   if (ytSeeking || !ytPlayer || !ytPlayer.getCurrentTime || ytPanel.hidden) return;
   const duration = ytPlayer.getDuration() || 0;
   const current = ytPlayer.getCurrentTime() || 0;
   ytSeekBar.max = duration;
   ytSeekBar.value = current;
+  ytSyncSeekFill();
   ytTimeCurrent.textContent = ytFormatTime(current);
   ytTimeDuration.textContent = ytFormatTime(duration);
+  if (ytPlayer.getPlayerState) {
+    const YT_PLAYING = 1;
+    const playing = ytPlayer.getPlayerState() === YT_PLAYING;
+    ytPlayIcon.hidden = playing;
+    ytPauseIcon.hidden = !playing;
+    // Drives the header equalizer bars and the play-orb ripple ring.
+    ytPanel.classList.toggle("youtube-player-panel--playing", playing);
+  }
 }, 500);
 
 ytSeekBar.addEventListener("input", () => {
   ytSeeking = true;
+  ytSyncSeekFill();
   ytTimeCurrent.textContent = ytFormatTime(Number(ytSeekBar.value));
 });
 ytSeekBar.addEventListener("change", () => {
@@ -85,11 +161,53 @@ function ytLoadApiOnce() {
   document.head.appendChild(tag);
 }
 
+// Consumes ytRestoredNeedsCue (if set) into a one-shot opts object for the next ytPlayQueueEntry
+// call, so a restored-from-storage video cues paused at its remembered position instead of
+// autoplaying - the flag must only fire once, the very first time that entry gets a live player.
+function ytConsumeRestoreOpts() {
+  if (!ytRestoredNeedsCue) return undefined;
+  ytRestoredNeedsCue = false;
+  return { startSeconds: ytRestoredTime, paused: true };
+}
+
 // Called by the IFrame API script itself once it finishes loading - must be a global.
 window.onYouTubeIframeAPIReady = function () {
   ytApiReady = true;
-  if (ytQueueIndex >= 0) ytPlayQueueEntry(ytQueue[ytQueueIndex]);
+  if (ytQueueIndex >= 0) ytPlayQueueEntry(ytQueue[ytQueueIndex], ytConsumeRestoreOpts());
 };
+
+// --- Remembers what was last playing across app restarts (ytQueue/ytQueueIndex are otherwise
+// pure in-memory and reset on every reload). The panel itself never auto-opens from this - only
+// the toolbar button and play_on_youtube tool calls open it (see showYoutubePanel callers) - this
+// purely decides what's ready to resume once the user (or the LLM) does. ---
+function ytSaveQueueState() {
+  if (!ytQueue.length || ytQueueIndex < 0) return;
+  // While popped out to the native window, this window's own ytPlayer is stopped (0 makes no
+  // sense as "the position") - the pop-out's own heartbeat keeps ytQueueIndex in sync already
+  // (see ytPipPoll), so just skip touching the persisted time until playback is back here.
+  if (ytNativePopout) return;
+  localStorage.setItem(YOUTUBE_QUEUE_KEY, JSON.stringify({
+    queue: ytQueue,
+    index: ytQueueIndex,
+    time: ytPlayer && ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() || 0 : 0,
+  }));
+}
+
+function ytLoadPersistedQueue() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(YOUTUBE_QUEUE_KEY) || "null");
+  } catch (err) { /* corrupt entry - nothing to restore */ }
+  if (!saved || !Array.isArray(saved.queue) || !saved.queue.length || !Number.isFinite(saved.index)) return;
+  ytQueue = saved.queue;
+  ytQueueIndex = Math.min(Math.max(0, saved.index), ytQueue.length - 1);
+  ytRestoredTime = Number.isFinite(saved.time) ? saved.time : 0;
+  ytRestoredNeedsCue = true;
+}
+ytLoadPersistedQueue();
+
+setInterval(ytSaveQueueState, 3000);
+window.addEventListener("pagehide", ytSaveQueueState);
 
 // Advances to the next queued video, if any - shared by the next button and auto-advance on end.
 function ytAdvanceQueue() {
@@ -98,16 +216,26 @@ function ytAdvanceQueue() {
     const entry = ytQueue[ytQueueIndex];
     showYoutubePanel(entry.title, entry.channel);
     ytPlayQueueEntry(entry);
+    ytSaveQueueState();
   }
 }
 
-function ytPlayQueueEntry(entry) {
+// opts.startSeconds resumes mid-video (used when playback returns from the pop-out window);
+// opts.paused cues the video at that position without autoplaying (pop-out was closed paused).
+function ytPlayQueueEntry(entry, opts) {
   if (!ytApiReady || !entry) return;
+  const startSeconds = opts && Number.isFinite(opts.startSeconds) ? opts.startSeconds : 0;
+  const paused = !!(opts && opts.paused);
   ytSeekBar.value = 0;
+  ytSeekBar.style.setProperty("--fill", "0%");
   ytTimeCurrent.textContent = "0:00";
   ytTimeDuration.textContent = "0:00";
   if (ytPlayer && ytPlayer.loadVideoById) {
-    ytPlayer.loadVideoById(entry.videoId);
+    if (paused && ytPlayer.cueVideoById) {
+      ytPlayer.cueVideoById({ videoId: entry.videoId, startSeconds });
+    } else {
+      ytPlayer.loadVideoById({ videoId: entry.videoId, startSeconds });
+    }
     return;
   }
   ytPlayer = new YT.Player(ytFrameMount, {
@@ -116,7 +244,15 @@ function ytPlayQueueEntry(entry) {
     // icon and, in our small floating panel, the pop-out sits outside the iframe's own bounds,
     // so moving the mouse toward it crosses into our page and the iframe fires a mouseout that
     // closes the slider before it can be dragged. A custom slider (below) avoids this entirely.
-    playerVars: { autoplay: 1, rel: 0, controls: 0 },
+    // disablekb/fs/iv_load_policy/cc_load_policy/modestbranding strip as much of YouTube's own
+    // embed chrome as the IFrame API actually allows - it still shows a hover overlay (title
+    // card, share/related-videos bar, YouTube logo) that NONE of these params suppress; that's
+    // blocked separately by ytVideoGuard below, which sits over the iframe and eats the mouse
+    // hover before YouTube's own player ever sees it.
+    playerVars: {
+      autoplay: 1, rel: 0, controls: 0,
+      disablekb: 1, fs: 0, iv_load_policy: 3, cc_load_policy: 0, modestbranding: 1,
+    },
     events: {
       onReady: (event) => {
         event.target.setVolume(ytGetSavedVolume());
@@ -126,6 +262,10 @@ function ytPlayQueueEntry(entry) {
       // or playback just stops after one video despite a queued Mix.
       onStateChange: (event) => {
         if (event.data === YT.PlayerState.ENDED) ytAdvanceQueue();
+        // PLAYING (not READY/CUED) is the first point getAvailableQualityLevels() reliably
+        // reports real data for the video that's actually loaded - refreshed per video since a
+        // new one can have a different max resolution than the last.
+        else if (event.data === YT.PlayerState.PLAYING) ytPopulateQualityOptions(event.target, ytQualitySelect);
       },
       // A video that fails to play (embedding disabled, removed, region-locked) leaves the
       // player permanently in an error state - getCurrentTime/getDuration never populate (seek
@@ -189,6 +329,7 @@ function showYoutubePanel(title, channel) {
 
 function hideYoutubePanel() {
   ytPanel.hidden = true;
+  if (ytPipWindow) ytPipWindow.close();
 }
 
 // Called from chat-stream.js when a play_on_youtube tool call resolves (SSE `youtube_play` event
@@ -196,12 +337,17 @@ function hideYoutubePanel() {
 // of opening a browser tab.
 window.loadYoutubeVideo = function (videoId, title) {
   if (!videoId) return;
+  ytForceClosePopout();
+  // A fresh explicit play always wins over whatever paused-resume was pending from a restored
+  // session - there's nothing to "resume" into anymore once a new video is requested.
+  ytRestoredNeedsCue = false;
   ytQueue = ytQueue.slice(0, ytQueueIndex + 1);
   ytQueue.push({ videoId, title });
   ytQueueIndex = ytQueue.length - 1;
   showYoutubePanel(title);
   ytLoadApiOnce();
   ytPlayQueueEntry(ytQueue[ytQueueIndex]);
+  ytSaveQueueState();
 };
 
 // Called from chat-stream.js when a play_youtube_playlist tool call resolves (SSE
@@ -210,6 +356,8 @@ window.loadYoutubeVideo = function (videoId, title) {
 // real playlist instead of just this session's ad-hoc play history.
 window.loadYoutubePlaylist = function (videos, title) {
   if (!videos || !videos.length) return;
+  ytForceClosePopout();
+  ytRestoredNeedsCue = false;
   ytQueue = ytQueue.slice(0, ytQueueIndex + 1);
   for (const video of videos) {
     ytQueue.push({ videoId: video.video_id, title: video.title, channel: video.channel });
@@ -222,11 +370,23 @@ window.loadYoutubePlaylist = function (videos, title) {
   showYoutubePanel(first.title || title, first.channel);
   ytLoadApiOnce();
   ytPlayQueueEntry(ytQueue[ytQueueIndex]);
+  ytSaveQueueState();
 };
 
 // Called from chat-stream.js for control_youtube_player tool calls (SSE `youtube_control` event /
 // non-streaming `youtube_control` response field) and by the panel's own buttons.
 window.controlYoutubePlayer = function (action, volume) {
+  // Playback lives in the pop-out window right now - relay the command there instead of driving
+  // the (stopped) in-app player. "stop" also ends the pop-out session: the pop-out closes itself
+  // on consuming it, and we must not treat that close as a "resume playback here" handoff.
+  if (ytNativePopout) {
+    ytPipSendCommand(action, volume);
+    if (action === "stop") {
+      ytEndNativePopout(null, false);
+      hideYoutubePanel();
+    }
+    return;
+  }
   const currentEntry = ytQueueIndex >= 0 ? ytQueue[ytQueueIndex] : null;
   switch (action) {
     case "play":
@@ -255,6 +415,7 @@ window.controlYoutubePlayer = function (action, volume) {
         const entry = ytQueue[ytQueueIndex];
         showYoutubePanel(entry.title, entry.channel);
         ytPlayQueueEntry(entry);
+        ytSaveQueueState();
       }
       break;
     case "stop":
@@ -275,11 +436,12 @@ window.controlYoutubePlayer = function (action, volume) {
 ytPanelClose.addEventListener("click", () => window.controlYoutubePlayer("stop"));
 ytPrevBtn.addEventListener("click", () => window.controlYoutubePlayer("previous"));
 ytNextBtn.addEventListener("click", () => window.controlYoutubePlayer("next"));
-ytPlayPauseBtn.addEventListener("click", () => {
+function ytTogglePlayPause() {
   if (!ytPlayer || !ytPlayer.getPlayerState) return;
   const PLAYING = 1;
   window.controlYoutubePlayer(ytPlayer.getPlayerState() === PLAYING ? "pause" : "play");
-});
+}
+ytPlayPauseBtn.addEventListener("click", ytTogglePlayPause);
 ytVolumeSlider.addEventListener("input", () => {
   const value = Number(ytVolumeSlider.value);
   if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(value);
@@ -526,9 +688,295 @@ async function ytPlaySearchResult(result) {
 // Chat toolbar's YouTube button - opens the player even if nothing has played yet this session,
 // dropping straight into search/browse in that case instead of showing an empty video frame.
 document.getElementById("chat-toolbar-youtube").addEventListener("click", () => {
+  if (ytNativePopout) return; // playing in the pop-out window - nothing to show in-app
   const entry = ytQueueIndex >= 0 ? ytQueue[ytQueueIndex] : null;
-  showYoutubePanel(entry ? entry.title : "YouTube", entry ? entry.channel : undefined);
-  if (!entry) ytOpenBrowsePanel();
+  if (!entry) {
+    showYoutubePanel("YouTube");
+    ytOpenBrowsePanel();
+    return;
+  }
+  showYoutubePanel(entry.title, entry.channel);
+  // First time this session anyone's asked to see this entry (e.g. it was only just restored
+  // from a previous session - see ytLoadPersistedQueue) - there's no live player for it yet, so
+  // cue it (paused if it's a resumed one, per ytConsumeRestoreOpts) instead of showing an empty
+  // frame. If a player already exists (already playing/paused from this session), leave it alone.
+  if (!ytPlayer) {
+    ytLoadApiOnce();
+    if (ytApiReady) ytPlayQueueEntry(entry, ytConsumeRestoreOpts());
+    // else: onYouTubeIframeAPIReady (above) creates it once the script tag finishes loading.
+  }
+});
+
+// --- Fullscreen - the video fills the entire SCREEN, not just the app viewport. The CSS class
+// makes the panel cover the page with overlay controls (header/seek/transport on scrims that
+// auto-hide on idle); on top of that:
+//   - Desktop app (pywebview): the frameless app window itself is resized to cover the whole
+//     monitor (taskbar included) through the already-exposed window_set_bounds bridge - element
+//     requestFullscreen inside WebView2 only fills the webview control, never the OS window,
+//     which is why the first attempt still showed the taskbar. Previous bounds are restored on
+//     exit and deliberately never persisted via window_save_bounds.
+//   - Browser (dev): documentElement.requestFullscreen hides the browser chrome natively.
+function ytIsFullscreen() {
+  return ytPanel.classList.contains("youtube-player-panel--fullscreen");
+}
+
+let ytPrevWinBounds = null; // logical px, desktop-app path only
+let ytIdleTimer = null;
+
+function ytSetFullscreenState(active) {
+  ytPanel.classList.toggle("youtube-player-panel--fullscreen", active);
+  ytPanelFullscreenBtn.classList.toggle("active", active);
+  ytPanelFullscreenBtn.title = active ? "Exit fullscreen" : "Fullscreen";
+  ytFullscreenIconExpand.hidden = active;
+  ytFullscreenIconCompress.hidden = !active;
+}
+
+// Auto-hide the overlay chrome after a short idle - any mouse movement brings it back.
+function ytPokeIdle() {
+  if (!ytIsFullscreen()) return;
+  ytPanel.classList.remove("youtube-player-panel--idle");
+  clearTimeout(ytIdleTimer);
+  ytIdleTimer = setTimeout(() => ytPanel.classList.add("youtube-player-panel--idle"), 2600);
+}
+document.addEventListener("mousemove", ytPokeIdle);
+
+function ytEnterFullscreen() {
+  ytSetFullscreenState(true);
+  // .app-shell's overflow:hidden otherwise clips this position:fixed panel to app-shell's own
+  // (shorter than viewport, thanks to the titlebar above it) box - see the CSS comment beside
+  // body.yt-fullscreen-active for the full explanation of why fixed doesn't escape this on its own.
+  document.body.classList.add("yt-fullscreen-active");
+  ytPokeIdle();
+  const bridge = window.pywebview && window.pywebview.api;
+  if (bridge && bridge.window_set_bounds) {
+    ytPrevWinBounds = { x: window.screenX, y: window.screenY, w: window.innerWidth, h: window.innerHeight };
+    const r = window.devicePixelRatio || 1;
+    // screen.availLeft/Top locate the CURRENT monitor's origin (so fullscreen lands on the
+    // monitor the app is on, not always the primary); screen.width/height are its full size
+    // including the taskbar area, which availWidth/Height would exclude.
+    const ox = Number.isFinite(screen.availLeft) ? screen.availLeft : 0;
+    const oy = Number.isFinite(screen.availTop) ? screen.availTop : 0;
+    bridge.window_set_bounds(Math.round(ox * r), Math.round(oy * r), Math.round(screen.width * r), Math.round(screen.height * r));
+  } else if (document.fullscreenEnabled && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function ytExitFullscreen() {
+  ytSetFullscreenState(false);
+  document.body.classList.remove("yt-fullscreen-active");
+  ytPanel.classList.remove("youtube-player-panel--idle");
+  clearTimeout(ytIdleTimer);
+  const bridge = window.pywebview && window.pywebview.api;
+  if (ytPrevWinBounds && bridge && bridge.window_set_bounds) {
+    const b = ytPrevWinBounds;
+    ytPrevWinBounds = null;
+    const r = window.devicePixelRatio || 1;
+    bridge.window_set_bounds(Math.round(b.x * r), Math.round(b.y * r), Math.round(b.w * r), Math.round(b.h * r));
+  }
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+ytPanelFullscreenBtn.addEventListener("click", () => {
+  if (ytIsFullscreen()) ytExitFullscreen();
+  else ytEnterFullscreen();
+});
+
+// See the .youtube-player-video-guard CSS comment - this is what actually receives the mouse
+// events that a cross-origin YouTube iframe would otherwise swallow entirely.
+const ytVideoGuard = document.getElementById("youtube-player-video-guard");
+ytVideoGuard.addEventListener("mousemove", ytPokeIdle);
+// Stealing focus onto our own element on every press means the iframe never ends up holding
+// keyboard focus in the first place, so Escape/other shortcuts always reach our own listeners.
+ytVideoGuard.addEventListener("mousedown", () => ytVideoGuard.focus());
+ytVideoGuard.addEventListener("click", ytTogglePlayPause);
+ytVideoGuard.addEventListener("dblclick", () => {
+  if (ytIsFullscreen()) ytExitFullscreen();
+  else ytEnterFullscreen();
+});
+
+// Browser path: the user exiting native fullscreen themselves (Esc, F11) must also drop our
+// overlay class, or the panel stays stretched over the page.
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && ytIsFullscreen() && !ytPrevWinBounds) ytExitFullscreen();
+});
+
+// Desktop path has no native fullscreen to intercept Esc for us.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ytIsFullscreen()) ytExitFullscreen();
+});
+
+// --- Pop out to a real, separate OS window that can be dragged to another monitor. Two paths:
+//
+// Desktop app (window.pywebview): WebView2 has no documentPictureInPicture, so run_app.py exposes
+// open_player_window() which spawns a second, normally-framed pywebview window loading
+// web/player.html. Playback HANDS OFF to that window (this one stops); state travels through
+// localStorage, which both windows share (same WebView2 profile): "boot" carries the queue +
+// position out, a 1s heartbeat carries live position/index back, "cmd" relays LLM/tool control
+// commands out, and a closed flag on the heartbeat hands playback back to this panel, resuming
+// at the exact position the pop-out reached.
+//
+// Browser (dev): Document Picture-in-Picture moves the panel's DOM node into an always-on-top
+// PiP window without reloading the iframe. ---
+const YT_PIP_BOOT_KEY = "lyko-yt-pip-boot";
+const YT_PIP_STATE_KEY = "lyko-yt-pip-state";
+const YT_PIP_CMD_KEY = "lyko-yt-pip-cmd";
+
+let ytNativePopout = false;
+let ytPipPollTimer = null;
+let ytPipCmdSeq = 0;
+
+const ytPanelHome = ytPanel.parentElement;
+const ytPanelHomeNext = ytPanel.nextSibling;
+
+function ytPipSendCommand(action, volume) {
+  ytPipCmdSeq += 1;
+  localStorage.setItem(YT_PIP_CMD_KEY, JSON.stringify({ seq: ytPipCmdSeq, action, volume }));
+}
+
+// Ends the native pop-out session. When resume=true (pop-out window was closed), playback picks
+// back up in this panel at the position/index the heartbeat last reported.
+function ytEndNativePopout(state, resume) {
+  if (ytPipPollTimer) { clearInterval(ytPipPollTimer); ytPipPollTimer = null; }
+  ytNativePopout = false;
+  localStorage.removeItem(YT_PIP_STATE_KEY);
+  localStorage.removeItem(YT_PIP_BOOT_KEY);
+  if (!resume) return;
+  const entry = ytQueueIndex >= 0 ? ytQueue[ytQueueIndex] : null;
+  if (!entry) return;
+  showYoutubePanel(entry.title, entry.channel);
+  ytPlayQueueEntry(entry, {
+    startSeconds: state && Number.isFinite(state.time) ? state.time : 0,
+    paused: state ? !state.playing : false,
+  });
+  ytSaveQueueState();
+}
+
+function ytPipPoll() {
+  let state = null;
+  try {
+    state = JSON.parse(localStorage.getItem(YT_PIP_STATE_KEY) || "null");
+  } catch (err) { /* not written yet / corrupt - wait for the next heartbeat */ }
+  if (!state) return;
+  // Track the pop-out's queue walking + volume live, so a later resume (and the LLM's view of
+  // "what's playing") stays correct without waiting for the close handoff.
+  if (Number.isFinite(state.index) && ytQueue.length) {
+    ytQueueIndex = Math.min(Math.max(0, state.index), ytQueue.length - 1);
+  }
+  if (Number.isFinite(state.volume)) {
+    ytVolumeSlider.value = state.volume;
+    ytSyncVolumeFill();
+    localStorage.setItem(YOUTUBE_VOLUME_KEY, String(state.volume));
+  }
+  if (state.closed) ytEndNativePopout(state, true);
+}
+
+async function ytOpenNativePopout() {
+  if (ytQueueIndex < 0) return;
+  if (ytIsFullscreen()) ytExitFullscreen();
+  const time = ytPlayer && ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() || 0 : 0;
+  const playing = ytPlayer && ytPlayer.getPlayerState ? ytPlayer.getPlayerState() === 1 : true;
+  localStorage.removeItem(YT_PIP_STATE_KEY);
+  localStorage.removeItem(YT_PIP_CMD_KEY);
+  localStorage.setItem(YT_PIP_BOOT_KEY, JSON.stringify({
+    queue: ytQueue,
+    index: ytQueueIndex,
+    time,
+    playing,
+    volume: Number(ytVolumeSlider.value),
+  }));
+  try {
+    await window.pywebview.api.open_player_window();
+  } catch (err) {
+    localStorage.removeItem(YT_PIP_BOOT_KEY);
+    return;
+  }
+  if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
+  ytNativePopout = true;
+  ytPanel.hidden = true;
+  ytPipPollTimer = setInterval(ytPipPoll, 700);
+}
+
+// A tool call starting NEW playback while popped out closes the pop-out and plays in-app -
+// two windows fighting over who's playing is never what anyone wants.
+function ytForceClosePopout() {
+  if (!ytNativePopout) return;
+  ytPipSendCommand("stop");
+  ytEndNativePopout(null, false);
+}
+
+async function ytOpenDocPipPopout() {
+  if (ytPipWindow) {
+    ytPipWindow.close();
+    return;
+  }
+  if (ytIsFullscreen()) ytExitFullscreen();
+  let pip;
+  try {
+    pip = await documentPictureInPicture.requestWindow({
+      width: Math.round(ytPanel.offsetWidth),
+      height: Math.round(ytPanel.offsetHeight),
+    });
+  } catch (err) {
+    return;
+  }
+  ytPipWindow = pip;
+  // Clone every stylesheet into the pip window's (otherwise blank) document so the moved panel
+  // keeps its styling - link stylesheets copy as a matching <link>, inline/constructed ones copy
+  // their parsed rules as a fresh <style> (a <link> would need a re-fetch and may 404 for a
+  // dynamically-created sheet with no href).
+  for (const sheet of document.styleSheets) {
+    if (sheet.href) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = sheet.href;
+      pip.document.head.appendChild(link);
+    } else {
+      try {
+        const style = document.createElement("style");
+        style.textContent = [...sheet.cssRules].map((rule) => rule.cssText).join("\n");
+        pip.document.head.appendChild(style);
+      } catch (err) { /* inaccessible sheet (e.g. cross-origin) - skip it */ }
+    }
+  }
+  pip.document.body.style.margin = "0";
+  pip.document.body.style.background = "#0a0a12";
+  pip.document.body.appendChild(ytPanel);
+  ytPanel.classList.add("youtube-player-panel--popped-out");
+  ytPoppedOut = true;
+  ytPanelPopoutBtn.title = "Return to app";
+
+  pip.addEventListener("pagehide", () => {
+    ytPanel.classList.remove("youtube-player-panel--popped-out");
+    ytPoppedOut = false;
+    ytPipWindow = null;
+    ytPanelPopoutBtn.title = "Pop out to a floating window";
+    if (ytPanelHomeNext && ytPanelHomeNext.parentElement === ytPanelHome) {
+      ytPanelHome.insertBefore(ytPanel, ytPanelHomeNext);
+    } else {
+      ytPanelHome.appendChild(ytPanel);
+    }
+    // Re-apply whichever layout mode was active before popping out - docking/floating position
+    // is normally only (re-)applied when its own toggle fires, which didn't happen here.
+    if (ytDocked) ytSetDocked(true);
+    else ytApplyFloatingPosition();
+  });
+}
+
+ytPanelPopoutBtn.addEventListener("click", () => {
+  if (window.pywebview) {
+    if (!ytNativePopout) ytOpenNativePopout();
+  } else if ("documentPictureInPicture" in window) {
+    ytOpenDocPipPopout();
+  }
+});
+
+// window.pywebview may not be injected yet at script-eval time - decide the button's visibility
+// once the page has fully loaded (same timing init.js relies on for body.desktop-app).
+window.addEventListener("load", () => {
+  if (!window.pywebview && !("documentPictureInPicture" in window)) {
+    ytPanelPopoutBtn.hidden = true;
+  }
 });
 
 (() => {
@@ -537,7 +985,7 @@ document.getElementById("chat-toolbar-youtube").addEventListener("click", () => 
   let offsetY = 0;
 
   ytPanelHeader.addEventListener("mousedown", (event) => {
-    if (ytDocked || event.target.closest("button")) return;
+    if (ytDocked || ytPoppedOut || ytIsFullscreen() || event.target.closest("button")) return;
     dragging = true;
     const rect = ytPanel.getBoundingClientRect();
     offsetX = event.clientX - rect.left;
@@ -572,7 +1020,7 @@ document.getElementById("chat-toolbar-youtube").addEventListener("click", () => 
   let startX = 0;
 
   ytResizeGrip.addEventListener("mousedown", (event) => {
-    if (ytDocked) return;
+    if (ytDocked || ytPoppedOut || ytIsFullscreen()) return;
     resizing = true;
     startWidth = ytPanel.offsetWidth;
     startX = event.clientX;

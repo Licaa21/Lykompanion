@@ -210,37 +210,23 @@ def _remove_window_border(hwnd: int) -> None:
 _WINDOW_STATE_FILE = ROOT / "data" / "window_state.json"
 
 
-def _clamp_window_state(state: dict) -> dict:
-    """Keep a restored window on-screen. If its titlebar centre falls outside every connected
-    monitor (e.g. a second display was unplugged since we saved), recentre on the virtual desktop
-    while preserving the size. GetSystemMetrics returns physical px, so divide by the system DPI
-    scale to compare against the logical px the saved bounds use.
+def _primary_work_area_logical() -> tuple[int, int, int, int]:
+    """Primary monitor's work area (screen minus taskbar) in logical px, matching the units
+    create_window uses elsewhere. Computed fresh on every launch so it's always correct for
+    whatever screen/DPI/taskbar is active right now - unlike native WindowState.Maximized, which
+    on a FRAMELESS window covers the entire monitor INCLUDING the taskbar (a well-known WinForms
+    borderless-window quirk, confirmed the hard way: it looked like unwanted true fullscreen
+    instead of a normal maximize). A plain Normal-state window explicitly sized to this rect gets
+    the "fills the screen, taskbar still visible" look without touching WindowState at all.
     """
-    try:
-        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
-        scale = (_user32.GetDpiForSystem() or 96) / 96.0
-        vx = _user32.GetSystemMetrics(SM_XVIRTUALSCREEN) / scale
-        vy = _user32.GetSystemMetrics(SM_YVIRTUALSCREEN) / scale
-        vw = _user32.GetSystemMetrics(SM_CXVIRTUALSCREEN) / scale
-        vh = _user32.GetSystemMetrics(SM_CYVIRTUALSCREEN) / scale
-    except Exception:
-        return state
-    x, y, w, h = state["x"], state["y"], state["w"], state["h"]
-    cx, cy = x + w / 2, y + 20  # centre of the titlebar
-    if vx <= cx <= vx + vw and vy <= cy <= vy + vh:
-        return state
-    return {"x": int(vx + (vw - w) / 2), "y": int(vy + (vh - h) / 2), "w": w, "h": h}
-
-
-def _load_window_state() -> dict | None:
-    try:
-        s = json.loads(_WINDOW_STATE_FILE.read_text(encoding="utf-8"))
-        x, y, w, h = int(s["x"]), int(s["y"]), int(s["w"]), int(s["h"])
-    except Exception:
-        return None
-    if w < 800 or h < 600:
-        return None
-    return _clamp_window_state({"x": x, "y": y, "w": w, "h": h})
+    SPI_GETWORKAREA = 0x0030
+    rect = wintypes.RECT()
+    _user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
+    scale = (_user32.GetDpiForSystem() or 96) / 96.0
+    return (
+        int(rect.left / scale), int(rect.top / scale),
+        int((rect.right - rect.left) / scale), int((rect.bottom - rect.top) / scale),
+    )
 
 
 def _save_window_state(x: float, y: float, w: float, h: float) -> None:
@@ -294,15 +280,23 @@ def main() -> None:
 
     # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
     # minimize/close buttons. easy_drag=False; the titlebar drives its own move/snap from JS.
-    # Restore the last window position+size if we saved one, else default centered.
-    state = _load_window_state()
+    # Always launches filling the CURRENT screen's work area (visually "maximized," taskbar still
+    # visible) - computed fresh via Win32 every time, so it's never stale across a resolution/
+    # monitor/taskbar change. Deliberately NOT native WindowState.Maximized: on a frameless window
+    # that covers the ENTIRE monitor INCLUDING the taskbar (a known WinForms borderless-window
+    # quirk), which looked like unwanted true fullscreen instead of a normal maximize - confirmed
+    # on-device. A plain Normal-state window explicitly sized to the work area avoids that entirely
+    # while still filling the screen the same way. window_state.json (still written by
+    # window_save_bounds on every drag/resize) is intentionally not read for this initial size -
+    # every launch always starts fit-to-screen, no stale saved size to ever get out of sync with.
+    x, y, w, h = _primary_work_area_logical()
     win = webview.create_window(
         "Lykompanion",
         f"{URL}/?token={API_TOKEN}",
-        width=state["w"] if state else 1280,
-        height=state["h"] if state else 820,
-        x=state["x"] if state else None,
-        y=state["y"] if state else None,
+        width=w,
+        height=h,
+        x=x,
+        y=y,
         min_size=(800, 600),
         frameless=True,
         easy_drag=False,
@@ -321,10 +315,13 @@ def main() -> None:
                 icon.stop()
             except Exception:
                 pass
-        try:
-            win.destroy()
-        except Exception:
-            pass
+        # Destroy every window, not just the main one - the pop-out player window
+        # (open_player_window below) would otherwise keep the process alive after quit.
+        for w in list(webview.windows):
+            try:
+                w.destroy()
+            except Exception:
+                pass
 
     def window_minimize() -> None:
         win.hide()
@@ -348,9 +345,100 @@ def main() -> None:
     def window_save_bounds(x: float, y: float, w: float, h: float) -> None:
         _save_window_state(x, y, w, h)
 
+    # App-wide fullscreen (F11) - pywebview's native toggle, same mechanism as the YouTube pop-out
+    # window's own fullscreen button. Hiding the custom titlebar is handled purely in CSS/JS
+    # (body.app-fullscreen, toggled from the same F11 handler that calls this) since pywebview's
+    # fullscreen only affects the OS window frame/bounds, not our own HTML chrome.
+    def window_toggle_fullscreen() -> None:
+        try:
+            win.toggle_fullscreen()
+        except Exception:
+            pass
+
+    # Pop-out YouTube player: a real second OS window (so the OS gives dragging to another
+    # monitor for free) but frameless like the main window, for visual consistency - it draws its
+    # own header/controls (web/player.html) instead of a native Windows title bar. The page is
+    # static so no API token is needed; playback state travels through localStorage, which both
+    # windows share (same WebView2 profile). documentPictureInPicture doesn't exist in WebView2,
+    # so this native window IS the desktop app's pop-out mechanism - the frontend branches on
+    # window.pywebview.
+    def open_player_window() -> None:
+        child = webview.create_window(
+            "Lykompanion Player",
+            f"{URL}/player.html",
+            width=640,
+            height=480,
+            min_size=(380, 300),
+            frameless=True,
+            easy_drag=False,
+            background_color="#0a0a12",
+        )
+
+        # Set right before OUR OWN destroy() call below, so _on_closing (which fires as PART of
+        # that same destroy(), synchronously, on the same thread - see its comment) can tell "this
+        # closing event was caused by our own player_close()" apart from an external one (Alt+F4).
+        # Necessary: the JS side (closeSelf() in player-window.js) already wrote the handoff via
+        # writeState() BEFORE calling this, so evaluate_js-ing that same, already-torn-down-by-us
+        # window for a redundant handoff here isn't just pointless - it deadlocked the whole app
+        # (evaluate_js blocks waiting on the webview's message loop to answer, but that loop is
+        # itself blocked inside this very closing-event callback, which destroy() is waiting on to
+        # return - a real circular wait, observed as "the window never actually closes and the app
+        # freezes/crashes").
+        self_initiated_close = False
+
+        # Lets the pop-out page close its own window (e.g. its own close button, or a relayed
+        # "stop" command) - window.close() inside WebView2 doesn't destroy the pywebview window.
+        def player_close() -> None:
+            nonlocal self_initiated_close
+            self_initiated_close = True
+            try:
+                child.destroy()
+            except Exception:
+                pass
+
+        # Native OS-level fullscreen (pywebview's own toggle, not the CSS-driven approach the main
+        # window needs) - this window has no frameless-titlebar/app-shell baggage to fight with,
+        # so the platform's real fullscreen just works.
+        def player_toggle_fullscreen() -> None:
+            try:
+                child.toggle_fullscreen()
+            except Exception:
+                pass
+
+        # Mirrors the main window's window_set_bounds - drives the frameless drag/resize this
+        # window's own JS (player-window.js) implements for itself.
+        def player_set_bounds(x: float, y: float, w: float, h: float) -> None:
+            try:
+                child.move(int(x), int(y))
+                child.resize(max(int(w), 380), max(int(h), 300))
+            except Exception:
+                pass
+
+        # events.closing fires for EVERY close path, including Alt+F4 / a taskbar close that never
+        # goes through our own player_close() above (where the page's own JS already wrote the
+        # handoff and this would be redundant - see self_initiated_close). It's the only remaining
+        # safety net for a close pywebview/WebView2 didn't reliably dispatch `pagehide` for. Two
+        # precautions given the deadlock above: skip entirely when self-initiated, and run the
+        # evaluate_js off-thread so even an external close can't block this event (and therefore
+        # destroy()) waiting on it - best-effort, not required for the close itself to succeed.
+        def _on_closing() -> None:
+            if self_initiated_close:
+                return
+
+            def _try_handoff() -> None:
+                try:
+                    child.evaluate_js("window.__lykoPlayerHandoff && window.__lykoPlayerHandoff()")
+                except Exception:
+                    pass
+
+            threading.Thread(target=_try_handoff, daemon=True).start()
+
+        child.events.closing += _on_closing
+        child.expose(player_close, player_toggle_fullscreen, player_set_bounds)
+
     win.expose(
         _make_download_api(win), window_minimize, window_close,
-        window_set_bounds, window_save_bounds,
+        window_set_bounds, window_save_bounds, window_toggle_fullscreen, open_player_window,
     )
 
     def _on_loaded() -> None:

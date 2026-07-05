@@ -84,6 +84,10 @@ body.desktop-app .titlebar {
   position: relative;
   z-index: 10;
 }
+/* F11 app-wide fullscreen (init.js's setupAppFullscreen) - hides the custom titlebar; .app-shell
+   (flex:1 below it) automatically reflows to fill the freed space, no extra sizing needed. Combined
+   class beats the plain body.desktop-app rule above regardless of source order. */
+body.desktop-app.app-fullscreen .titlebar { display: none; }
 .titlebar-drag {
   flex: 1;
   display: flex;
@@ -1515,15 +1519,205 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .floating-panel-pin:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
 .floating-panel-pin.active { color: var(--accent); }
 
+.youtube-player-fullscreen-icon-expand,
+.youtube-player-fullscreen-icon-compress { display: block; }
+
 .floating-panel .game-state-fields { padding: 10px 12px; }
 
+/* ── YouTube player — a glass "now playing" card: gradient hairline border, layered accent
+   glow, inset rounded video, orb play button, gradient-filled sliders, live equalizer. ── */
 .youtube-player-panel {
   top: auto;
   bottom: 16px;
   right: auto;
   left: 16px;
-  width: 320px;
+  width: 340px;
   position: fixed;
+  border-radius: 18px;
+  /* Gradient hairline border: opaque-ish panel fill painted to padding-box, accent gradient
+     painted to border-box showing through the 1px transparent border. */
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(13,14,24,0.93), rgba(13,14,24,0.93)) padding-box,
+    linear-gradient(155deg, rgba(116,119,214,0.55), rgba(255,255,255,0.07) 35%, rgba(58,95,219,0.5)) border-box;
+  box-shadow:
+    0 24px 64px rgba(0,0,0,0.55),
+    0 0 44px rgba(91,95,199,0.20),
+    0 0 110px rgba(58,95,219,0.10);
+  transition: box-shadow var(--ease-out);
+}
+.youtube-player-panel:hover {
+  box-shadow:
+    0 24px 64px rgba(0,0,0,0.6),
+    0 0 60px rgba(91,95,199,0.30),
+    0 0 130px rgba(58,95,219,0.15);
+}
+
+.youtube-player-panel .floating-panel-header {
+  padding: 10px 10px 10px 14px;
+  background: linear-gradient(180deg, rgba(91,95,199,0.13) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.youtube-player-panel .floating-panel-title {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Live equalizer bars beside the title - only visible (width animates open) while playing. */
+.yt-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: width var(--ease-out), opacity var(--ease-out);
+}
+.youtube-player-panel--playing .yt-eq { width: 14px; opacity: 1; }
+.yt-eq i {
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #7477d6, #3a5fdb);
+  height: 35%;
+  animation: yt-eq-bounce 0.9s ease-in-out infinite;
+}
+.yt-eq i:nth-child(2) { animation-delay: 0.22s; }
+.yt-eq i:nth-child(3) { animation-delay: 0.44s; }
+@keyframes yt-eq-bounce {
+  0%, 100% { height: 30%; }
+  50%      { height: 100%; }
+}
+
+/* .app-shell has overflow:hidden (it clips its nebula background/scroll areas) and does NOT
+   span the full viewport height in the desktop app - the custom titlebar above it eats some of
+   body's height. Chromium clips position:fixed DESCENDANTS to an ancestor's overflow:hidden box
+   even though fixed is normally viewport-relative ("fixed" only sets the CONTAINING BLOCK for
+   offsets, it doesn't exempt the element from the ancestor clip chain) - so the fullscreen panel
+   below, despite position:fixed + inset:0, was being clipped to app-shell's shorter box, leaving
+   a titlebar-height strip of the app visible at the top instead of true fullscreen. Lifting the
+   clip only while fullscreen is active (JS toggles this body class) fixes it with no visible side
+   effect, since the fullscreen panel's own opaque background sits above everything else (z-index
+   10500) regardless of what it's no longer clipping. */
+body.yt-fullscreen-active .app-shell { overflow: visible; }
+
+/* SECOND, independent bug behind the same symptom: `.app-shell > * { position: relative;
+   z-index: 1; }` (above) forces .chat-panel into its OWN stacking context at level 1. A
+   descendant's z-index (our fullscreen panel is 10500) is only ever compared against siblings
+   WITHIN that same stacking context - it can never reach out and outrank something outside it,
+   no matter how high the number. So the whole .chat-panel subtree, fullscreen video and all,
+   still only counts as "level 1" against the custom titlebar sitting right next to app-shell in
+   body (.titlebar is level 10) - which is exactly why the titlebar kept rendering ON TOP of a
+   "fullscreen" video instead of a clipping gap. Raising .chat-panel's own level while fullscreen
+   is active lets its entire contents finally outrank the titlebar. */
+body.yt-fullscreen-active .chat-panel { z-index: 10001; }
+
+/* Fullscreen - immersive: the video fills the entire viewport edge-to-edge; header, seek and
+   transport float OVER it on gradient scrims and auto-hide when the mouse goes idle (JS toggles
+   --idle). In the desktop app the pywebview window itself is also resized to cover the whole
+   screen (taskbar included) - see ytEnterFullscreen in youtube-player.js. !important guards
+   against leftover inline top/left/width from a prior drag/resize. */
+.youtube-player-panel--fullscreen {
+  position: fixed !important;
+  top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  margin: 0 !important;
+  border-radius: 0;
+  border: none;
+  background: #000;
+  box-shadow: none;
+  z-index: 10500; /* above the desktop titlebar/resize grips (9999) and toasts */
+}
+.youtube-player-panel--fullscreen .youtube-player-frame {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  border-radius: 0;
+  aspect-ratio: auto;
+  box-shadow: none;
+}
+.youtube-player-panel--fullscreen .floating-panel-header {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 2;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.65) 0%, transparent 100%);
+  border-bottom: none;
+  cursor: default;
+  transition: opacity 300ms ease;
+}
+.youtube-player-panel--fullscreen .youtube-player-seek {
+  position: absolute;
+  left: 14px; right: 14px;
+  bottom: 60px;
+  z-index: 2;
+  padding: 0 6px;
+  transition: opacity 300ms ease;
+}
+.youtube-player-panel--fullscreen .youtube-player-controls {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 2;
+  padding: 10px 18px 16px;
+  background: linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+  border-top: none;
+  transition: opacity 300ms ease;
+}
+.youtube-player-panel--fullscreen .youtube-player-resize-grip,
+.youtube-player-panel--fullscreen #youtube-player-panel-pin,
+.youtube-player-panel--fullscreen #youtube-player-panel-popout,
+.youtube-player-panel--fullscreen #youtube-player-panel-toggle,
+.youtube-player-panel--fullscreen #youtube-player-playlists,
+.youtube-player-panel--fullscreen #youtube-player-browse {
+  display: none;
+}
+/* Collapsed (audio-only) has no meaning in fullscreen - always show the video. */
+.youtube-player-panel--fullscreen.youtube-player-panel--collapsed .youtube-player-frame { display: block; }
+.youtube-player-panel--fullscreen.youtube-player-panel--idle { cursor: none; }
+.youtube-player-panel--fullscreen.youtube-player-panel--idle .floating-panel-header,
+.youtube-player-panel--fullscreen.youtube-player-panel--idle .youtube-player-seek,
+.youtube-player-panel--fullscreen.youtube-player-panel--idle .youtube-player-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Popped out into its own OS window (documentPictureInPicture in a browser, or the dedicated
+   pywebview window loading web/player.html in the desktop app - both reuse this class). The
+   window's own chrome is the floating/movable/resizable surface, so the panel just fills it
+   edge-to-edge with the video flexing to absorb the extra height. */
+.youtube-player-panel--popped-out {
+  position: fixed !important;
+  top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+.youtube-player-panel--popped-out .youtube-player-frame {
+  aspect-ratio: auto;
+  flex: 1;
+  min-height: 0;
+  margin: 10px 10px 4px;
+}
+.youtube-player-panel--popped-out .floating-panel-header { cursor: default; }
+.youtube-player-panel--popped-out .youtube-player-resize-grip,
+.youtube-player-panel--popped-out #youtube-player-panel-pin,
+.youtube-player-panel--popped-out #youtube-player-panel-fullscreen {
+  display: none;
 }
 
 /* Docked mode - sits in normal document flow above the chat log (chat-panel's flex layout
@@ -1624,15 +1818,26 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .chat-toolbar-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px;
-  border-radius: var(--r1);
-  border: none;
-  background: rgba(255,255,255,0.05);
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.04);
   color: var(--t2);
   cursor: pointer;
-  transition: background var(--ease), color var(--ease);
+  transition: background var(--ease), color var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
 }
-.chat-toolbar-btn:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
+.chat-toolbar-btn:hover {
+  background: rgba(255,255,255,0.09);
+  color: var(--t1);
+  border-color: rgba(255,255,255,0.14);
+}
+.chat-toolbar-btn:active { transform: scale(0.93); }
+/* The YouTube toggle carries the player's own signature gradient glow (matches the redesigned
+   panel's hairline border / orb play button) instead of the plain flat-gray toolbar hover. */
+.chat-toolbar-btn--youtube:hover {
+  box-shadow: 0 0 16px var(--accent-glow);
+  transform: scale(1.06);
+}
 
 .youtube-player-resize-grip {
   position: absolute;
@@ -1656,17 +1861,43 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 
 .youtube-player-frame {
-  width: 100%;
+  position: relative;
+  margin: 10px 10px 2px;
   aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
   background: #000;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 8px 28px rgba(0,0,0,0.45);
 }
+/* YouTube's own embed chrome (title card, hover pause icon, share/related/logo bar, and the
+   endscreen "up next" cards it draws over the last several seconds of any video) persists even
+   with controls:0/disablekb/iv_load_policy/etc - none of the IFrame API's playerVars fully
+   suppress it, and it's cross-origin so JS can't reach in and remove the DOM nodes either. A
+   scale+crop hack was tried here and reverted: it distorted/zoomed the video (which looked worse
+   than the chrome it was hiding), introduced a compositing seam artifact on paused frames, and
+   still didn't cover the endscreen cards anyway (those can take up far more than a cropped-off
+   edge). This is a hard platform limitation, not a bug - the video plays at its real, undistorted
+   aspect ratio and YouTube's own minimal branding is an accepted trade-off. */
 .youtube-player-frame iframe { width: 100%; height: 100%; display: block; border: 0; }
+/* Sits above the iframe (later in DOM order = painted on top, no z-index needed) and eats every
+   mouse event before the cross-origin YouTube iframe ever sees it - otherwise clicking/hovering
+   the video hands it keyboard focus and mouse-hover state that our own document.addEventListener
+   calls (Escape to exit fullscreen, mousemove idle-detection) can never observe, since events
+   inside a cross-origin iframe don't bubble out to the parent document. Also doubles as a plain
+   click-to-toggle-play/pause and double-click-to-toggle-fullscreen surface, like any normal
+   video player. */
+.youtube-player-video-guard {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  outline: none;
+}
 
 .youtube-player-seek {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px 0;
+  padding: 8px 12px 0;
 }
 .youtube-player-time {
   font-size: 11px;
@@ -1674,12 +1905,48 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   min-width: 32px;
   text-align: center;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
-.youtube-player-seekbar {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
+
+/* Gradient-filled tracks: JS keeps --fill in sync with the played fraction / volume level, the
+   track paints accent gradient up to it and faint white after. Thumbs stay hidden until the row
+   is hovered (modern minimal look), then pop in with a glow. */
+.youtube-player-seekbar,
+.youtube-player-volume {
+  -webkit-appearance: none; appearance: none;
+  height: 5px;
+  background: linear-gradient(90deg,
+    #6b6fd0 0%,
+    #3a5fdb var(--fill, 0%),
+    rgba(255,255,255,0.12) var(--fill, 0%));
+  border-radius: var(--pill);
+  outline: none;
   cursor: pointer;
+  border: none;
+}
+.youtube-player-seekbar { flex: 1; min-width: 0; }
+.youtube-player-seekbar::-webkit-slider-thumb,
+.youtube-player-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--hero-grad);
+  border: 2px solid var(--surface-2);
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--accent-glow);
+  transform: scale(0);
+  transition: transform var(--ease), box-shadow var(--ease);
+}
+.youtube-player-seek:hover .youtube-player-seekbar::-webkit-slider-thumb,
+.youtube-player-seekbar:active::-webkit-slider-thumb,
+.youtube-player-volume-group:hover .youtube-player-volume::-webkit-slider-thumb,
+.youtube-player-volume:active::-webkit-slider-thumb {
+  transform: scale(1);
+}
+.youtube-player-seekbar::-webkit-slider-thumb:hover,
+.youtube-player-volume::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 14px var(--accent-glow);
+  transform: scale(1.15);
 }
 
 /* Plain flex row - the two queue labels are the only flex:1 items, so they (and only they) grow
@@ -1711,26 +1978,98 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .youtube-player-queue-label--prev { text-align: right; }
 .youtube-player-queue-label--next { text-align: left; }
-.youtube-player-controls button {
+
+.youtube-player-icon-btn {
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
+  width: 26px; height: 26px;
   border-radius: var(--r1);
   border: none;
   background: rgba(255,255,255,0.05);
-  color: var(--t1);
-  font-size: 14px;
+  color: var(--t2);
   cursor: pointer;
-  transition: background var(--ease);
+  transition: background var(--ease), color var(--ease);
 }
-.youtube-player-controls button:hover { background: rgba(255,255,255,0.1); }
+.youtube-player-icon-btn:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
 
-.youtube-player-volume {
+.youtube-player-transport-btn {
   flex-shrink: 0;
-  width: 90px;
-  accent-color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.04);
+  color: var(--t1);
   cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), transform var(--ease);
 }
+.youtube-player-transport-btn:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.14);
+  transform: scale(1.08);
+}
+.youtube-player-transport-btn:active { transform: scale(0.94); }
+
+/* The play/pause button is the visual centerpiece of the transport row: a glowing gradient orb.
+   While playing, a soft ring ripples out of it (::after, gated on --playing). */
+.youtube-player-playpause-btn {
+  position: relative;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: var(--hero-grad);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 3px 16px var(--accent-glow), 0 0 0 1px rgba(255,255,255,0.1) inset;
+  transition: box-shadow var(--ease), transform var(--ease);
+}
+.youtube-player-playpause-btn:hover { box-shadow: 0 3px 26px var(--accent-glow), 0 0 0 1px rgba(255,255,255,0.16) inset; transform: scale(1.06); }
+.youtube-player-playpause-btn:active { transform: scale(0.94); }
+.youtube-player-playpause-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent-2);
+  opacity: 0;
+  pointer-events: none;
+}
+.youtube-player-panel--playing .youtube-player-playpause-btn::after {
+  animation: yt-orb-ripple 2.4s ease-out infinite;
+}
+@keyframes yt-orb-ripple {
+  0%   { opacity: 0.55; transform: scale(1); }
+  70%  { opacity: 0;    transform: scale(1.55); }
+  100% { opacity: 0;    transform: scale(1.55); }
+}
+/* Optical centering - the play triangle's own visual weight sits left of its bounding box. */
+.youtube-player-playpause-icon-play { margin-left: 2px; }
+
+.youtube-player-volume-group {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t3);
+}
+.youtube-player-volume { width: 80px; }
+
+/* Compact override of the generic full-width .custom-select (custom-select.js) for this small
+   toolbar slot - shows the current pick ("Auto"/"1080p"/...) in the same cramped controls row as
+   the transport buttons. */
+.youtube-player-quality-group { flex-shrink: 0; width: 66px; }
+.youtube-player-quality-group .custom-select { width: 100%; }
+.youtube-player-quality-group .cs-trigger {
+  padding: 5px 6px;
+  border-radius: var(--r1);
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.07);
+  font-size: 11px;
+  gap: 4px;
+}
+.youtube-player-quality-group .cs-trigger-arrow { width: 8px; height: 5px; }
 
 /* ════════════════════════════════════════════════════
    TOASTS

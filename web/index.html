@@ -90,8 +90,17 @@
       <!-- Top-left toolbar, independent of the YouTube player's docked/floating state - lets the
            player be opened even when nothing has played yet this session (youtube-player.js). -->
       <div class="chat-toolbar" id="chat-toolbar">
-        <button type="button" class="chat-toolbar-btn" id="chat-toolbar-youtube" title="YouTube player">
-          <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3V9z" fill="currentColor" stroke="none"/></svg>
+        <button type="button" class="chat-toolbar-btn chat-toolbar-btn--youtube" id="chat-toolbar-youtube" title="YouTube player">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <rect x="2.5" y="5.5" width="19" height="13" rx="4" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M10 9l5.2 3-5.2 3V9z" fill="url(#yt-toolbar-grad)"/>
+            <defs>
+              <linearGradient id="yt-toolbar-grad" x1="10" y1="9" x2="15.2" y2="15" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#7477d6"/>
+                <stop offset="1" stop-color="#3a5fdb"/>
+              </linearGradient>
+            </defs>
+          </svg>
         </button>
       </div>
 
@@ -107,16 +116,27 @@
            floating is purely a CSS position toggle (static vs. fixed). ──────────────────────── -->
       <div id="youtube-player-panel" class="floating-panel youtube-player-panel" hidden>
         <div class="floating-panel-header" id="youtube-player-panel-header">
+          <span class="yt-eq" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="floating-panel-title" id="youtube-player-title">YouTube</span>
           <button type="button" class="floating-panel-pin" id="youtube-player-panel-toggle" title="Collapse video">
             <svg class="youtube-player-panel-toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <button type="button" class="floating-panel-pin" id="youtube-player-panel-popout" title="Pop out to a floating window">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="11" rx="1.5"/><path d="M14 15h6a1 1 0 0 0 1-1V9"/><path d="M21 9h-5V4"/><path d="M21 9l-6 6"/></svg>
+          </button>
+          <button type="button" class="floating-panel-pin" id="youtube-player-panel-fullscreen" title="Fullscreen">
+            <svg class="youtube-player-fullscreen-icon-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
+            <svg class="youtube-player-fullscreen-icon-compress" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M9 21v-3a2 2 0 0 0-2-2H4M15 21v-3a2 2 0 0 1 2-2h3"/></svg>
           </button>
           <button type="button" class="floating-panel-pin" id="youtube-player-panel-pin" title="Dock above chat">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
           </button>
           <button type="button" class="floating-panel-close" id="youtube-player-panel-close">&times;</button>
         </div>
-        <div class="youtube-player-frame"><div id="youtube-player-frame-mount"></div></div>
+        <div class="youtube-player-frame">
+          <div id="youtube-player-frame-mount"></div>
+          <div class="youtube-player-video-guard" id="youtube-player-video-guard" tabindex="-1"></div>
+        </div>
         <div class="youtube-player-seek">
           <span class="youtube-player-time" id="youtube-player-time-current">0:00</span>
           <input type="range" id="youtube-player-seekbar" class="youtube-player-seekbar" min="0" max="100" value="0" step="0.1" title="Seek" />
@@ -124,19 +144,34 @@
         </div>
         <div class="youtube-player-controls">
           <div class="youtube-player-controls-left">
-            <button type="button" id="youtube-player-panel-playlists" title="Your playlists" hidden>
+            <button type="button" id="youtube-player-panel-playlists" class="youtube-player-icon-btn" title="Your playlists" hidden>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
             </button>
-            <button type="button" id="youtube-player-panel-search" title="Search YouTube">
+            <button type="button" id="youtube-player-panel-search" class="youtube-player-icon-btn" title="Search YouTube">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
             </button>
+            <div class="youtube-player-quality-group" title="Video quality — best-effort. YouTube manages this automatically now and may keep Auto regardless of what you pick.">
+              <select id="youtube-player-quality-select" class="youtube-player-quality-select">
+                <option value="auto">Auto</option>
+              </select>
+            </div>
           </div>
           <span class="youtube-player-queue-label youtube-player-queue-label--prev" id="youtube-player-prev-label"></span>
-          <button type="button" id="youtube-player-prev" title="Previous">&#9198;</button>
-          <button type="button" id="youtube-player-playpause" title="Play/Pause">&#9199;</button>
-          <button type="button" id="youtube-player-next" title="Next">&#9197;</button>
+          <button type="button" id="youtube-player-prev" class="youtube-player-transport-btn" title="Previous">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6.27v11.46c0 .8-.87 1.3-1.56.89l-9.54-5.73a1 1 0 0 1 0-1.72l9.54-5.73c.69-.41 1.56.09 1.56.89z"/></svg>
+          </button>
+          <button type="button" id="youtube-player-playpause" class="youtube-player-playpause-btn" title="Play/Pause">
+            <svg class="youtube-player-playpause-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .84.93 1.35 1.64.89l10.7-6.86a1 1 0 0 0 0-1.68L9.64 4.25c-.71-.46-1.64.05-1.64.89z"/></svg>
+            <svg class="youtube-player-playpause-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+          </button>
+          <button type="button" id="youtube-player-next" class="youtube-player-transport-btn" title="Next">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6.27v11.46c0 .8.87 1.3 1.56.89l9.54-5.73a1 1 0 0 0 0-1.72L5.56 5.38C4.87 4.97 4 5.47 4 6.27z"/></svg>
+          </button>
           <span class="youtube-player-queue-label youtube-player-queue-label--next" id="youtube-player-next-label"></span>
-          <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+          <div class="youtube-player-volume-group">
+            <svg class="youtube-player-volume-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+            <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+          </div>
         </div>
         <div id="youtube-player-playlists" hidden>
           <div class="youtube-player-list-panel" id="youtube-player-playlists-list"></div>

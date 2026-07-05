@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<!-- Pop-out YouTube player window (desktop app only). Opened by run_app.py's open_player_window
+     as a second, frameless pywebview window (matching the main window's look) that can still be
+     dragged to another monitor / resized / closed like any real OS window - just with our own
+     drawn header/controls instead of native Windows chrome. Playback state hands off from the
+     main window through localStorage (shared WebView2 profile) - see web/js/player-window.js and
+     the pop-out section of web/js/app/youtube-player.js for the boot/heartbeat/cmd protocol.
+     Reuses style.css's .youtube-player-panel--popped-out styling so it looks identical to the
+     in-app player. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lykompanion Player</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0a0a12; }
+    /* This window's own header IS its drag handle now (frameless) - the shared
+       .youtube-player-panel--popped-out rule sets cursor:default here since the in-app/DocPiP
+       reuse of that class never wants in-page dragging; override just for this page. */
+    #player-drag-header { cursor: grab; }
+    #player-drag-header:active { cursor: grabbing; }
+  </style>
+</head>
+<body class="desktop-app">
+  <!-- Frameless like the main window - reuses the same 8 edge/corner resize-grip strips (styled
+       in style.css, driven from player-window.js via the player_set_bounds bridge). -->
+  <div class="resize-grips" aria-hidden="true">
+    <div class="resize-grip rg-n"  data-dir="n"></div>
+    <div class="resize-grip rg-s"  data-dir="s"></div>
+    <div class="resize-grip rg-e"  data-dir="e"></div>
+    <div class="resize-grip rg-w"  data-dir="w"></div>
+    <div class="resize-grip rg-ne" data-dir="ne"></div>
+    <div class="resize-grip rg-nw" data-dir="nw"></div>
+    <div class="resize-grip rg-se" data-dir="se"></div>
+    <div class="resize-grip rg-sw" data-dir="sw"></div>
+  </div>
+  <div id="youtube-player-panel" class="floating-panel youtube-player-panel youtube-player-panel--popped-out">
+    <div class="floating-panel-header" id="player-drag-header">
+      <span class="yt-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="floating-panel-title" id="youtube-player-title">YouTube</span>
+      <button type="button" class="floating-panel-pin" id="player-fullscreen-btn" title="Fullscreen">
+        <svg class="youtube-player-fullscreen-icon-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
+        <svg class="youtube-player-fullscreen-icon-compress" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M9 21v-3a2 2 0 0 0-2-2H4M15 21v-3a2 2 0 0 1 2-2h3"/></svg>
+      </button>
+      <button type="button" class="floating-panel-close" id="player-close-btn" title="Return to app">&times;</button>
+    </div>
+    <div class="youtube-player-frame">
+      <div id="youtube-player-frame-mount"></div>
+      <div class="youtube-player-video-guard" id="youtube-player-video-guard" tabindex="-1"></div>
+    </div>
+    <div class="youtube-player-seek">
+      <span class="youtube-player-time" id="youtube-player-time-current">0:00</span>
+      <input type="range" id="youtube-player-seekbar" class="youtube-player-seekbar" min="0" max="100" value="0" step="0.1" title="Seek" />
+      <span class="youtube-player-time" id="youtube-player-time-duration">0:00</span>
+    </div>
+    <div class="youtube-player-controls">
+      <div class="youtube-player-quality-group" title="Video quality — best-effort. YouTube manages this automatically now and may keep Auto regardless of what you pick.">
+        <select id="youtube-player-quality-select" class="youtube-player-quality-select">
+          <option value="auto">Auto</option>
+        </select>
+      </div>
+      <span class="youtube-player-queue-label youtube-player-queue-label--prev" id="youtube-player-prev-label"></span>
+      <button type="button" id="youtube-player-prev" class="youtube-player-transport-btn" title="Previous">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6.27v11.46c0 .8-.87 1.3-1.56.89l-9.54-5.73a1 1 0 0 1 0-1.72l9.54-5.73c.69-.41 1.56.09 1.56.89z"/></svg>
+      </button>
+      <button type="button" id="youtube-player-playpause" class="youtube-player-playpause-btn" title="Play/Pause">
+        <svg class="youtube-player-playpause-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .84.93 1.35 1.64.89l10.7-6.86a1 1 0 0 0 0-1.68L9.64 4.25c-.71-.46-1.64.05-1.64.89z"/></svg>
+        <svg class="youtube-player-playpause-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      </button>
+      <button type="button" id="youtube-player-next" class="youtube-player-transport-btn" title="Next">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6.27v11.46c0 .8.87 1.3 1.56.89l9.54-5.73a1 1 0 0 0 0-1.72L5.56 5.38C4.87 4.97 4 5.47 4 6.27z"/></svg>
+      </button>
+      <span class="youtube-player-queue-label youtube-player-queue-label--next" id="youtube-player-next-label"></span>
+      <div class="youtube-player-volume-group">
+        <svg class="youtube-player-volume-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+      </div>
+    </div>
+  </div>
+  <script src="/js/app/custom-select.js"></script>
+  <script src="/js/player-window.js"></script>
+</body>
+</html>

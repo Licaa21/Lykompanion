@@ -46,7 +46,12 @@ function setupDesktopTitlebar() {
 
     // Lightweight Windows-Snap: snapZone tracks where the window is snapped; restoreBounds is the
     // floating rect to return to. No OS snap overlay/layouts — this is a pure JS reimplementation.
-    let snapZone = null;      // 'max' | 'left' | 'right' | null
+    // The app always launches already sized to fill the work area (run_app.py), so on load this
+    // heuristic detects that and seeds snapZone as 'max' - without it the titlebar's first
+    // double-click/maximize-button press would see snapZone as null (thinks it's floating) and
+    // just re-apply the identical size instead of correctly restoring down to something smaller.
+    let snapZone = (Math.abs(window.innerWidth - (screen.availWidth || 0)) < 4 &&
+                    Math.abs(window.innerHeight - (screen.availHeight || 0)) < 4) ? 'max' : null;
     let restoreBounds = null;
     const snapTarget = (zone) => {
       const a = workArea();
@@ -204,5 +209,39 @@ function setupDesktopTitlebar() {
   else window.addEventListener('pywebviewready', apply);
 }
 setupDesktopTitlebar();
+
+// F11 app-wide fullscreen. Desktop app: pywebview's native toggle (same mechanism as the YouTube
+// pop-out window's own fullscreen button) resizes the actual OS window over the whole screen;
+// body.app-fullscreen (CSS) hides the custom titlebar for it, since pywebview's fullscreen only
+// touches the OS window frame/bounds, not our own HTML chrome — flexbox then reflows .app-shell
+// to fill the freed space on its own, no extra sizing needed. Plain browser: falls back to the
+// real Fullscreen API, which has no equivalent "hide the titlebar" concern (it's not shown there).
+function setupAppFullscreen() {
+  const bridge = () => window.pywebview?.api;
+  let pywebviewFullscreen = false; // pywebview gives no change event - we're the only toggler
+
+  function toggle() {
+    const api = bridge();
+    if (api?.window_toggle_fullscreen) {
+      api.window_toggle_fullscreen();
+      pywebviewFullscreen = !pywebviewFullscreen;
+      document.body.classList.toggle('app-fullscreen', pywebviewFullscreen);
+    } else if (document.fullscreenEnabled) {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }
+  document.addEventListener('fullscreenchange', () => {
+    if (!bridge()?.window_toggle_fullscreen) {
+      document.body.classList.toggle('app-fullscreen', !!document.fullscreenElement);
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'F11') return;
+    e.preventDefault();
+    toggle();
+  });
+}
+setupAppFullscreen();
 
 init();
