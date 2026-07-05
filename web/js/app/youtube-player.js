@@ -1,6 +1,4 @@
-const YOUTUBE_PANEL_POS_KEY = "lyko-youtube-panel-pos";
 const YOUTUBE_VOLUME_KEY = "lyko-youtube-volume";
-const YOUTUBE_DOCKED_KEY = "lyko-youtube-docked";
 const YOUTUBE_COLLAPSED_KEY = "lyko-youtube-collapsed";
 // Remembers what was playing across app restarts - the panel itself stays closed (hidden by
 // default in index.html) until the toolbar button or a play_on_youtube tool call opens it; this
@@ -8,9 +6,7 @@ const YOUTUBE_COLLAPSED_KEY = "lyko-youtube-collapsed";
 const YOUTUBE_QUEUE_KEY = "lyko-youtube-queue";
 
 const ytPanel = document.getElementById("youtube-player-panel");
-const ytPanelHeader = document.getElementById("youtube-player-panel-header");
 const ytPanelClose = document.getElementById("youtube-player-panel-close");
-const ytPanelPin = document.getElementById("youtube-player-panel-pin");
 const ytPanelToggle = document.getElementById("youtube-player-panel-toggle");
 const ytPanelFullscreenBtn = document.getElementById("youtube-player-panel-fullscreen");
 const ytFullscreenIconExpand = ytPanel.querySelector(".youtube-player-fullscreen-icon-expand");
@@ -47,11 +43,9 @@ let ytQueue = [];
 let ytQueueIndex = -1;
 // True while the user is dragging the seek bar - suspends the poll below from fighting the drag.
 let ytSeeking = false;
-let ytDocked = false;
 let ytCollapsed = false;
 // True while the panel has been moved into a separate documentPictureInPicture window (see
-// ytPanelPopoutBtn below) - suspends header-drag/resize-grip handling, since the OS window itself
-// is what the user drags/resizes at that point, not our in-page positioning.
+// ytPanelPopoutBtn below).
 let ytPoppedOut = false;
 let ytPipWindow = null;
 // True from page load until the restored entry (see ytLoadPersistedQueue below) actually gets a
@@ -103,7 +97,23 @@ function ytPopulateQualityOptions(player, selectEl) {
   }
 }
 ytQualitySelect.addEventListener("change", () => {
-  if (ytPlayer && ytPlayer.setPlaybackQuality) ytPlayer.setPlaybackQuality(ytQualitySelect.value);
+  if (!ytPlayer || !ytPlayer.setPlaybackQuality) return;
+  const quality = ytQualitySelect.value;
+  ytPlayer.setPlaybackQuality(quality);
+  // setPlaybackQuality alone is only a suggestion for future buffering - it doesn't touch what's
+  // already buffered, so the visible resolution often doesn't change for a while (if ever) on its
+  // own. Forcing an immediate re-load/re-cue at the current position with the quality as a
+  // suggestedQuality hint applies it right away in practice.
+  if (!ytPlayer.getVideoData || !ytPlayer.getCurrentTime) return;
+  const videoData = ytPlayer.getVideoData();
+  if (!videoData || !videoData.video_id) return;
+  const startSeconds = ytPlayer.getCurrentTime() || 0;
+  const wasPlaying = ytPlayer.getPlayerState && ytPlayer.getPlayerState() === YT.PlayerState.PLAYING;
+  if (wasPlaying && ytPlayer.loadVideoById) {
+    ytPlayer.loadVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
+  } else if (ytPlayer.cueVideoById) {
+    ytPlayer.cueVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
+  }
 });
 
 // Polls current time/duration instead of relying on an IFrame API event - the API has no
@@ -426,7 +436,10 @@ window.controlYoutubePlayer = function (action, volume) {
       if (ytPlayer && ytPlayer.setVolume && Number.isFinite(volume)) {
         const clamped = Math.min(100, Math.max(0, volume));
         ytPlayer.setVolume(clamped);
-        if (ytVolumeSlider) ytVolumeSlider.value = clamped;
+        if (ytVolumeSlider) {
+          ytVolumeSlider.value = clamped;
+          ytSyncVolumeFill();
+        }
         localStorage.setItem(YOUTUBE_VOLUME_KEY, String(clamped));
       }
       break;
@@ -448,84 +461,9 @@ ytVolumeSlider.addEventListener("input", () => {
   localStorage.setItem(YOUTUBE_VOLUME_KEY, String(value));
 });
 
-const ytResizeGrip = document.getElementById("youtube-player-resize-grip");
-const YT_PANEL_MIN_WIDTH = 240;
-const YT_PANEL_MAX_WIDTH = 640;
-const YT_PANEL_DEFAULT_WIDTH = 320;
-
-function ytSavePanelState() {
-  // Read the actual rendered position (not style.top/left, which stay unset while the panel is
-  // still sitting at its default bottom-right CSS anchor) so a resize-only interaction - no drag
-  // ever happened - still has something concrete to persist alongside the new width.
-  const rect = ytPanel.getBoundingClientRect();
-  localStorage.setItem(
-    YOUTUBE_PANEL_POS_KEY,
-    JSON.stringify({ top: rect.top, left: rect.left, width: ytPanel.offsetWidth })
-  );
-}
-
-// Restore a dragged position + resized width, or fall back to the default bottom-right CSS
-// anchor - mirrors game-state.js's floating panel exactly (same corrupt/off-screen guards).
-// Reused whenever the panel goes back to floating mode after being docked, since docking clears
-// these inline styles (they'd otherwise outrank the docked CSS class, which is only a class
-// selector and inline styles always win regardless of specificity).
-function ytApplyFloatingPosition() {
-  let saved = null;
-  try {
-    saved = JSON.parse(localStorage.getItem(YOUTUBE_PANEL_POS_KEY) || "null");
-  } catch (err) { /* corrupt entry - fall through to the CSS anchor */ }
-  if (saved && Number.isFinite(saved.top) && Number.isFinite(saved.left)) {
-    const width = Number.isFinite(saved.width)
-      ? Math.min(Math.max(YT_PANEL_MIN_WIDTH, saved.width), YT_PANEL_MAX_WIDTH)
-      : YT_PANEL_DEFAULT_WIDTH;
-    const maxLeft = Math.max(0, window.innerWidth - width);
-    const maxTop = Math.max(0, window.innerHeight - 40);   // keep at least the header on-screen
-    ytPanel.style.width = `${width}px`;
-    ytPanel.style.top = `${Math.min(Math.max(0, saved.top), maxTop)}px`;
-    ytPanel.style.left = `${Math.min(Math.max(0, saved.left), maxLeft)}px`;
-    ytPanel.style.right = "auto";
-    ytPanel.style.bottom = "auto";
-  } else if (saved !== null) {
-    localStorage.removeItem(YOUTUBE_PANEL_POS_KEY);
-  } else {
-    ytPanel.style.width = "";
-    ytPanel.style.top = "";
-    ytPanel.style.left = "";
-    ytPanel.style.right = "";
-    ytPanel.style.bottom = "";
-  }
-}
-ytApplyFloatingPosition();
-
-// Docked mode switches the panel from position:fixed to position:static so it sits in normal
-// document flow right above #chat-log (chat-panel's flex column then shrinks the log to make
-// room) instead of floating over the page. This is a CSS-only toggle - the panel element is
-// permanently mounted in the same DOM spot (see index.html) and is never moved/reparented, since
-// reparenting any ancestor of an <iframe> forces the browser to discard and reload it, which
-// would restart the video on every dock/undock.
-function ytSetDocked(docked) {
-  ytDocked = docked;
-  localStorage.setItem(YOUTUBE_DOCKED_KEY, docked ? "1" : "0");
-  ytPanel.classList.toggle("youtube-player-panel--docked", docked);
-  ytPanelPin.classList.toggle("active", docked);
-  ytPanelPin.title = docked ? "Undock (float over page)" : "Dock above chat";
-  if (docked) {
-    // Inline styles left over from a drag/resize outrank the docked CSS class no matter its
-    // specificity - clear them so the class's position/width actually take effect.
-    ytPanel.style.top = "";
-    ytPanel.style.left = "";
-    ytPanel.style.right = "";
-    ytPanel.style.bottom = "";
-    ytPanel.style.width = "";
-  } else {
-    ytApplyFloatingPosition();
-  }
-}
-ytPanelPin.addEventListener("click", () => ytSetDocked(!ytDocked));
-
 // Collapsed mode hides the video frame only, keeping the seek bar/transport/volume controls -
 // the iframe keeps playing audio while hidden via CSS, so this is a real "audio only" mode, not
-// a pause. Works identically in docked or floating layout.
+// a pause.
 function ytSetCollapsed(collapsed) {
   ytCollapsed = collapsed;
   localStorage.setItem(YOUTUBE_COLLAPSED_KEY, collapsed ? "1" : "0");
@@ -544,8 +482,7 @@ ytPanelToggle.addEventListener("click", () => {
   ytSetCollapsed(!ytCollapsed);
 });
 
-// Defaults to docked+expanded unless the user has explicitly chosen otherwise.
-ytSetDocked(localStorage.getItem(YOUTUBE_DOCKED_KEY) !== "0");
+// Defaults to expanded unless the user has explicitly chosen otherwise.
 ytSetCollapsed(localStorage.getItem(YOUTUBE_COLLAPSED_KEY) === "1");
 
 // Renders a list of {title, ...} items, each row itself clickable to play - shared by the
@@ -956,10 +893,6 @@ async function ytOpenDocPipPopout() {
     } else {
       ytPanelHome.appendChild(ytPanel);
     }
-    // Re-apply whichever layout mode was active before popping out - docking/floating position
-    // is normally only (re-)applied when its own toggle fires, which didn't happen here.
-    if (ytDocked) ytSetDocked(true);
-    else ytApplyFloatingPosition();
   });
 }
 
@@ -979,68 +912,3 @@ window.addEventListener("load", () => {
   }
 });
 
-(() => {
-  let dragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  ytPanelHeader.addEventListener("mousedown", (event) => {
-    if (ytDocked || ytPoppedOut || ytIsFullscreen() || event.target.closest("button")) return;
-    dragging = true;
-    const rect = ytPanel.getBoundingClientRect();
-    offsetX = event.clientX - rect.left;
-    offsetY = event.clientY - rect.top;
-    event.preventDefault();
-  });
-
-  window.addEventListener("mousemove", (event) => {
-    if (!dragging) return;
-    const maxLeft = window.innerWidth - ytPanel.offsetWidth;
-    const maxTop = window.innerHeight - ytPanel.offsetHeight;
-    const left = Math.min(Math.max(0, event.clientX - offsetX), maxLeft);
-    const top = Math.min(Math.max(0, event.clientY - offsetY), maxTop);
-    ytPanel.style.left = `${left}px`;
-    ytPanel.style.top = `${top}px`;
-    ytPanel.style.right = "auto";
-    ytPanel.style.bottom = "auto";
-  });
-
-  window.addEventListener("mouseup", () => {
-    if (!dragging) return;
-    dragging = false;
-    ytSavePanelState();
-  });
-})();
-
-// Bottom-right corner grip resizes the panel width - the video frame's aspect-ratio CSS keeps
-// height in lockstep, so only width needs to be tracked/persisted.
-(() => {
-  let resizing = false;
-  let startWidth = 0;
-  let startX = 0;
-
-  ytResizeGrip.addEventListener("mousedown", (event) => {
-    if (ytDocked || ytPoppedOut || ytIsFullscreen()) return;
-    resizing = true;
-    startWidth = ytPanel.offsetWidth;
-    startX = event.clientX;
-    event.preventDefault();
-    event.stopPropagation();
-  });
-
-  window.addEventListener("mousemove", (event) => {
-    if (!resizing) return;
-    // Clamped so the panel can't grow past the right edge of the screen from wherever it
-    // currently sits - Math.max keeps this from collapsing below the min width when there's
-    // little room (e.g. panel already dragged close to the right edge).
-    const maxWidth = Math.max(YT_PANEL_MIN_WIDTH, Math.min(YT_PANEL_MAX_WIDTH, window.innerWidth - ytPanel.offsetLeft));
-    const width = Math.min(Math.max(YT_PANEL_MIN_WIDTH, startWidth + (event.clientX - startX)), maxWidth);
-    ytPanel.style.width = `${width}px`;
-  });
-
-  window.addEventListener("mouseup", () => {
-    if (!resizing) return;
-    resizing = false;
-    ytSavePanelState();
-  });
-})();

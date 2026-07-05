@@ -83,7 +83,21 @@ function populateQualityOptions() {
   }
 }
 qualitySelect.addEventListener("change", () => {
-  if (player && player.setPlaybackQuality) player.setPlaybackQuality(qualitySelect.value);
+  if (!player || !player.setPlaybackQuality) return;
+  const quality = qualitySelect.value;
+  player.setPlaybackQuality(quality);
+  // See youtube-player.js's matching handler for why this force-reload/re-cue follows - otherwise
+  // the pick often never visibly applies.
+  if (!player.getVideoData || !player.getCurrentTime) return;
+  const videoData = player.getVideoData();
+  if (!videoData || !videoData.video_id) return;
+  const startSeconds = player.getCurrentTime() || 0;
+  const wasPlaying = player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING;
+  if (wasPlaying && player.loadVideoById) {
+    player.loadVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
+  } else if (player.cueVideoById) {
+    player.cueVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
+  }
 });
 
 function combinedTitle(entry) {

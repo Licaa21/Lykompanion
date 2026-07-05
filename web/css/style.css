@@ -1527,12 +1527,12 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 /* ── YouTube player — a glass "now playing" card: gradient hairline border, layered accent
    glow, inset rounded video, orb play button, gradient-filled sliders, live equalizer. ── */
 .youtube-player-panel {
-  top: auto;
-  bottom: 16px;
-  right: auto;
-  left: 16px;
-  width: 340px;
-  position: fixed;
+  position: static;
+  /* Match .composer/.message's column width so the docked player lines up with the chat content
+     instead of stretching edge-to-edge across the (often much wider) chat-panel flex container. */
+  width: calc(100% - 40px);
+  max-width: 780px;
+  margin: 12px auto 0;
   border-radius: 18px;
   /* Gradient hairline border: opaque-ish panel fill painted to padding-box, accent gradient
      painted to border-box showing through the 1px transparent border. */
@@ -1672,13 +1672,31 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   border-top: none;
   transition: opacity 300ms ease;
 }
-.youtube-player-panel--fullscreen .youtube-player-resize-grip,
-.youtube-player-panel--fullscreen #youtube-player-panel-pin,
 .youtube-player-panel--fullscreen #youtube-player-panel-popout,
-.youtube-player-panel--fullscreen #youtube-player-panel-toggle,
+.youtube-player-panel--fullscreen #youtube-player-panel-toggle {
+  display: none;
+}
+/* Playlists/search normally render in-flow below .youtube-player-controls (which is itself
+   pinned position:absolute to the bottom in fullscreen, taking it out of flow) - promoted to an
+   absolutely-positioned overlay anchored just above that bar so they open upward over the video
+   instead of being invisible/unreachable. */
 .youtube-player-panel--fullscreen #youtube-player-playlists,
 .youtube-player-panel--fullscreen #youtube-player-browse {
-  display: none;
+  position: absolute;
+  left: 14px; right: 14px;
+  bottom: 92px;
+  z-index: 3;
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  border-radius: 12px;
+  background: rgba(12,13,20,0.96);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+}
+.youtube-player-panel--fullscreen #youtube-player-playlists .youtube-player-list-panel,
+.youtube-player-panel--fullscreen #youtube-player-browse .youtube-player-list-panel {
+  border-top: none;
+  max-height: none;
 }
 /* Collapsed (audio-only) has no meaning in fullscreen - always show the video. */
 .youtube-player-panel--fullscreen.youtube-player-panel--collapsed .youtube-player-frame { display: block; }
@@ -1713,38 +1731,17 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   min-height: 0;
   margin: 10px 10px 4px;
 }
-.youtube-player-panel--popped-out .floating-panel-header { cursor: default; }
-.youtube-player-panel--popped-out .youtube-player-resize-grip,
-.youtube-player-panel--popped-out #youtube-player-panel-pin,
 .youtube-player-panel--popped-out #youtube-player-panel-fullscreen {
   display: none;
 }
 
-/* Docked mode - sits in normal document flow above the chat log (chat-panel's flex layout
-   shrinks .chat-log to make room) instead of floating over the page. Combined-class selector
-   so it outranks the plain .youtube-player-panel rule above without needing !important - inline
-   styles left over from a drag/resize still take precedence, so youtube-player.js clears those
-   when toggling into dock mode. */
-.youtube-player-panel.youtube-player-panel--docked {
-  position: static;
-  top: auto;
-  left: auto;
-  right: auto;
-  bottom: auto;
-  /* Match .composer/.message's column width so the docked player lines up with the chat content
-     instead of stretching edge-to-edge across the (often much wider) chat-panel flex container. */
-  width: calc(100% - 40px);
-  max-width: 780px;
-  margin: 12px auto 0;
-}
-.youtube-player-panel--docked .youtube-player-resize-grip { display: none; }
-.youtube-player-panel--docked .floating-panel-header { cursor: default; }
+.youtube-player-panel .floating-panel-header { cursor: default; }
 
 .youtube-player-title-channel { color: var(--accent); }
 
 /* Collapsed mode - hides the video frame only, keeping the seek bar/transport/volume controls so
    audio (still playing - a hidden iframe doesn't pause it) can be controlled without the video
-   taking up space. Works the same in both docked and floating layouts. */
+   taking up space. */
 .youtube-player-panel--collapsed .youtube-player-frame { display: none; }
 .youtube-player-panel-toggle-icon { transition: transform var(--ease); }
 .youtube-player-panel--collapsed .youtube-player-panel-toggle-icon { transform: rotate(180deg); }
@@ -1837,27 +1834,6 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 .chat-toolbar-btn--youtube:hover {
   box-shadow: 0 0 16px var(--accent-glow);
   transform: scale(1.06);
-}
-
-.youtube-player-resize-grip {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  z-index: 1;
-}
-.youtube-player-resize-grip::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid var(--t3);
-  border-bottom: 2px solid var(--t3);
-  opacity: 0.6;
 }
 
 .youtube-player-frame {
@@ -2059,7 +2035,7 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 /* Compact override of the generic full-width .custom-select (custom-select.js) for this small
    toolbar slot - shows the current pick ("Auto"/"1080p"/...) in the same cramped controls row as
    the transport buttons. */
-.youtube-player-quality-group { flex-shrink: 0; width: 66px; }
+.youtube-player-quality-group { flex-shrink: 0; width: 88px; }
 .youtube-player-quality-group .custom-select { width: 100%; }
 .youtube-player-quality-group .cs-trigger {
   padding: 5px 6px;
@@ -3248,7 +3224,7 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 /* Panel is appended to <body> (fixed) so the modal's overflow:auto can't clip it. */
 .cs-panel {
   position: fixed;
-  z-index: 650; /* above dialog(600) so a select inside a dialog still opens */
+  z-index: 10600; /* above dialog(600) and the YouTube fullscreen overlay (10500) */
   max-height: 260px;
   overflow-y: auto;
   padding: 4px;

@@ -111,9 +111,9 @@
         <button type="button" id="setup-banner-btn" class="setup-banner-btn">Set up now</button>
       </div>
 
-      <!-- ── YOUTUBE PLAYER — permanently mounted here (never reparented, see
-           youtube-player.js's ytSetDocked) so its iframe never reloads on dock/undock; docked vs.
-           floating is purely a CSS position toggle (static vs. fixed). ──────────────────────── -->
+      <!-- ── YOUTUBE PLAYER — permanently mounted here, docked above the chat log. The only way
+           out of this layout is popping out to a separate movable window (see
+           youtube-player.js's ytOpenNativePopout/ytOpenDocPipPopout). ──────────────────────── -->
       <div id="youtube-player-panel" class="floating-panel youtube-player-panel" hidden>
         <div class="floating-panel-header" id="youtube-player-panel-header">
           <span class="yt-eq" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -127,9 +127,6 @@
           <button type="button" class="floating-panel-pin" id="youtube-player-panel-fullscreen" title="Fullscreen">
             <svg class="youtube-player-fullscreen-icon-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
             <svg class="youtube-player-fullscreen-icon-compress" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M9 21v-3a2 2 0 0 0-2-2H4M15 21v-3a2 2 0 0 1 2-2h3"/></svg>
-          </button>
-          <button type="button" class="floating-panel-pin" id="youtube-player-panel-pin" title="Dock above chat">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
           </button>
           <button type="button" class="floating-panel-close" id="youtube-player-panel-close">&times;</button>
         </div>
@@ -183,7 +180,6 @@
           </form>
           <div class="youtube-player-list-panel" id="youtube-player-browse-results"></div>
         </div>
-        <div class="youtube-player-resize-grip" id="youtube-player-resize-grip" title="Resize"></div>
       </div>
 
       <div id="chat-log" class="chat-log"></div>
