@@ -143,27 +143,31 @@
             <button type="button" id="youtube-player-panel-search" class="youtube-player-icon-btn" title="Search YouTube">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
             </button>
+            <span class="youtube-player-queue-label youtube-player-queue-label--prev" id="youtube-player-prev-label"></span>
           </div>
-          <span class="youtube-player-queue-label youtube-player-queue-label--prev" id="youtube-player-prev-label"></span>
-          <button type="button" id="youtube-player-prev" class="youtube-player-transport-btn" title="Previous">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6.27v11.46c0 .8-.87 1.3-1.56.89l-9.54-5.73a1 1 0 0 1 0-1.72l9.54-5.73c.69-.41 1.56.09 1.56.89z"/></svg>
-          </button>
-          <button type="button" id="youtube-player-playpause" class="youtube-player-playpause-btn" title="Play/Pause">
-            <svg class="youtube-player-playpause-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .84.93 1.35 1.64.89l10.7-6.86a1 1 0 0 0 0-1.68L9.64 4.25c-.71-.46-1.64.05-1.64.89z"/></svg>
-            <svg class="youtube-player-playpause-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-          </button>
-          <button type="button" id="youtube-player-next" class="youtube-player-transport-btn" title="Next">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6.27v11.46c0 .8.87 1.3 1.56.89l9.54-5.73a1 1 0 0 0 0-1.72L5.56 5.38C4.87 4.97 4 5.47 4 6.27z"/></svg>
-          </button>
-          <span class="youtube-player-queue-label youtube-player-queue-label--next" id="youtube-player-next-label"></span>
-          <div class="youtube-player-volume-group">
-            <svg class="youtube-player-volume-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-            <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+          <div class="youtube-player-controls-center">
+            <button type="button" id="youtube-player-prev" class="youtube-player-transport-btn" title="Previous">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6.27v11.46c0 .8-.87 1.3-1.56.89l-9.54-5.73a1 1 0 0 1 0-1.72l9.54-5.73c.69-.41 1.56.09 1.56.89z"/></svg>
+            </button>
+            <button type="button" id="youtube-player-playpause" class="youtube-player-playpause-btn" title="Play/Pause">
+              <svg class="youtube-player-playpause-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .84.93 1.35 1.64.89l10.7-6.86a1 1 0 0 0 0-1.68L9.64 4.25c-.71-.46-1.64.05-1.64.89z"/></svg>
+              <svg class="youtube-player-playpause-icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+            </button>
+            <button type="button" id="youtube-player-next" class="youtube-player-transport-btn" title="Next">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6.27v11.46c0 .8.87 1.3 1.56.89l9.54-5.73a1 1 0 0 0 0-1.72L5.56 5.38C4.87 4.97 4 5.47 4 6.27z"/></svg>
+            </button>
           </div>
-          <button type="button" id="youtube-player-panel-fullscreen" class="youtube-player-icon-btn" title="Fullscreen">
-            <svg class="youtube-player-fullscreen-icon-expand" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
-            <svg class="youtube-player-fullscreen-icon-compress" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M9 21v-3a2 2 0 0 0-2-2H4M15 21v-3a2 2 0 0 1 2-2h3"/></svg>
-          </button>
+          <div class="youtube-player-controls-right">
+            <span class="youtube-player-queue-label youtube-player-queue-label--next" id="youtube-player-next-label"></span>
+            <div class="youtube-player-volume-group">
+              <svg class="youtube-player-volume-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+              <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+            </div>
+            <button type="button" id="youtube-player-panel-fullscreen" class="youtube-player-icon-btn" title="Fullscreen">
+              <svg class="youtube-player-fullscreen-icon-expand" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
+              <svg class="youtube-player-fullscreen-icon-compress" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M9 21v-3a2 2 0 0 0-2-2H4M15 21v-3a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+          </div>
         </div>
         <div id="youtube-player-playlists" hidden>
           <div class="youtube-player-list-panel" id="youtube-player-playlists-list"></div>
