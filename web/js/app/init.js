@@ -46,12 +46,7 @@ function setupDesktopTitlebar() {
 
     // Lightweight Windows-Snap: snapZone tracks where the window is snapped; restoreBounds is the
     // floating rect to return to. No OS snap overlay/layouts — this is a pure JS reimplementation.
-    // The app always launches already sized to fill the work area (run_app.py), so on load this
-    // heuristic detects that and seeds snapZone as 'max' - without it the titlebar's first
-    // double-click/maximize-button press would see snapZone as null (thinks it's floating) and
-    // just re-apply the identical size instead of correctly restoring down to something smaller.
-    let snapZone = (Math.abs(window.innerWidth - (screen.availWidth || 0)) < 4 &&
-                    Math.abs(window.innerHeight - (screen.availHeight || 0)) < 4) ? 'max' : null;
+    let snapZone = null;
     let restoreBounds = null;
     const snapTarget = (zone) => {
       const a = workArea();
@@ -203,6 +198,16 @@ function setupDesktopTitlebar() {
         grip.addEventListener('pointerup', onUp);
       });
     });
+
+    // run_app.py launches the window hidden, at half work-area width. 100ms after the window is
+    // ready, drive it to full size through the same maximize path the titlebar's maximize button
+    // uses (so snapZone/restoreBounds end up correctly seeded - restoreBounds becomes this
+    // initial half-width window), then reveal it - the whole half->full transition happens while
+    // still hidden, so the window only ever appears already full-size.
+    setTimeout(() => {
+      applySnap('max', curBounds());
+      api()?.window_show?.();
+    }, 100);
   };
 
   if (api()) apply();
