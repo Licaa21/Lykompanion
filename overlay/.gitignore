@@ -1,8 +1,5 @@
-# Build artifacts. overlay.exe itself IS shipped (prebuilt, Sprint C5) so users
-# without VS Build Tools still get the overlay — it is force-tracked below.
+# Build artifacts.
 *.obj
 *.exe
 *.pdb
 *.ilk
-
-!Lykompanion-overlay.exe
