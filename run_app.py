@@ -177,18 +177,19 @@ def _make_download_api(win) -> object:
     return download_voice
 
 
-# Remove the Windows 11 window border/outline AND corner rounding on the frameless window. Both
-# are DWM attributes (border colour, corner preference), NOT window styles — so this is safe and
-# can't affect the frameless drag the way the reverted WS_THICKFRAME hack did. Corner rounding
-# matters here because Win11 rounds top-level windows by default (DWMWCP_ROUND); our own custom
-# maximize (JS snaps the frameless window to fill screen.availWidth/Height, see init.js) doesn't
-# go through WindowState=Maximized, so the OS never suppresses rounding the way it does for a
-# true maximized window — leaving the desktop visible through the clipped corners. argtypes are
-# set so the 64-bit HWND isn't truncated to a 32-bit int (which would silently no-op).
+# Recolor the Windows 11 window border/outline (default is a bright accent/white that clashes
+# with the dark UI) AND disable corner rounding on the frameless window. Both are DWM attributes
+# (border colour, corner preference), NOT window styles — so this is safe and can't affect the
+# frameless drag the way the reverted WS_THICKFRAME hack did. Corner rounding matters here because
+# Win11 rounds top-level windows by default (DWMWCP_ROUND); our own custom maximize (JS snaps the
+# frameless window to fill screen.availWidth/Height, see init.js) doesn't go through
+# WindowState=Maximized, so the OS never suppresses rounding the way it does for a true maximized
+# window — leaving the desktop visible through the clipped corners. argtypes are set so the
+# 64-bit HWND isn't truncated to a 32-bit int (which would silently no-op).
 _DWMWA_BORDER_COLOR = 34          # Win11 22000+
-_DWMWA_COLOR_NONE = 0xFFFFFFFE
 _DWMWA_WINDOW_CORNER_PREFERENCE = 33  # Win11 22000+
 _DWMWCP_DONOTROUND = 1
+_BORDER_COLORREF = 0x00C75F5B  # 0x00BBGGRR form of CSS --accent (#5b5fc7)
 _dwmapi = ctypes.windll.dwmapi
 _user32 = ctypes.windll.user32
 _dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long  # HRESULT
@@ -196,7 +197,7 @@ _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.
 
 
 def _remove_window_border(hwnd: int) -> None:
-    color = ctypes.c_uint(_DWMWA_COLOR_NONE)
+    color = ctypes.c_uint(_BORDER_COLORREF)
     _dwmapi.DwmSetWindowAttribute(hwnd, _DWMWA_BORDER_COLOR, ctypes.byref(color), ctypes.sizeof(color))
     corner_pref = ctypes.c_uint(_DWMWCP_DONOTROUND)
     _dwmapi.DwmSetWindowAttribute(
