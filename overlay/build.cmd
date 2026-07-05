@@ -41,9 +41,13 @@ if %ERRORLEVEL% neq 0 (
 REM /O2 optimized, /EHsc C++ exceptions, /std:c++17, GUI subsystem (no console).
 REM /utf-8 = treat source (and exec) as UTF-8 so non-ASCII string literals
 REM (e.g. the ellipsis in "Listening…") don't mojibake under the default codepage.
-cl /nologo /O2 /EHsc /std:c++17 /utf-8 /W3 ^
+REM /Brepro (both compiler and linker) makes the build reproducible: without it,
+REM link.exe stamps a build timestamp into the PE header on every invocation, so
+REM the committed exe shows as "modified" in git after every rebuild even when
+REM overlay.cpp hasn't changed.
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /W3 /Brepro ^
     overlay.cpp ^
-    /link /SUBSYSTEM:WINDOWS ^
+    /link /SUBSYSTEM:WINDOWS /Brepro ^
     user32.lib gdi32.lib d2d1.lib dwrite.lib shell32.lib ^
     /OUT:Lykompanion-overlay.exe
 
