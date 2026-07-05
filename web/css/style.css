@@ -1519,9 +1519,6 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .floating-panel-pin:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
 .floating-panel-pin.active { color: var(--accent); }
 
-.youtube-player-fullscreen-icon-expand,
-.youtube-player-fullscreen-icon-compress { display: block; }
-
 .floating-panel .game-state-fields { padding: 10px 12px; }
 
 /* ── YouTube player — a glass "now playing" card: gradient hairline border, layered accent
@@ -1967,6 +1964,7 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   transition: background var(--ease), color var(--ease);
 }
 .youtube-player-icon-btn:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
+.youtube-player-icon-btn.active { color: var(--accent); }
 
 .youtube-player-transport-btn {
   flex-shrink: 0;
