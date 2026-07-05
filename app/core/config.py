@@ -159,13 +159,13 @@ class Settings(BaseSettings):
     # poll window - a state that became static entirely inside one window (e.g. a death/game-over
     # screen reached mid-window, or one the window started already on) would otherwise be skipped
     # forever, since every later window also compares that same static screen against itself and
-    # finds nothing new. Rather than a time-based fallback (which fires on a schedule regardless of
-    # whether anything is actually happening, defeating the point of skipping), the first "should
-    # skip" window in a streak is always let through anyway; this caps how many further consecutive
-    # windows may then actually be skipped (real cost savings for a genuinely static screen) before
-    # one is let through again as a safety net. Set to 0 to disable (revert to skipping indefinitely
-    # once a streak starts, the prior behavior).
-    game_state_max_consecutive_skips: int = 5
+    # finds nothing new. To fix that, the first "should skip" window in any streak is ALWAYS let
+    # through unconditionally (not gated by this setting) - the guaranteed single look that actually
+    # fixes the bug. This setting only controls an optional periodic re-check after that: 0 (default)
+    # means skip indefinitely for the rest of the streak once that one look has happened (no
+    # recurring LLM cost while genuinely static); a positive value re-forces one through every N
+    # further consecutive skips as extra insurance, at the cost of periodic calls even while paused.
+    game_state_max_consecutive_skips: int = 0
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this

@@ -542,12 +542,14 @@ async def _capture_tick() -> None:
             # Neither signal saw a change *within this window*. That comparison is blind to a state
             # that became static entirely inside one window (e.g. a death screen reached mid-window,
             # or one that started already on it) - every later window compares that same static
-            # screen against itself and would find nothing new forever. Rather than trying to detect
-            # that case directly, always let the first "should skip" window in a streak through
-            # anyway, then actually skip for up to game_state_max_consecutive_skips windows (real
-            # cost savings for a genuinely static screen) before allowing one through again.
+            # screen against itself and would find nothing new forever. The first "should skip"
+            # window in a streak is therefore ALWAYS let through, unconditionally - this is the
+            # actual fix and isn't gated by the setting below. game_state_max_consecutive_skips only
+            # controls an optional periodic re-check after that: 0 (default) means skip indefinitely
+            # for the rest of the streak once the single guaranteed look has happened (no recurring
+            # cost); a positive value re-forces one through every N skips as extra insurance.
             max_skips = settings.game_state_max_consecutive_skips
-            if max_skips > 0 and (_consecutive_skips == 0 or _consecutive_skips >= max_skips):
+            if _consecutive_skips == 0 or (max_skips > 0 and _consecutive_skips >= max_skips):
                 logger.info(
                     "Game-state poll: no OCR/visual change detected for process=%r (consecutive "
                     "skips=%d, budget=%d) - forcing one through anyway (%s)",

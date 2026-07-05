@@ -893,8 +893,8 @@ function applyConfigToForm(cfg) {
   gameStateVisualDiffValue.textContent = cfg.game_state_visual_diff_threshold_percent ?? 12;
   gameStateVisualDiffNoiseFloorInput.value = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
   gameStateVisualDiffNoiseFloorValue.textContent = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
-  gameStateMaxSkipsInput.value = cfg.game_state_max_consecutive_skips ?? 5;
-  gameStateMaxSkipsValue.textContent = cfg.game_state_max_consecutive_skips ?? 5;
+  gameStateMaxSkipsInput.value = cfg.game_state_max_consecutive_skips ?? 0;
+  gameStateMaxSkipsValue.textContent = cfg.game_state_max_consecutive_skips ?? 0;
   gameStateOcrSimilarityInput.value = cfg.game_state_ocr_similarity_threshold ?? 0.9;
   gameStateOcrSimilarityValue.textContent = (cfg.game_state_ocr_similarity_threshold ?? 0.9).toFixed(2);
   gameStateOcrWidthInput.value = cfg.game_state_ocr_max_width ?? 1600;
