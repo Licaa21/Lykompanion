@@ -29,11 +29,12 @@ def _session_cost_usd() -> float:
 
 
 async def _tick() -> None:
-    rows: list[list[str]] = []
+    # Row order matters: the overlay renders rows[0] in red (session cost) and
+    # rows[1] in green (balance), joined on one line - see overlay.cpp's RenderStats.
+    rows: list[list[str]] = [["Session cost", f"{_session_cost_usd():.3f} $"]]
     balance = await fetch_account_balance("openrouter")
     if balance.available and balance.remaining_usd is not None:
-        rows.append(["Balance", f"${balance.remaining_usd:.2f}"])
-    rows.append(["Session cost", f"${_session_cost_usd():.3f}"])
+        rows.append(["Balance", f"{balance.remaining_usd:.3f} $"])
     overlay_process.push_stats("Usage", rows)
 
 

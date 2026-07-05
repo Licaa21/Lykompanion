@@ -453,7 +453,7 @@ InputModality g_lastModality = ModalityMouse;
 constexpr int kWidgetCount = 5;
 LayeredWindow* g_widgets[kWidgetCount] = { nullptr, nullptr, nullptr, nullptr, nullptr };  // filled in wWinMain
 const wchar_t* g_widgetLabels[kWidgetCount] =
-    { L"Chat toasts", L"Memory toasts", L"Game panel", L"Mic indicator", L"Stats panel" };
+    { L"Chat toasts", L"Memory toasts", L"Game panel", L"Mic indicator", L"Usage line" };
 int           g_selectedWidgetIdx = 0;   // gamepad-only concept, independent of mouse drag
 
 WORD          g_prevButtons = 0;         // previous-frame XInput button state (edge detection)
@@ -1514,8 +1514,67 @@ void RenderPanel() {
     RenderLabelValuePanel(g_panelWin, g_panel, g_showPanel, L"Game state panel", AnchorTopLeft);
 }
 
+// Usage line: "<session cost> | <balance>", session cost in red and balance in
+// green, no card/background — just floating text (see app/services/usage_overlay.py
+// for the rows it's fed: rows[0] = session cost, rows[1] = balance if available).
 void RenderStats() {
-    RenderLabelValuePanel(g_statsWin, g_stats, g_showStats, L"Usage stats panel", AnchorBottomRight);
+    if (!g_showStats) { HideWindow(g_statsWin); return; }
+    if (!g_stats.valid || g_stats.rows.empty()) {
+        if (g_editMode) RenderPlaceholder(g_statsWin, L"Usage line", AnchorBottomRight, 200);
+        else HideWindow(g_statsWin);
+        return;
+    }
+
+    const std::wstring& costText = g_stats.rows[0].second;
+    bool hasBalance = g_stats.rows.size() >= 2;
+    const std::wstring sep = L"   |   ";
+    std::wstring text = costText;
+    if (hasBalance) text += sep + g_stats.rows[1].second;
+
+    const float padX = 12.0f, padY = 8.0f;
+    float textH = 0;
+    IDWriteTextLayout* layout = MakeLayout(text, g_fmtBody, 600.0f, &textH);
+    if (!layout) return;
+    DWRITE_TEXT_METRICS tm = {};
+    layout->GetMetrics(&tm);
+    float textW = tm.widthIncludingTrailingWhitespace;
+
+    int width  = (int)(textW + 2 * padX + 0.5f);
+    int height = (int)(textH + 2 * padY + 0.5f);
+
+    if (!EnsureSurface(g_statsWin, width, height)) { SafeRelease(&layout); return; }
+
+    ID2D1DCRenderTarget* rt = g_statsWin.rt;
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+    ID2D1SolidColorBrush *red = nullptr, *green = nullptr, *dim = nullptr;
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.95f, 0.30f, 0.30f, g_opacity), &red);
+    rt->CreateSolidColorBrush(D2D1::ColorF(0.35f, 0.85f, 0.45f, g_opacity), &green);
+    rt->CreateSolidColorBrush(Dim(1.0f), &dim);
+
+    // SetDrawingEffect brushes are honored automatically by ID2D1RenderTarget::
+    // DrawTextLayout (it uses a run's effect as its brush when the effect
+    // implements ID2D1Brush) - no custom IDWriteTextRenderer needed.
+    layout->SetDrawingEffect(red, {0, (UINT32)costText.size()});
+    if (hasBalance) {
+        layout->SetDrawingEffect(dim, {(UINT32)costText.size(), (UINT32)sep.size()});
+        layout->SetDrawingEffect(
+            green, {(UINT32)(costText.size() + sep.size()),
+                    (UINT32)g_stats.rows[1].second.size()});
+    }
+    rt->DrawTextLayout(D2D1::Point2F(padX, padY), layout, dim);
+
+    SafeRelease(&red); SafeRelease(&green); SafeRelease(&dim);
+    SafeRelease(&layout);
+
+    if (g_editMode) {
+        DrawEditDecoration(rt, width, height);
+        if (IsGamepadSelected(g_statsWin)) DrawSelectionRing(rt, width, height);
+    }
+
+    if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { DiscardSurface(g_statsWin); return; }
+    CommitWindow(g_statsWin, AnchorBottomRight);
 }
 
 bool InRect(const D2D1_RECT_F& r, int x, int y) {
@@ -1896,7 +1955,7 @@ void RenderConfig() {
 
     // --- Show toggles: one chip per area, filled (accent) when visible.
     rt->DrawText(L"Show", 4, g_fmtUi, D2D1::RectF(PAD, 158, 90, 178), white);
-    const wchar_t* labels[kWidgetCount] = {L"Chat", L"Memory", L"Panel", L"Mic", L"Stats"};
+    const wchar_t* labels[kWidgetCount] = {L"Chat", L"Memory", L"Panel", L"Mic", L"Usage"};
     bool* flags[kWidgetCount] = {&g_showToasts, &g_showMemories, &g_showPanel, &g_showHandsfree, &g_showStats};
     const float chy = 178, chh = 26, chgap = 6;
     const float innerW = CONFIG_W - 2 * PAD;
@@ -2639,7 +2698,7 @@ void InjectDemo() {
                   L"\"text\":\"Prefers concise answers and plays on hard difficulty.\"}");
     HandleCommand(L"{\"type\":\"handsfree\",\"active\":true}");
     HandleCommand(L"{\"type\":\"stats\",\"title\":\"Usage\",\"rows\":"
-                  L"[[\"Balance\",\"$12.34\"],[\"Session cost\",\"$0.042\"]]}");
+                  L"[[\"Session cost\",\"0.042 $\"],[\"Balance\",\"9.536 $\"]]}");
     // Image toast (needs network; shows "[image unavailable]" if offline).
     HandleCommand(L"{\"type\":\"image\",\"alt\":\"Sample map image\","
                   L"\"url\":\"https://picsum.photos/400/240\"}");
