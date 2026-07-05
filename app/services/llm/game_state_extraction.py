@@ -33,17 +33,6 @@ from app.services.system.processes import (
 
 logger = logging.getLogger(__name__)
 
-# A captured frame is dropped (not sent to the LLM) if its normalized text is at least this
-# similar to the last kept frame - filters out an unchanging HUD/menu across consecutive
-# captures while still keeping frames that show a real on-screen change.
-_SIMILARITY_THRESHOLD = 0.9
-
-# Every captured frame is downscaled to this width before OCR (independent of the screenshot
-# settings used for vision LLM calls) - cuts OCR CPU time substantially on high-res captures,
-# with negligible accuracy loss for HUD-sized text, reducing CPU contention with whatever game
-# is running while this poller captures every tick.
-_OCR_MAX_WIDTH = 1600
-
 _last_process: str | None = None
 _last_kept_text: str | None = None
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
@@ -63,10 +52,6 @@ _last_frame_b64: str | None = None
 _window_first_image: Image.Image | None = None
 _window_last_image: Image.Image | None = None
 
-# A single empty OCR result is routine (loading screens, blank/solid-color frames, a menu with no
-# text) and not worth logging every tick - only warn once capture/OCR has come back empty this
-# many consecutive ticks in a row, since that's what actually indicates a persistent problem.
-_EMPTY_OCR_WARN_THRESHOLD = 10
 _empty_ocr_streak = 0
 
 # When the last proactive message was delivered (time.monotonic), enforcing the user-configured
@@ -108,10 +93,7 @@ def _reset_window() -> None:
 
 
 def _frames_similar(a: str, b: str) -> bool:
-    return SequenceMatcher(None, a, b).ratio() >= _SIMILARITY_THRESHOLD
-
-
-_VISUAL_DIFF_SIZE = (64, 64)
+    return SequenceMatcher(None, a, b).ratio() >= settings.game_state_ocr_similarity_threshold
 
 
 def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
@@ -120,8 +102,9 @@ def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
     noise) and compared via mean absolute pixel difference. Used only as a fallback signal when
     OCR text found nothing to distinguish the window's frames - real camera movement/environment
     change registers here even when no on-screen text changed at all."""
-    a_thumb = a.convert("L").resize(_VISUAL_DIFF_SIZE)
-    b_thumb = b.convert("L").resize(_VISUAL_DIFF_SIZE)
+    size = (settings.game_state_visual_diff_thumbnail_size, settings.game_state_visual_diff_thumbnail_size)
+    a_thumb = a.convert("L").resize(size)
+    b_thumb = b.convert("L").resize(size)
     diff = ImageChops.difference(a_thumb, b_thumb)
     return (ImageStat.Stat(diff).mean[0] / 255) * 100
 
@@ -404,10 +387,11 @@ async def _capture_tick() -> None:
     image = await capture_monitor_frame()
     ocr_text = None
     if image is not None:
-        if image.width > _OCR_MAX_WIDTH:
-            ratio = _OCR_MAX_WIDTH / image.width
+        ocr_max_width = settings.game_state_ocr_max_width
+        if image.width > ocr_max_width:
+            ratio = ocr_max_width / image.width
             # Off the event loop - PIL resize is pure CPU and this runs every capture tick.
-            image = await asyncio.to_thread(image.resize, (_OCR_MAX_WIDTH, int(image.height * ratio)))
+            image = await asyncio.to_thread(image.resize, (ocr_max_width, int(image.height * ratio)))
         # Tracked regardless of the OCR-text dedupe below - the visual-diff fallback needs the
         # window's true first/last frame, not just its first/last *kept* one.
         if _window_first_image is None:
@@ -431,7 +415,7 @@ async def _capture_tick() -> None:
             logger.debug("Game-state poll: skipping near-duplicate OCR frame for process=%r", process)
     else:
         _empty_ocr_streak += 1
-        if _empty_ocr_streak == _EMPTY_OCR_WARN_THRESHOLD:
+        if _empty_ocr_streak == settings.game_state_empty_ocr_warn_threshold:
             logger.warning(
                 "Game-state poll: capture/OCR has returned no text for %d consecutive ticks for "
                 "process=%r. Either screen capture is failing for this window (some exclusive-"

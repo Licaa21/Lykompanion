@@ -19,27 +19,28 @@ import numpy as np
 from PIL import Image
 from windows_capture import Frame, InternalCaptureControl, WindowsCapture
 
+from app.core.config import settings
 from app.services.screenshot.capture import get_foreground_monitor_index
 
 logger = logging.getLogger(__name__)
-
-# How long to wait for a single frame before giving up. Normally a frame arrives in
-# well under a second; a frame that never arrives (exclusive-fullscreen, protected
-# content, a stalled compositor) must NOT block forever — that used to wedge the whole
-# game-state poller permanently, since it awaits this via asyncio.to_thread.
-_FRAME_TIMEOUT_SECONDS = 6.0
 
 
 def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
     """Starts a Windows Graphics Capture session for one monitor, grabs exactly one frame, and
     tears it down. Uses `start_free_threaded()` (capture runs on its own thread) so we can bound
-    the wait: if no frame arrives within _FRAME_TIMEOUT_SECONDS we stop the session and return
-    None instead of blocking indefinitely (the old blocking `start()` had no escape hatch)."""
+    the wait: if no frame arrives within game_state_capture_frame_timeout_seconds we stop the
+    session and return None instead of blocking indefinitely (the old blocking `start()` had no
+    escape hatch)."""
     result: dict[str, np.ndarray] = {}
     error: dict[str, Exception] = {}
     done = threading.Event()
+    frame_timeout = settings.game_state_capture_frame_timeout_seconds
 
-    capture = WindowsCapture(cursor_capture=False, draw_border=False, monitor_index=monitor_index)
+    capture = WindowsCapture(
+        cursor_capture=settings.game_state_capture_cursor_enabled,
+        draw_border=False,
+        monitor_index=monitor_index,
+    )
 
     @capture.event
     def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl) -> None:
@@ -57,7 +58,7 @@ def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
 
     control = capture.start_free_threaded()
 
-    if not done.wait(_FRAME_TIMEOUT_SECONDS):
+    if not done.wait(frame_timeout):
         # No frame in time — stop the session so its thread can unwind, and treat this tick as
         # "no capture" (same as a failed capture). We deliberately don't join here: if the native
         # thread is genuinely stuck, joining would just move the hang back onto the poller.
@@ -68,7 +69,7 @@ def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
         logger.warning(
             "Windows Graphics Capture timed out after %.1fs for monitor_index=%r (no frame arrived "
             "— exclusive-fullscreen or protected content? try borderless/windowed mode)",
-            _FRAME_TIMEOUT_SECONDS,
+            frame_timeout,
             monitor_index,
         )
         return None

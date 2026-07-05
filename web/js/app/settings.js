@@ -480,6 +480,43 @@ gameStateVisualDiffInput.addEventListener("input", () => {
   gameStateVisualDiffValue.textContent = gameStateVisualDiffInput.value;
 });
 
+const gameStateOcrSimilarityInput = document.getElementById("cfg-game-state-ocr-similarity");
+const gameStateOcrSimilarityValue = document.getElementById("cfg-game-state-ocr-similarity-value");
+
+gameStateOcrSimilarityInput.addEventListener("input", () => {
+  gameStateOcrSimilarityValue.textContent = parseFloat(gameStateOcrSimilarityInput.value).toFixed(2);
+});
+
+const gameStateOcrWidthInput = document.getElementById("cfg-game-state-ocr-width");
+const gameStateOcrWidthValue = document.getElementById("cfg-game-state-ocr-width-value");
+
+gameStateOcrWidthInput.addEventListener("input", () => {
+  gameStateOcrWidthValue.textContent = gameStateOcrWidthInput.value;
+});
+
+const gameStateVisualDiffThumbInput = document.getElementById("cfg-game-state-visual-diff-thumb");
+const gameStateVisualDiffThumbValue = document.getElementById("cfg-game-state-visual-diff-thumb-value");
+
+gameStateVisualDiffThumbInput.addEventListener("input", () => {
+  gameStateVisualDiffThumbValue.textContent = gameStateVisualDiffThumbInput.value;
+});
+
+const gameStateFrameTimeoutInput = document.getElementById("cfg-game-state-frame-timeout");
+const gameStateFrameTimeoutValue = document.getElementById("cfg-game-state-frame-timeout-value");
+
+gameStateFrameTimeoutInput.addEventListener("input", () => {
+  gameStateFrameTimeoutValue.textContent = gameStateFrameTimeoutInput.value;
+});
+
+const gameStateEmptyWarnInput = document.getElementById("cfg-game-state-empty-warn");
+const gameStateEmptyWarnValue = document.getElementById("cfg-game-state-empty-warn-value");
+
+gameStateEmptyWarnInput.addEventListener("input", () => {
+  gameStateEmptyWarnValue.textContent = gameStateEmptyWarnInput.value;
+});
+
+const gameStateCaptureCursorInput = document.getElementById("cfg-game-state-capture-cursor");
+
 const avatarPreviewEl = document.getElementById("cfg-avatar-preview");
 const avatarInputEl = document.getElementById("cfg-avatar-input");
 const avatarUploadBtn = document.getElementById("cfg-avatar-upload-btn");
@@ -677,6 +714,17 @@ function applyConfigToForm(cfg) {
   gameStateCaptureIntervalValue.textContent = cfg.game_state_capture_interval_seconds;
   gameStateVisualDiffInput.value = cfg.game_state_visual_diff_threshold_percent ?? 12;
   gameStateVisualDiffValue.textContent = cfg.game_state_visual_diff_threshold_percent ?? 12;
+  gameStateOcrSimilarityInput.value = cfg.game_state_ocr_similarity_threshold ?? 0.9;
+  gameStateOcrSimilarityValue.textContent = (cfg.game_state_ocr_similarity_threshold ?? 0.9).toFixed(2);
+  gameStateOcrWidthInput.value = cfg.game_state_ocr_max_width ?? 1600;
+  gameStateOcrWidthValue.textContent = cfg.game_state_ocr_max_width ?? 1600;
+  gameStateVisualDiffThumbInput.value = cfg.game_state_visual_diff_thumbnail_size ?? 64;
+  gameStateVisualDiffThumbValue.textContent = cfg.game_state_visual_diff_thumbnail_size ?? 64;
+  gameStateFrameTimeoutInput.value = cfg.game_state_capture_frame_timeout_seconds ?? 6;
+  gameStateFrameTimeoutValue.textContent = cfg.game_state_capture_frame_timeout_seconds ?? 6;
+  gameStateEmptyWarnInput.value = cfg.game_state_empty_ocr_warn_threshold ?? 10;
+  gameStateEmptyWarnValue.textContent = cfg.game_state_empty_ocr_warn_threshold ?? 10;
+  gameStateCaptureCursorInput.checked = cfg.game_state_capture_cursor_enabled ?? false;
   restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
 
   document.getElementById("cfg-debug-mode-enabled").checked = cfg.debug_mode_enabled;
@@ -925,6 +973,12 @@ async function saveSettings(saveButton) {
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_visual_diff_threshold_percent: parseFloat(gameStateVisualDiffInput.value),
     game_state_model: document.getElementById("cfg-game-state-model").value,
+    game_state_ocr_similarity_threshold: parseFloat(gameStateOcrSimilarityInput.value),
+    game_state_ocr_max_width: parseInt(gameStateOcrWidthInput.value, 10),
+    game_state_visual_diff_thumbnail_size: parseInt(gameStateVisualDiffThumbInput.value, 10),
+    game_state_capture_frame_timeout_seconds: parseFloat(gameStateFrameTimeoutInput.value),
+    game_state_empty_ocr_warn_threshold: parseInt(gameStateEmptyWarnInput.value, 10),
+    game_state_capture_cursor_enabled: gameStateCaptureCursorInput.checked,
     game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
     proactive_messages_enabled: document.getElementById("cfg-proactive-enabled").checked,
     proactive_min_interval_minutes: parseInt(document.getElementById("cfg-proactive-interval").value, 10),

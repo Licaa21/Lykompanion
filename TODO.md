@@ -1,7 +1,7 @@
 # TODO
 
 - [ ] `play_on_spotify` needs to be properly tested.
-- [ ] Add the logo to the overlay's startup welcome banner too (currently text-only; reply toasts already show it as an avatar via `LoadLogo()`/`g_logo`).
+
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 

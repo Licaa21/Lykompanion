@@ -749,8 +749,8 @@
               </div>
               <div class="cfg-row">
                 <label>
-                  <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>
-                  <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
+                  <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen. Minimum 5s.">?</button></span>
+                  <input id="cfg-game-state-interval" type="range" min="5" max="300" step="5" value="90" />
                 </label>
               </div>
               <div class="cfg-row">
@@ -778,6 +778,31 @@
                 <label>
                   <span class="cfg-label">Visual Diff Threshold: <span id="cfg-game-state-visual-diff-value">12</span>% <button type="button" class="cfg-help" data-tip="If the on-screen text never changes across a whole poll window, it's normally skipped entirely (e.g. sitting in a pause menu). As a fallback, the window's first and last screenshots are compared by pixels - if they differ by at least this percent, the window is sent through anyway. A genuinely frozen screen stays skipped; a minimal-UI game where you're actually moving around still gets checked. Set to 100 to disable this fallback.">?</button></span>
                   <input id="cfg-game-state-visual-diff" type="range" min="0" max="100" step="1" value="12" />
+                </label>
+                <label>
+                  <span class="cfg-label">OCR Similarity Threshold: <span id="cfg-game-state-ocr-similarity-value">0.90</span> <button type="button" class="cfg-help" data-tip="A captured frame is dropped as a near-duplicate if its OCR text is at least this similar (0-1) to the last kept frame. Lower catches more subtle changes but sends more frames through; higher is more tolerant of unchanged HUD text.">?</button></span>
+                  <input id="cfg-game-state-ocr-similarity" type="range" min="0.5" max="1" step="0.01" value="0.9" />
+                </label>
+                <label>
+                  <span class="cfg-label">OCR Capture Width: <span id="cfg-game-state-ocr-width-value">1600</span>px <button type="button" class="cfg-help" data-tip="Each captured frame is downscaled to this width before OCR (independent of the Screenshot Max Width used for vision LLM calls). Lower cuts OCR CPU time with negligible accuracy loss for HUD-sized text.">?</button></span>
+                  <input id="cfg-game-state-ocr-width" type="range" min="640" max="3840" step="80" value="1600" />
+                </label>
+                <label>
+                  <span class="cfg-label">Visual Diff Thumbnail Size: <span id="cfg-game-state-visual-diff-thumb-value">64</span>px <button type="button" class="cfg-help" data-tip="Square thumbnail size both frames are downscaled to for the visual-diff fallback comparison. Smaller is cheaper and blurs out noise; larger is more sensitive to small changes.">?</button></span>
+                  <input id="cfg-game-state-visual-diff-thumb" type="range" min="16" max="256" step="8" value="64" />
+                </label>
+                <label>
+                  <span class="cfg-label">Capture Frame Timeout: <span id="cfg-game-state-frame-timeout-value">6</span>s <button type="button" class="cfg-help" data-tip="How long the Windows Graphics Capture poller waits for a single frame before giving up on that tick instead of blocking indefinitely (exclusive-fullscreen/protected content can stall a frame forever).">?</button></span>
+                  <input id="cfg-game-state-frame-timeout" type="range" min="1" max="30" step="0.5" value="6" />
+                </label>
+                <label>
+                  <span class="cfg-label">Empty OCR Warn Threshold: <span id="cfg-game-state-empty-warn-value">10</span> ticks <button type="button" class="cfg-help" data-tip="How many consecutive capture ticks with no OCR text before a warning is logged (capture/OCR failing, or no OCR language pack installed).">?</button></span>
+                  <input id="cfg-game-state-empty-warn" type="range" min="1" max="60" step="1" value="10" />
+                </label>
+                <label class="checkbox">
+                  <input id="cfg-game-state-capture-cursor" type="checkbox" />
+                  Capture mouse cursor
+                  <button type="button" class="cfg-help" data-tip="Whether the mouse cursor is included in captured frames used for OCR and the game-state extraction pass's screenshots.">?</button>
                 </label>
               </details>
             </div>

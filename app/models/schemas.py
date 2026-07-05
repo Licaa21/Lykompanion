@@ -65,6 +65,12 @@ class CompanionConfig(BaseModel):
     game_state_capture_interval_seconds: int = 1
     game_state_visual_diff_threshold_percent: float = 12.0
     game_state_model: str | None = None
+    game_state_ocr_similarity_threshold: float = 0.9
+    game_state_ocr_max_width: int = 1600
+    game_state_empty_ocr_warn_threshold: int = 10
+    game_state_visual_diff_thumbnail_size: int = 64
+    game_state_capture_frame_timeout_seconds: float = 6.0
+    game_state_capture_cursor_enabled: bool = False
     game_state_training_enabled: bool = False
     proactive_messages_enabled: bool = False
     proactive_min_interval_minutes: int = 15
