@@ -280,13 +280,13 @@ def main() -> None:
 
     # frameless: no native title bar — the web UI draws its own (web/index.html .titlebar) with
     # minimize/close buttons. easy_drag=False; the titlebar drives its own move/snap from JS.
-    # Launches at half the work-area width, then init.js's setupDesktopTitlebar snaps it to full
+    # Launches hidden at half the work-area width; init.js's setupDesktopTitlebar snaps it to full
     # (via the same JS maximize path as the titlebar's maximize button) ~100ms after the page is
-    # ready. Starting full-size directly used to show a visible white-flash transition; starting
-    # smaller and letting JS drive the maximize keeps snapZone state in sync (it's tracked
-    # frontend-side) and avoids that flash. window_state.json (still written by window_save_bounds
-    # on every drag/resize) is intentionally not read for this initial size - every launch always
-    # starts at half-width, no stale saved size to ever get out of sync with.
+    # ready, then calls window_show(). Doing the half->full resize while still hidden means the
+    # whole transition happens off-screen - the window only ever appears already full-size.
+    # window_state.json (still written by window_save_bounds on every drag/resize) is intentionally
+    # not read for this initial size - every launch always starts at half-width, no stale saved
+    # size to ever get out of sync with.
     x, y, w, h = _primary_work_area_logical()
     win = webview.create_window(
         "Lykompanion",
@@ -298,6 +298,7 @@ def main() -> None:
         min_size=(800, 600),
         frameless=True,
         easy_drag=False,
+        hidden=True,
     )
 
     # Tray icon + clean-quit wiring. The custom titlebar's minimize hides the window to the tray
@@ -326,6 +327,12 @@ def main() -> None:
 
     def window_close() -> None:
         _quit()
+
+    # Reveals the window after init.js has driven the startup half->full resize while still
+    # hidden (see create_window's hidden=True above) - called once from the same setTimeout that
+    # applies the maximize, so the window only ever becomes visible already full-size.
+    def window_show() -> None:
+        win.show()
 
     # Resize + maximize are driven from JS (the frontend's resize grips and titlebar double-click)
     # through pywebview's own move/resize — NOT by mutating the window style, which fought the
@@ -435,7 +442,7 @@ def main() -> None:
         child.expose(player_close, player_toggle_fullscreen, player_set_bounds)
 
     win.expose(
-        _make_download_api(win), window_minimize, window_close,
+        _make_download_api(win), window_minimize, window_close, window_show,
         window_set_bounds, window_save_bounds, window_toggle_fullscreen, open_player_window,
     )
 

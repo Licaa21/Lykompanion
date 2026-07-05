@@ -199,12 +199,15 @@ function setupDesktopTitlebar() {
       });
     });
 
-    // run_app.py launches the window at half work-area width (avoids a white-flash transition
-    // seen when starting already full-size). 100ms after the window is ready, drive it to full
-    // size through the same maximize path the titlebar's maximize button uses, so
-    // snapZone/restoreBounds end up correctly seeded - restoreBounds becomes this initial
-    // half-width window, matching what a real "maximize" should restore down to.
-    setTimeout(() => applySnap('max', curBounds()), 100);
+    // run_app.py launches the window hidden, at half work-area width. 100ms after the window is
+    // ready, drive it to full size through the same maximize path the titlebar's maximize button
+    // uses (so snapZone/restoreBounds end up correctly seeded - restoreBounds becomes this
+    // initial half-width window), then reveal it - the whole half->full transition happens while
+    // still hidden, so the window only ever appears already full-size.
+    setTimeout(() => {
+      applySnap('max', curBounds());
+      api()?.window_show?.();
+    }, 100);
   };
 
   if (api()) apply();
