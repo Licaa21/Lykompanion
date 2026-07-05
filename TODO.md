@@ -1,10 +1,14 @@
 # TODO
 
-- [ ] `play_on_spotify` needs to be properly tested.
-- [ ] New `GAME_STATE_VISUAL_DIFF_NOISE_FLOOR_PERCENT` (default `1.5`) needs real-world tuning against actual gameplay — use `tools/ocr_debug.py` to watch OCR-similarity and visual-diff numbers together while playing and confirm the default doesn't suppress genuine small HUD changes (e.g. HP ticking) or fail to filter OCR misread noise.
-- [ ] Confirmed bug (2026-07-05, Slay the Spire), now fixed but needs real-world re-verification: died at 18HP, sat on the death screen 2 minutes, tracker panel stayed frozen at "In combat, 18HP" the whole time - no pass ever ran. Root cause (per user): both the OCR-similarity and visual-diff checks only ever compared frames *within* the current poll window, never against the previous window - a state that became static entirely inside one window (the death screen) reads as "unchanged" against itself forever after. First attempted fix (a wall-clock `GAME_STATE_MAX_STALE_SECONDS` safety net) was rejected - with typical settings it fired on nearly every skipped window, defeating the cost-saving point of skipping at all. Replaced with `GAME_STATE_MAX_CONSECUTIVE_SKIPS` (default `5`): the first "should skip" window in any streak is always let through immediately, then up to N further consecutive windows are actually skipped before one is let through again. Needs a real Slay-the-Spire death-screen repro to confirm the fix actually holds.
-
+- [ ] Spotify integration needs to be properly tested.
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 
 - [ ] Real TTS network streaming (audio starts playing before synthesis fully completes) was deliberately NOT implemented in the 2026-07-04 latency pass — it requires switching narration.js off fetch()+blob() to an `<audio src>`-based GET stream (plus a WAV-header trick or MSE for the PCM-wrapping providers), which touches the working narration/overlay-toast-timing/barge-in logic and can't be verified without running the app. Done instead: persistent HTTP client reuse per TTS call (removes per-sentence connection setup) — see kokoro.py/chirp3.py `_get_client()`. If ever revisited, read the reasoning in that session before starting.
+
+# Game State improvements:
+- [ ] (2026-07-05, needs in-game validation) Addressed all three known issues via prompt changes in `app/prompts/game_state_extraction.md` — no code changes needed since these were reasoning gaps, not logic bugs:
+    * Flashback/other-character-POV confusion (e.g. Ciri's flashback during Geralt's Bloody Baron dialogue misattributed to Geralt): added a rule to recognize scene shifts (flashback/vision/playable-as-another-character) and attribute events to that character/scene, not the tracked player character.
+    * Character misidentification (Keira mistaken for Yennefer, no on-screen name tag to go on): added a rule barring identity assertions from vibe/appearance inference alone — requires an actually-visible name or pinned-down known fact, otherwise use a generic descriptor + lower confidence.
+    * Needless low-value observations clogging memory (routine loot, trash mobs, generic XP, NPC directions): added an explicit materiality bar + exclusion list, plus a nudge to use `web_search_query` to check whether a recognized quest/area beat is core-plot or forgettable before reporting it.
+    Keep an eye on real sessions to confirm these hold up; revise wording if any of the three recur.
