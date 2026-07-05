@@ -2032,21 +2032,6 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 }
 .youtube-player-volume { width: 80px; }
 
-/* Compact override of the generic full-width .custom-select (custom-select.js) for this small
-   toolbar slot - shows the current pick ("Auto"/"1080p"/...) in the same cramped controls row as
-   the transport buttons. */
-.youtube-player-quality-group { flex-shrink: 0; width: 88px; }
-.youtube-player-quality-group .custom-select { width: 100%; }
-.youtube-player-quality-group .cs-trigger {
-  padding: 5px 6px;
-  border-radius: var(--r1);
-  background: rgba(255,255,255,0.05);
-  border-color: rgba(255,255,255,0.07);
-  font-size: 11px;
-  gap: 4px;
-}
-.youtube-player-quality-group .cs-trigger-arrow { width: 8px; height: 5px; }
-
 /* ════════════════════════════════════════════════════
    TOASTS
 ════════════════════════════════════════════════════ */

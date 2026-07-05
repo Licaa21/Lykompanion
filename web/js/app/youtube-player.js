@@ -33,7 +33,6 @@ const ytVolumeSlider = document.getElementById("youtube-player-volume");
 const ytSeekBar = document.getElementById("youtube-player-seekbar");
 const ytTimeCurrent = document.getElementById("youtube-player-time-current");
 const ytTimeDuration = document.getElementById("youtube-player-time-duration");
-const ytQualitySelect = document.getElementById("youtube-player-quality-select");
 
 let ytPlayer = null;
 let ytApiReady = false;
@@ -69,54 +68,6 @@ function ytFormatTime(seconds) {
   const secs = total % 60;
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
-
-// YouTube's own internal quality-level identifiers, mapped to human labels.
-const YT_QUALITY_LABELS = {
-  highres: "4K+", hd2160: "2160p", hd1440: "1440p", hd1080: "1080p", hd720: "720p",
-  large: "480p", medium: "360p", small: "240p", tiny: "144p", auto: "Auto",
-};
-
-// Best-effort quality selector: YouTube deprecated real user control over playback quality in
-// 2018 - setPlaybackQuality() below is largely a suggestion the player is free to ignore in
-// favor of its own adaptive-bitrate logic, and there is no way to force it. What we CAN do
-// honestly is only ever list resolutions getAvailableQualityLevels() reports as actually existing
-// for THIS video (so a 1080p-max video never offers a fake 4K option), via the IFrame API itself.
-function ytPopulateQualityOptions(player, selectEl) {
-  if (!player || !player.getAvailableQualityLevels) return;
-  let levels = [];
-  try { levels = player.getAvailableQualityLevels() || []; } catch (err) { return; }
-  if (!levels.length) levels = ["auto"];
-  else if (!levels.includes("auto")) levels = [...levels, "auto"];
-  let current = "auto";
-  try { current = (player.getPlaybackQuality && player.getPlaybackQuality()) || "auto"; } catch (err) { /* default to auto */ }
-  selectEl.innerHTML = "";
-  for (const level of levels) {
-    const opt = document.createElement("option");
-    opt.value = level;
-    opt.textContent = YT_QUALITY_LABELS[level] || level;
-    if (level === current) opt.selected = true;
-    selectEl.appendChild(opt);
-  }
-}
-ytQualitySelect.addEventListener("change", () => {
-  if (!ytPlayer || !ytPlayer.setPlaybackQuality) return;
-  const quality = ytQualitySelect.value;
-  ytPlayer.setPlaybackQuality(quality);
-  // setPlaybackQuality alone is only a suggestion for future buffering - it doesn't touch what's
-  // already buffered, so the visible resolution often doesn't change for a while (if ever) on its
-  // own. Forcing an immediate re-load/re-cue at the current position with the quality as a
-  // suggestedQuality hint applies it right away in practice.
-  if (!ytPlayer.getVideoData || !ytPlayer.getCurrentTime) return;
-  const videoData = ytPlayer.getVideoData();
-  if (!videoData || !videoData.video_id) return;
-  const startSeconds = ytPlayer.getCurrentTime() || 0;
-  const wasPlaying = ytPlayer.getPlayerState && ytPlayer.getPlayerState() === YT.PlayerState.PLAYING;
-  if (wasPlaying && ytPlayer.loadVideoById) {
-    ytPlayer.loadVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
-  } else if (ytPlayer.cueVideoById) {
-    ytPlayer.cueVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
-  }
-});
 
 // Polls current time/duration instead of relying on an IFrame API event - the API has no
 // "timeupdate" event of its own, unlike an HTML5 <video> element.
@@ -274,10 +225,6 @@ function ytPlayQueueEntry(entry, opts) {
       // or playback just stops after one video despite a queued Mix.
       onStateChange: (event) => {
         if (event.data === YT.PlayerState.ENDED) ytAdvanceQueue();
-        // PLAYING (not READY/CUED) is the first point getAvailableQualityLevels() reliably
-        // reports real data for the video that's actually loaded - refreshed per video since a
-        // new one can have a different max resolution than the last.
-        else if (event.data === YT.PlayerState.PLAYING) ytPopulateQualityOptions(event.target, ytQualitySelect);
       },
       // A video that fails to play (embedding disabled, removed, region-locked) leaves the
       // player permanently in an error state - getCurrentTime/getDuration never populate (seek

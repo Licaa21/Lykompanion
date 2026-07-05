@@ -40,7 +40,6 @@ const fullscreenBtn = document.getElementById("player-fullscreen-btn");
 const fullscreenIconExpand = fullscreenBtn.querySelector(".youtube-player-fullscreen-icon-expand");
 const fullscreenIconCompress = fullscreenBtn.querySelector(".youtube-player-fullscreen-icon-compress");
 const closeBtn = document.getElementById("player-close-btn");
-const qualitySelect = document.getElementById("youtube-player-quality-select");
 
 let boot = null;
 try {
@@ -58,47 +57,6 @@ function formatTime(seconds) {
   const total = Math.max(0, Math.floor(seconds || 0));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
-
-// Same best-effort approach as the in-app player's ytPopulateQualityOptions - see its comment in
-// youtube-player.js for why this can't reliably force a resolution, only list real ones.
-const QUALITY_LABELS = {
-  highres: "4K+", hd2160: "2160p", hd1440: "1440p", hd1080: "1080p", hd720: "720p",
-  large: "480p", medium: "360p", small: "240p", tiny: "144p", auto: "Auto",
-};
-function populateQualityOptions() {
-  if (!player || !player.getAvailableQualityLevels) return;
-  let levels = [];
-  try { levels = player.getAvailableQualityLevels() || []; } catch (err) { return; }
-  if (!levels.length) levels = ["auto"];
-  else if (!levels.includes("auto")) levels = [...levels, "auto"];
-  let current = "auto";
-  try { current = (player.getPlaybackQuality && player.getPlaybackQuality()) || "auto"; } catch (err) { /* default to auto */ }
-  qualitySelect.innerHTML = "";
-  for (const level of levels) {
-    const opt = document.createElement("option");
-    opt.value = level;
-    opt.textContent = QUALITY_LABELS[level] || level;
-    if (level === current) opt.selected = true;
-    qualitySelect.appendChild(opt);
-  }
-}
-qualitySelect.addEventListener("change", () => {
-  if (!player || !player.setPlaybackQuality) return;
-  const quality = qualitySelect.value;
-  player.setPlaybackQuality(quality);
-  // See youtube-player.js's matching handler for why this force-reload/re-cue follows - otherwise
-  // the pick often never visibly applies.
-  if (!player.getVideoData || !player.getCurrentTime) return;
-  const videoData = player.getVideoData();
-  if (!videoData || !videoData.video_id) return;
-  const startSeconds = player.getCurrentTime() || 0;
-  const wasPlaying = player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING;
-  if (wasPlaying && player.loadVideoById) {
-    player.loadVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
-  } else if (player.cueVideoById) {
-    player.cueVideoById({ videoId: videoData.video_id, startSeconds, suggestedQuality: quality });
-  }
-});
 
 function combinedTitle(entry) {
   return entry.channel ? `${entry.title} — ${entry.channel}` : entry.title;
@@ -370,7 +328,6 @@ window.onYouTubeIframeAPIReady = function () {
       },
       onStateChange: (event) => {
         if (event.data === YT.PlayerState.ENDED) playIndex(index + 1);
-        else if (event.data === YT.PlayerState.PLAYING) populateQualityOptions();
       },
       onError: () => {
         if (index < queue.length - 1) playIndex(index + 1);
