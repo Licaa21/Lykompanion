@@ -20,7 +20,6 @@ from app.services.llm.client import chat_completion
 from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
-from app.services.llm.web_search_tool import execute_web_search
 from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
@@ -80,7 +79,7 @@ def _proactive_allowed() -> bool:
 _PROACTIVE_PROMPT_ADDON = """
 Additionally, you MAY include a **"proactive_message"** field: a short, natural, spoken-style message from the companion to the player, delivered unprompted into their chat (and read aloud). Use it ONLY when you have something genuinely worth interrupting the player for - a relevant tip for exactly the situation on screen, a warning about something they seem to have missed, or a brief comment on a real milestone. It must feel like a friend watching over their shoulder speaking up at the right moment, not a narrator or a coach spamming advice. The bar is high: most windows deserve none - set it to null unless the moment truly calls for it. Never use it to describe what's on screen back to the player (they can see it), never repeat something you (or the chat) already told them, and keep it to one or two conversational sentences.
 
-Lean on whatever real context you have about this exact situation - training data notes, a fact you looked up via "web_search_query" this pass or an earlier one, known facts about the player - instead of a generic reaction. "That's the Ashen Idol, it opens with a poison cloud - don't stand still" beats "careful, tough-looking boss" every time. If you don't actually know anything specific about what's on screen, don't manufacture false confidence - either use "web_search_query" to find out first, or say nothing this window.
+Lean on whatever real context you have about this exact situation - training data notes, known facts about the player - instead of a generic reaction. "That's the Ashen Idol, it opens with a poison cloud - don't stand still" beats "careful, tough-looking boss" every time. If you don't actually know anything specific about what's on screen, don't manufacture false confidence - say nothing this window.
 """
 
 
@@ -241,28 +240,6 @@ async def extract_and_apply_game_state(
         except Exception:
             logger.exception("Game-state extraction failed")
             return
-
-    # One research round: the model flagged something on screen it can't decode (an unknown
-    # game-specific term/stat/UI element) - run the search and re-call with the results so it can
-    # interpret correctly and bank what it learned into the training data.
-    search_query = data.get("web_search_query")
-    if isinstance(search_query, str) and search_query.strip():
-        search_query = search_query.strip()
-        logger.info("Game-state poll: extraction pass requested web search %r for process=%r", search_query, process)
-        try:
-            results = await execute_web_search({"query": search_query})
-            enriched = content + [{
-                "type": "text",
-                "text": (
-                    f"Web search results for your query \"{search_query}\" (requested by your own "
-                    f"previous pass - use them to interpret the screen and update the training "
-                    f"data; do not request another search):\n{results}"
-                ),
-            }]
-            data = await _call_extraction(enriched, model, provider, allow_proactive)
-        except Exception:
-            # Keep the first pass's output - a failed search must not cost us the whole window.
-            logger.exception("Game-state extraction web-search round failed for process=%r", process)
 
     new_values = {}
     for tracker in trackers:

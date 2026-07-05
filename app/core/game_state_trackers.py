@@ -117,7 +117,7 @@ def set_trackers(process: str, trackers: list[dict]) -> list[dict]:
     # suffixing below renames it to confidence_2 instead).
     seen_ids = {
         activity["id"], "confidence", "save_memories", "remove_memory_ids", "divergence_warning",
-        "observations", "training_data_update", "proactive_message", "web_search_query",
+        "observations", "training_data_update", "proactive_message",
     }
     for t in trackers:
         label = (t.get("label") or "").strip()
