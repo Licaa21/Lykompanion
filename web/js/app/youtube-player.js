@@ -127,9 +127,13 @@ function ytPlayQueueEntry(entry) {
       onStateChange: (event) => {
         if (event.data === YT.PlayerState.ENDED) ytAdvanceQueue();
       },
-      // Without this, a video that fails to play (embedding disabled, removed, region-locked)
-      // just sits there silently - no error ever surfaced anywhere, so it looked identical to the
-      // app doing nothing. YouTube's own error codes: https://developers.google.com/youtube/iframe_api_reference#onError
+      // A video that fails to play (embedding disabled, removed, region-locked) leaves the
+      // player permanently in an error state - getCurrentTime/getDuration never populate (seek
+      // bar stuck at 0:00) and playVideo/pauseVideo/seekTo are no-ops on it, which looked
+      // identical to the whole player being broken. Surface the message AND skip to the next
+      // queued video automatically (mirrors the ENDED handler below), instead of leaving the
+      // user stuck on a dead entry. YouTube's own error codes:
+      // https://developers.google.com/youtube/iframe_api_reference#onError
       onError: (event) => {
         const messages = {
           2: "Invalid video.",
@@ -141,6 +145,7 @@ function ytPlayQueueEntry(entry) {
         const message = messages[event.data] || "Playback error.";
         console.error("YouTube player error", event.data, entry.videoId);
         ytPanelTitle.textContent = message;
+        ytAdvanceQueue();
       },
     },
   });
