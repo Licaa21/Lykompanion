@@ -1669,8 +1669,8 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
    (ytVideoGuard already sits above it for input). Stays on the base rule's 1fr auto 1fr grid
    (rather than switching to a plain centered flex row) specifically so the center column - the
    play/pause button - is guaranteed to sit at the bar's exact horizontal center no matter how much
-   content is in the two side groups; only the side groups' own alignment changes below, sliding
-   their content off the edges and in against the center column instead. */
+   content is in the two side groups; only the side groups' own content changes below, sliding it
+   off the edges and in against the center column instead. */
 .youtube-player-panel--fullscreen .youtube-player-controls {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -1680,8 +1680,14 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   border-top: none;
   transition: opacity 300ms ease;
 }
-.youtube-player-panel--fullscreen .youtube-player-controls-left { justify-content: flex-end; }
-.youtube-player-panel--fullscreen .youtube-player-controls-right { justify-content: flex-start; }
+/* justify-content alone can't move the icon buttons here - the prev/next queue label next to them
+   is flex:1 and greedily consumes all the column's free space before justify-content ever gets a
+   chance to redistribute any of it, leaving the (fixed-size) icon buttons stuck wherever DOM order
+   put them: right at the true edges. Reordering the label past its icons instead moves the *empty,
+   invisible* growing space itself to the true edge, which pushes the actual buttons up against the
+   center column where the free space used to be. */
+.youtube-player-panel--fullscreen .youtube-player-queue-label--prev { order: -1; }
+.youtube-player-panel--fullscreen .youtube-player-queue-label--next { order: 1; }
 .youtube-player-panel--fullscreen #youtube-player-panel-popout,
 .youtube-player-panel--fullscreen #youtube-player-panel-toggle {
   display: none;
