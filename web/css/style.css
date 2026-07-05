@@ -1502,15 +1502,137 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .floating-panel-close:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
 
+.floating-panel-pin {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--r1);
+  border: none;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.floating-panel-pin:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+.floating-panel-pin.active { color: var(--accent); }
+
 .floating-panel .game-state-fields { padding: 10px 12px; }
 
 .youtube-player-panel {
   top: auto;
   bottom: 16px;
-  right: 16px;
+  right: auto;
+  left: 16px;
   width: 320px;
   position: fixed;
 }
+
+/* Docked mode - sits in normal document flow above the chat log (chat-panel's flex layout
+   shrinks .chat-log to make room) instead of floating over the page. Combined-class selector
+   so it outranks the plain .youtube-player-panel rule above without needing !important - inline
+   styles left over from a drag/resize still take precedence, so youtube-player.js clears those
+   when toggling into dock mode. */
+.youtube-player-panel.youtube-player-panel--docked {
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* Match .composer/.message's column width so the docked player lines up with the chat content
+     instead of stretching edge-to-edge across the (often much wider) chat-panel flex container. */
+  width: calc(100% - 40px);
+  max-width: 780px;
+  margin: 12px auto 0;
+}
+.youtube-player-panel--docked .youtube-player-resize-grip { display: none; }
+.youtube-player-panel--docked .floating-panel-header { cursor: default; }
+
+.youtube-player-title-channel { color: var(--accent); }
+
+/* Collapsed mode - hides the video frame only, keeping the seek bar/transport/volume controls so
+   audio (still playing - a hidden iframe doesn't pause it) can be controlled without the video
+   taking up space. Works the same in both docked and floating layouts. */
+.youtube-player-panel--collapsed .youtube-player-frame { display: none; }
+.youtube-player-panel-toggle-icon { transition: transform var(--ease); }
+.youtube-player-panel--collapsed .youtube-player-panel-toggle-icon { transform: rotate(180deg); }
+
+/* Shared by both the playlists list and the search/browse results list below - same row shape,
+   different data source. */
+.youtube-player-list-panel {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--glass-border);
+}
+.youtube-player-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.youtube-player-list-item:hover { background: rgba(255,255,255,0.06); color: var(--t1); }
+.youtube-player-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youtube-player-list-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--t3);
+}
+
+.youtube-player-browse-form {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--glass-border);
+}
+.youtube-player-browse-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--r1);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--t1);
+  font-size: 12px;
+}
+.youtube-player-browse-form button {
+  padding: 0 12px;
+  border-radius: var(--r1);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Fixed toolbar over the top-left of the chat view - independent of the player's docked/floating
+   state, so the player can be opened even when nothing has played yet this session. */
+.chat-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 60;
+  display: flex;
+  gap: 6px;
+}
+.chat-toolbar-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: var(--r1);
+  border: none;
+  background: rgba(255,255,255,0.05);
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.chat-toolbar-btn:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
 
 .youtube-player-resize-grip {
   position: absolute;
@@ -1540,15 +1662,57 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .youtube-player-frame iframe { width: 100%; height: 100%; display: block; border: 0; }
 
+.youtube-player-seek {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+}
+.youtube-player-time {
+  font-size: 11px;
+  color: var(--t3);
+  min-width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.youtube-player-seekbar {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Plain flex row - the two queue labels are the only flex:1 items, so they (and only they) grow
+   to fill whatever space is left, splitting it evenly and keeping the transport buttons visually
+   centered even with no text - everything else (icon group, buttons, volume) is flex-shrink:0. A
+   label with empty text still occupies its flexed share of space (no `hidden` toggling needed for
+   the centered look), it just renders nothing. */
 .youtube-player-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 8px;
+  gap: 8px;
+  padding: 8px 12px;
   border-top: 1px solid var(--glass-border);
 }
+.youtube-player-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.youtube-player-queue-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youtube-player-queue-label--prev { text-align: right; }
+.youtube-player-queue-label--next { text-align: left; }
 .youtube-player-controls button {
+  flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px;
   border-radius: var(--r1);
@@ -1562,9 +1726,8 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .youtube-player-controls button:hover { background: rgba(255,255,255,0.1); }
 
 .youtube-player-volume {
-  flex: 1;
-  min-width: 0;
-  max-width: 90px;
+  flex-shrink: 0;
+  width: 90px;
   accent-color: var(--accent);
   cursor: pointer;
 }

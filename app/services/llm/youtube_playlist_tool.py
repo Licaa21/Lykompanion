@@ -1,6 +1,19 @@
+import re
+
 import httpx
 
 from app.core import youtube_auth
+
+# YouTube auto-generates a "<Artist> - Topic" channel for tracks uploaded without the artist's own
+# channel (common for music-catalog/official-audio entries) - "Topic" isn't part of the artist's
+# actual name, just YouTube's label for that auto-generated channel, so it reads as noise here.
+_TOPIC_CHANNEL_SUFFIX_RE = re.compile(r"\s*-\s*Topic$", re.IGNORECASE)
+
+
+def _clean_channel_title(channel: str | None) -> str | None:
+    if not channel:
+        return channel
+    return _TOPIC_CHANNEL_SUFFIX_RE.sub("", channel).strip() or channel
 
 PLAYLISTS_URL = "https://www.googleapis.com/youtube/v3/playlists"
 PLAYLIST_ITEMS_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
@@ -73,7 +86,15 @@ async def _fetch_playlist_videos(access_token: str, playlist_id: str) -> list[di
         video_id = (snippet.get("resourceId") or {}).get("videoId")
         # Deleted/private videos still show up as a placeholder item with no resolvable video id.
         if video_id:
-            videos.append({"video_id": video_id, "title": snippet.get("title") or "Untitled"})
+            videos.append(
+                {
+                    "video_id": video_id,
+                    "title": snippet.get("title") or "Untitled",
+                    # playlistItems.snippet includes the uploader's channel name directly (unlike
+                    # the id-only videoId), so the player can show it without a second API call.
+                    "channel": _clean_channel_title(snippet.get("videoOwnerChannelTitle")),
+                }
+            )
     return videos
 
 

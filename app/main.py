@@ -36,6 +36,7 @@ from app.api import (
     usage,
     voice,
     youtube_oauth,
+    youtube_search,
 )
 from app.core.chats import prune_empty_chats
 from app.services import overlay_process
@@ -117,6 +118,7 @@ app.include_router(provider_routing.router)
 app.include_router(backup.router)
 app.include_router(spotify_oauth.router)
 app.include_router(youtube_oauth.router)
+app.include_router(youtube_search.router)
 
 from app.services.llm.web_search_tool import SEARXNG_HEADERS
 

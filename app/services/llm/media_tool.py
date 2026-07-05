@@ -163,6 +163,38 @@ def _search_youtube_sync(query: str) -> dict | None:
     return entries[0] if entries else info
 
 
+_BROWSE_SEARCH_RESULTS = 10
+
+
+def _search_youtube_multi_sync(query: str) -> list[dict]:
+    """Multiple results for the in-app player's own search/browse UI (youtube_search.py's
+    endpoint) - unlike _search_youtube_sync above, which only ever needs the single best match for
+    a play_on_youtube tool call. extract_flat skips per-video metadata resolution (id+title only),
+    same tradeoff as _fetch_mix_playlist_sync below - plenty for a picker list."""
+    from yt_dlp import YoutubeDL
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "default_search": f"ytsearch{_BROWSE_SEARCH_RESULTS}",
+        "js_runtimes": {},
+        "socket_timeout": _SEARCH_TIMEOUT_SECONDS,
+    }
+    with YoutubeDL(options) as ydl:
+        info = ydl.extract_info(query, download=False)
+    if not info:
+        return []
+    entries = info.get("entries") or []
+    results = []
+    for entry in entries:
+        video_id = entry.get("id")
+        if video_id:
+            results.append({"video_id": video_id, "title": entry.get("title") or "Untitled"})
+    return results
+
+
 def _fetch_mix_playlist_sync(video_id: str) -> list[dict]:
     """YouTube auto-generates a "Mix" playlist (id `RD<video_id>`) of similar songs/videos for
     almost every video - no OAuth or curated playlist needed. extract_flat skips per-video
@@ -255,10 +287,15 @@ async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
             song = None
 
         if song and song.get("videoId"):
-            title = song.get("title") or query
+            song_title = song.get("title") or query
             artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
-            label = f"'{title}'" + (f" by {artists}" if artists else "")
-            payload = await _build_player_payload(song["videoId"], title)
+            label = f"'{song_title}'" + (f" by {artists}" if artists else "")
+            # YouTube Music's "songs" search returns just the bare track name in `title` (unlike a
+            # regular video search, whose `title` is the uploader's own, usually "Artist - Song")
+            # - without the artist stitched in here, the in-app player panel/queue only ever shows
+            # the song name with no way to tell whose version is playing.
+            display_title = f"{song_title} - {artists}" if artists else song_title
+            payload = await _build_player_payload(song["videoId"], display_title)
             suffix = " and queued a Mix of similar songs" if "videos" in payload else ""
             return f"Now playing {label} on YouTube Music{suffix}.", payload
 
