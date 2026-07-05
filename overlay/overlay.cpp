@@ -280,6 +280,7 @@ IDWriteTextFormat* g_fmtHead  = nullptr;  // memory/handsfree header (semibold 1
 IDWriteTextFormat* g_fmtIcon  = nullptr;  // emoji glyphs (color font)
 IDWriteTextFormat* g_fmtCenter = nullptr; // centered (config buttons / banner)
 IDWriteTextFormat* g_fmtUi    = nullptr;  // edit-toolbar labels (fixed size/font)
+IDWriteTextFormat* g_fmtChip  = nullptr;  // small no-wrap centered (Show-toggle chips)
 ID2D1StrokeStyle*  g_dashStroke = nullptr; // dashed edit-mode outline
 
 // Base sizes for the user-scalable text formats (multiplied by g_fontScale).
@@ -535,6 +536,15 @@ bool CreateFactories() {
             L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_fmtUi)))
         return false;
+    // Chip labels are narrow (5 evenly-split chips in CONFIG_W) - "Memory" wraps to two
+    // lines at g_fmtCenter's 15px, so give chips their own smaller, non-wrapping format.
+    if (FAILED(g_dwriteFactory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"en-us", &g_fmtChip)))
+        return false;
+    g_fmtChip->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_fmtChip->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    g_fmtChip->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
     if (!RebuildTextFormats()) return false;
 
@@ -1966,7 +1976,7 @@ void RenderConfig() {
         D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(g_rcToggle[i], 7, 7);
         if (*flags[i]) rt->FillRoundedRectangle(rr, acc);
         else           rt->DrawRoundedRectangle(rr, dim, 1.2f);
-        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtCenter,
+        rt->DrawText(labels[i], (UINT32)wcslen(labels[i]), g_fmtChip,
                      g_rcToggle[i], *flags[i] ? white : dim);
     }
 
@@ -2814,6 +2824,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     CoUninitialize();
     SafeRelease(&g_dashStroke);
     SafeRelease(&g_fmtUi);
+    SafeRelease(&g_fmtChip);
     SafeRelease(&g_fmtCenter);
     SafeRelease(&g_fmtIcon);
     SafeRelease(&g_fmtHead);
