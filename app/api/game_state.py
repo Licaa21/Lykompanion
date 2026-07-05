@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from app.core import game_art
 from app.core import game_state as game_state_store
 from app.core import game_state_processes
 from app.core import game_state_trackers
@@ -101,6 +102,7 @@ async def delete_game(process: str) -> dict:
     game_state_store.delete_process(process)
     game_state_trackers.delete_process(process)
     game_state_training_data.delete_process(process)
+    game_art.delete_process(process)
     memory_store.clear_memories_for_process(process)
     observations.clear_process(process)
     game_state_processes.remove_from_whitelist(process)

@@ -10,7 +10,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    include_screenshot: bool = False
+    # Data URL (or raw base64) of an image the user attached via the Send Image modal.
+    image: str | None = None
     # When true (narration is on), the frontend pushes reply toasts to the overlay itself, timed to
     # each narrated sentence — so the backend skips its own fixed-timer reply-toast push to avoid
     # duplicates. See app/api/chat.py / web/js/app/narration.js.
@@ -58,12 +59,20 @@ class CompanionConfig(BaseModel):
     overlay_enabled: bool = False
     overlay_edit_hotkey: str = "Ctrl+Shift+O"
     overlay_edit_phrase_enabled: bool = False
-    overlay_edit_phrase: str = "edit overlay"
+    overlay_edit_phrase: str = "Edit overlay"
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
     game_state_capture_interval_seconds: int = 1
     game_state_visual_diff_threshold_percent: float = 12.0
+    game_state_visual_diff_noise_floor_percent: float = 1.5
+    game_state_max_consecutive_skips: int = 0
     game_state_model: str | None = None
+    game_state_ocr_similarity_threshold: float = 0.9
+    game_state_ocr_max_width: int = 1600
+    game_state_empty_ocr_warn_threshold: int = 10
+    game_state_visual_diff_thumbnail_size: int = 64
+    game_state_capture_frame_timeout_seconds: float = 6.0
+    game_state_capture_cursor_enabled: bool = False
     game_state_training_enabled: bool = False
     proactive_messages_enabled: bool = False
     proactive_min_interval_minutes: int = 15
@@ -109,6 +118,8 @@ class CompanionConfig(BaseModel):
     steam_api_key: str | None = None
     steam_api_key_set: bool = False
     steam_id: str | None = None
+    steamgriddb_api_key: str | None = None
+    steamgriddb_api_key_set: bool = False
 
     spotify_client_id: str | None = None
     spotify_connected: bool = False
@@ -240,9 +251,27 @@ class GamingJournalSession(BaseModel):
 
 class GamingJournalGame(BaseModel):
     process: str
+    title: str
+    cover_url: str | None = None
+    description: str | None = None
     tracked: bool = False
     memories: list[MemoryEntry] = []
     sessions: list[GamingJournalSession] = []
+    date_added: str | None = None
+    last_played: str | None = None
+
+
+class GameArtRecord(BaseModel):
+    title: str
+    cover_url: str | None = None
+    description: str | None = None
+    source: str | None = None
+    title_overridden: bool = False
+    updated_at: str | None = None
+
+
+class GameArtTitleUpdate(BaseModel):
+    title: str
 
 
 class ReminderEntry(BaseModel):
@@ -286,3 +315,23 @@ class DebugRequestEntry(BaseModel):
     completion_tokens: int
     cost_usd: float
     duration_ms: float | None = None
+
+
+class ProviderEndpointInfo(BaseModel):
+    tag: str
+    provider_name: str
+    pricing_prompt: float | None = None
+    pricing_completion: float | None = None
+    context_length: int | None = None
+    quantization: str | None = None
+    uptime_last_30m: float | None = None
+    latency_last_30m: float | None = None
+    throughput_last_30m: float | None = None
+
+
+class ProviderRoutingConfig(BaseModel):
+    only: list[str] = []
+    sort: Literal["price", "throughput", "latency"] | None = None
+    allow_fallbacks: bool = True
+    max_price_prompt: float | None = None
+    max_price_completion: float | None = None

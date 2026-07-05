@@ -36,3 +36,8 @@ def test_prefix_key_is_not_mistaken_for_match():
     lines = config.ENV_PATH.read_text(encoding="utf-8").splitlines()
     assert "FOOBAR=1" in lines
     assert "FOO=2" in lines
+
+
+def test_game_state_poll_interval_clamps_to_minimum_5_seconds():
+    settings = config.Settings(openrouter_model="test-model", game_state_poll_interval_seconds=3)
+    assert settings.game_state_poll_interval_seconds == 5

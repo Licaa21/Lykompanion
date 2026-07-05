@@ -87,23 +87,85 @@
 
     <!-- ── MAIN CHAT PANEL ──────────────────────────────────────────── -->
     <main class="chat-panel">
+      <!-- Top-left toolbar, independent of the YouTube player's docked/floating state - lets the
+           player be opened even when nothing has played yet this session (youtube-player.js). -->
+      <div class="chat-toolbar" id="chat-toolbar">
+        <button type="button" class="chat-toolbar-btn" id="chat-toolbar-youtube" title="YouTube player">
+          <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3V9z" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+
       <!-- First-run setup nudge — shown only while the active LLM provider has no API key -->
       <div id="setup-banner" class="setup-banner" hidden>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         <span class="setup-banner-text">Almost ready — add an API key for your LLM provider to start chatting.</span>
         <button type="button" id="setup-banner-btn" class="setup-banner-btn">Set up now</button>
       </div>
+
+      <!-- ── YOUTUBE PLAYER — permanently mounted here (never reparented, see
+           youtube-player.js's ytSetDocked) so its iframe never reloads on dock/undock; docked vs.
+           floating is purely a CSS position toggle (static vs. fixed). ──────────────────────── -->
+      <div id="youtube-player-panel" class="floating-panel youtube-player-panel" hidden>
+        <div class="floating-panel-header" id="youtube-player-panel-header">
+          <span class="floating-panel-title" id="youtube-player-title">YouTube</span>
+          <button type="button" class="floating-panel-pin" id="youtube-player-panel-toggle" title="Collapse video">
+            <svg class="youtube-player-panel-toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <button type="button" class="floating-panel-pin" id="youtube-player-panel-pin" title="Dock above chat">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+          </button>
+          <button type="button" class="floating-panel-close" id="youtube-player-panel-close">&times;</button>
+        </div>
+        <div class="youtube-player-frame"><div id="youtube-player-frame-mount"></div></div>
+        <div class="youtube-player-seek">
+          <span class="youtube-player-time" id="youtube-player-time-current">0:00</span>
+          <input type="range" id="youtube-player-seekbar" class="youtube-player-seekbar" min="0" max="100" value="0" step="0.1" title="Seek" />
+          <span class="youtube-player-time" id="youtube-player-time-duration">0:00</span>
+        </div>
+        <div class="youtube-player-controls">
+          <div class="youtube-player-controls-left">
+            <button type="button" id="youtube-player-panel-playlists" title="Your playlists" hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+            </button>
+            <button type="button" id="youtube-player-panel-search" title="Search YouTube">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            </button>
+          </div>
+          <span class="youtube-player-queue-label youtube-player-queue-label--prev" id="youtube-player-prev-label"></span>
+          <button type="button" id="youtube-player-prev" title="Previous">&#9198;</button>
+          <button type="button" id="youtube-player-playpause" title="Play/Pause">&#9199;</button>
+          <button type="button" id="youtube-player-next" title="Next">&#9197;</button>
+          <span class="youtube-player-queue-label youtube-player-queue-label--next" id="youtube-player-next-label"></span>
+          <input type="range" id="youtube-player-volume" class="youtube-player-volume" min="0" max="100" value="100" title="Volume" />
+        </div>
+        <div id="youtube-player-playlists" hidden>
+          <div class="youtube-player-list-panel" id="youtube-player-playlists-list"></div>
+        </div>
+        <div id="youtube-player-browse" hidden>
+          <form id="youtube-player-browse-form" class="youtube-player-browse-form">
+            <input type="text" id="youtube-player-browse-input" placeholder="Search YouTube…" autocomplete="off" />
+            <button type="submit">Search</button>
+          </form>
+          <div class="youtube-player-list-panel" id="youtube-player-browse-results"></div>
+        </div>
+        <div class="youtube-player-resize-grip" id="youtube-player-resize-grip" title="Resize"></div>
+      </div>
+
       <div id="chat-log" class="chat-log"></div>
 
       <div class="composer">
         <div id="voice-status" class="voice-status"></div>
-        <div id="screenshot-indicator" class="screenshot-indicator" hidden>
-          Screenshot will be included with your next message
+        <div id="sleep-word-hint" class="voice-hint" hidden></div>
+        <div id="overlay-edit-hint" class="voice-hint" hidden></div>
+        <div id="attached-image-indicator" class="screenshot-indicator" hidden>
+          <img id="attached-image-thumb" class="attached-image-thumb" alt="" />
+          <span>Image attached — it will be sent with your next message</span>
+          <button type="button" id="attached-image-remove" class="attached-image-remove" aria-label="Remove attached image" title="Remove attached image">&times;</button>
         </div>
         <form id="chat-form" class="chat-form">
-          <!-- Screenshot toggle -->
-          <button type="button" id="screenshot-toggle" class="icon-btn" title="Include screenshot: off" aria-label="Include screenshot with next message">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <!-- Send Image -->
+          <button type="button" id="send-image-btn" class="icon-btn" title="Send Image" aria-label="Attach an image to your next message">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
           </button>
           <!-- Hands-free / live mic toggle -->
           <button type="button" id="live-mic-toggle" class="icon-btn" title="Hands-free: auto-record and send when you speak" aria-label="Toggle hands-free listening">
@@ -183,6 +245,7 @@
                 <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply. Normally must support audio+image input (voice messages and screenshots go straight to it). With Transcription Mode enabled (Voice tab), it only needs to handle text, so any cheap text-only model works — but it can no longer see screenshots.">?</button></span>
                 <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-model"></select>
+                <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="llm">Providers…</button>
               </label>
             </div>
 
@@ -201,6 +264,7 @@
                 <span class="cfg-label">Memory Extraction Model <button type="button" class="cfg-help" data-tip="Model used for the background task that extracts memorable facts from your conversations. Leave blank to reuse the main chat model.">?</button></span>
                 <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-memory-model"></select>
+                <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="memory">Providers…</button>
               </label>
             </div>
             <label>
@@ -338,6 +402,19 @@
             <label>
               <span class="cfg-label">SteamID64 <button type="button" class="cfg-help" data-tip="Your numeric SteamID64, used together with the API key to look up your library.">?</button></span>
               <input id="cfg-steam-id" type="text" placeholder="Not set" autocomplete="off" />
+            </label>
+          </div>
+
+          <h3>SteamGridDB</h3>
+          <p class="modal-hint">
+            Last-resort cover art fallback for the Gaming Journal's My Games library, when a game's box art
+            isn't found on Steam or IGDB. Get a free API key at
+            <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener noreferrer">steamgriddb.com/profile/preferences/api</a>.
+          </p>
+          <div class="cfg-key-row">
+            <label>
+              <span class="cfg-label">API Key <button type="button" class="cfg-help" data-tip="Free SteamGridDB API key, used only when Steam and IGDB both have no cover art for a tracked game.">?</button></span>
+              <span class="key-field"><input id="cfg-steamgriddb-api-key" type="password" placeholder="Not set" autocomplete="off" /><button type="button" class="clear-key-btn" title="Clear">✕</button></span>
             </label>
           </div>
 
@@ -566,13 +643,13 @@
           <div id="overlay-edit-phrase-controls">
             <label class="checkbox">
               <input id="cfg-overlay-edit-phrase-enabled" type="checkbox" />
-              Enable "edit overlay" phrase
+              Enable "Edit overlay" phrase
               <button type="button" class="cfg-help" data-tip="Say this phrase to open the in-game overlay's edit mode directly — detected locally, never sent to the AI. No-ops if the overlay isn't running.">?</button>
             </label>
             <div id="overlay-edit-phrase-dependent">
               <label>
                 <span class="cfg-label">Phrase <button type="button" class="cfg-help" data-tip="The phrase that opens overlay edit mode when spoken, regardless of hands-free state.">?</button></span>
-                <input id="cfg-overlay-edit-phrase" type="text" value="edit overlay" autocomplete="off" />
+                <input id="cfg-overlay-edit-phrase" type="text" value="Edit overlay" autocomplete="off" />
               </label>
             </div>
           </div>
@@ -670,22 +747,31 @@
       </div>
       <div class="modal-layout">
         <nav class="modal-tabs">
-          <button type="button" class="tab-btn active" data-tab="journal">Journal</button>
-          <button type="button" class="tab-btn" data-tab="game-awareness">Game Awareness</button>
+          <button type="button" class="tab-btn active" data-tab="journal">My Games</button>
+          <button type="button" class="tab-btn" data-tab="game-awareness">Journal Settings</button>
           <button type="button" class="tab-btn" data-tab="overlay-layout">Customize Overlay</button>
         </nav>
         <div class="modal-main modal-body">
 
           <section class="tab-panel" data-tab="journal">
-            <p class="modal-hint">
-              Everything your companion knows per game: general facts that hold across all playthroughs,
-              and per-profile facts tied to one playthrough. Unconfirmed observations are things it noticed
-              on screen but hasn't confirmed with you yet — they fade in and out on their own.
-            </p>
-            <div id="gaming-journal-list" class="gaming-journal-list"></div>
-            <div class="memory-add-controls">
-              <button type="button" id="journal-delete-all" class="secondary-btn secondary-btn--danger">Delete all journal memories</button>
+
+            <div id="journal-library-view">
+              <div class="journal-library-toolbar">
+                <select id="journal-sort-select" title="Sort My Games">
+                  <option value="last_played">Last played</option>
+                  <option value="title">Name (A-Z)</option>
+                  <option value="date_added">Date added</option>
+                </select>
+                <button type="button" id="journal-sort-dir" class="secondary-btn" title="Toggle ascending/descending">&darr;</button>
+              </div>
+              <div id="gaming-journal-list" class="journal-library-grid"></div>
             </div>
+
+            <div id="journal-detail-view" hidden>
+              <button type="button" id="journal-detail-back" class="secondary-btn">&larr; Back to My Games</button>
+              <div id="journal-detail-content"></div>
+            </div>
+
           </section>
 
         <!-- GAME AWARENESS tab -->
@@ -694,7 +780,6 @@
             <button type="button" class="subtab-btn active" data-subtab="ga-awareness">Awareness</button>
             <button type="button" class="subtab-btn" data-subtab="ga-processes">Tracked Processes</button>
             <button type="button" class="subtab-btn" data-subtab="ga-trackers">Trackers</button>
-            <button type="button" class="subtab-btn" data-subtab="ga-training-data">Training Data</button>
           </div>
 
           <div class="subtab-panel" data-subtab="ga-awareness">
@@ -724,8 +809,8 @@
               </div>
               <div class="cfg-row">
                 <label>
-                  <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen.">?</button></span>
-                  <input id="cfg-game-state-interval" type="range" min="15" max="300" step="15" value="90" />
+                  <span class="cfg-label">Game State Poll Interval: <span id="cfg-game-state-interval-value">90</span>s <button type="button" class="cfg-help" data-tip="How often (in seconds) the background OCR poller captures and reads your screen. Minimum 5s.">?</button></span>
+                  <input id="cfg-game-state-interval" type="range" min="5" max="300" step="5" value="90" />
                 </label>
               </div>
               <div class="cfg-row">
@@ -742,6 +827,7 @@
                   <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to interpret each poll window's OCR text plus its first/last frames as screenshots into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
                   <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
                   <select id="cfg-game-state-model"></select>
+                  <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="gameState">Providers…</button>
                 </label>
               </div>
               <details class="cfg-advanced">
@@ -754,11 +840,50 @@
                   <span class="cfg-label">Visual Diff Threshold: <span id="cfg-game-state-visual-diff-value">12</span>% <button type="button" class="cfg-help" data-tip="If the on-screen text never changes across a whole poll window, it's normally skipped entirely (e.g. sitting in a pause menu). As a fallback, the window's first and last screenshots are compared by pixels - if they differ by at least this percent, the window is sent through anyway. A genuinely frozen screen stays skipped; a minimal-UI game where you're actually moving around still gets checked. Set to 100 to disable this fallback.">?</button></span>
                   <input id="cfg-game-state-visual-diff" type="range" min="0" max="100" step="1" value="12" />
                 </label>
+                <label>
+                  <span class="cfg-label">OCR Similarity Threshold: <span id="cfg-game-state-ocr-similarity-value">0.90</span> <button type="button" class="cfg-help" data-tip="A captured frame is dropped as a near-duplicate if its OCR text is at least this similar (0-1) to the last kept frame. Lower catches more subtle changes but sends more frames through; higher is more tolerant of unchanged HUD text.">?</button></span>
+                  <input id="cfg-game-state-ocr-similarity" type="range" min="0.5" max="1" step="0.01" value="0.9" />
+                </label>
+                <label>
+                  <span class="cfg-label">Visual Diff Noise Floor: <span id="cfg-game-state-visual-diff-noise-floor-value">1.5</span>% <button type="button" class="cfg-help" data-tip="OCR text similarity is noisy - misreads can flag a frame as 'changed' even when the screen barely moved. If OCR says a window changed but the pixel diff between its frames falls below this floor, it's treated as OCR noise and the LLM pass is skipped. Keep well below the Visual Diff Threshold above - this only catches near-zero-diff noise, not real small HUD changes.">?</button></span>
+                  <input id="cfg-game-state-visual-diff-noise-floor" type="range" min="0" max="20" step="0.5" value="1.5" />
+                </label>
+                <label>
+                  <span class="cfg-label">Max Consecutive Skips: <span id="cfg-game-state-max-skips-value">0</span> <button type="button" class="cfg-help" data-tip="Both change-detection checks only ever compare frames within the current poll window, so a screen that became static entirely inside one window (e.g. a death/game-over screen) is always let through once, unconditionally, the moment a skip streak starts - that's the actual fix and isn't affected by this. This only controls an optional periodic re-check after that: 0 (default) means no further forced pass for the rest of the streak (no recurring cost while genuinely static); a positive value re-forces one through every N further consecutive skips as extra insurance.">?</button></span>
+                  <input id="cfg-game-state-max-skips" type="range" min="0" max="30" step="1" value="0" />
+                </label>
+                <label>
+                  <span class="cfg-label">OCR Capture Width: <span id="cfg-game-state-ocr-width-value">1600</span>px <button type="button" class="cfg-help" data-tip="Each captured frame is downscaled to this width before OCR (independent of the Screenshot Max Width used for vision LLM calls). Lower cuts OCR CPU time with negligible accuracy loss for HUD-sized text.">?</button></span>
+                  <input id="cfg-game-state-ocr-width" type="range" min="640" max="3840" step="80" value="1600" />
+                </label>
+                <label>
+                  <span class="cfg-label">Visual Diff Thumbnail Size: <span id="cfg-game-state-visual-diff-thumb-value">64</span>px <button type="button" class="cfg-help" data-tip="Square thumbnail size both frames are downscaled to for the visual-diff fallback comparison. Smaller is cheaper and blurs out noise; larger is more sensitive to small changes.">?</button></span>
+                  <input id="cfg-game-state-visual-diff-thumb" type="range" min="16" max="256" step="8" value="64" />
+                </label>
+                <label>
+                  <span class="cfg-label">Capture Frame Timeout: <span id="cfg-game-state-frame-timeout-value">6</span>s <button type="button" class="cfg-help" data-tip="How long the Windows Graphics Capture poller waits for a single frame before giving up on that tick instead of blocking indefinitely (exclusive-fullscreen/protected content can stall a frame forever).">?</button></span>
+                  <input id="cfg-game-state-frame-timeout" type="range" min="1" max="30" step="0.5" value="6" />
+                </label>
+                <label>
+                  <span class="cfg-label">Empty OCR Warn Threshold: <span id="cfg-game-state-empty-warn-value">10</span> ticks <button type="button" class="cfg-help" data-tip="How many consecutive capture ticks with no OCR text before a warning is logged (capture/OCR failing, or no OCR language pack installed).">?</button></span>
+                  <input id="cfg-game-state-empty-warn" type="range" min="1" max="60" step="1" value="10" />
+                </label>
+                <label class="checkbox">
+                  <input id="cfg-game-state-capture-cursor" type="checkbox" />
+                  Capture mouse cursor
+                  <button type="button" class="cfg-help" data-tip="Whether the mouse cursor is included in captured frames used for OCR and the game-state extraction pass's screenshots.">?</button>
+                </label>
               </details>
             </div>
             <div class="modal-footer modal-footer--inline">
               <button type="button" id="ga-save" class="primary-btn">Save Awareness Settings</button>
             </div>
+
+            <label>
+              <span class="cfg-label">Danger Zone</span>
+              <p class="modal-hint">Bulk-clear memories across every tracked game at once. Unconfirmed observations are left alone.</p>
+            </label>
+            <button type="button" id="journal-delete-all" class="secondary-btn secondary-btn--danger">Delete all journal memories</button>
           </div>
 
           <div class="subtab-panel" data-subtab="ga-processes" hidden>
@@ -792,15 +917,6 @@
               <button type="submit" class="secondary-btn">Add</button>
             </form>
             <button type="button" id="game-state-tracker-reset" class="secondary-btn">Reset to Defaults</button>
-          </div>
-
-          <div class="subtab-panel" data-subtab="ga-training-data" hidden>
-            <label>
-              <span class="cfg-label">Training Data <button type="button" class="cfg-help" data-tip="A living reference document the Game-State Model maintains per process, explaining how to interpret that game's OCR output and UI. Fed into every future extraction pass for that process. Edit it directly if something's wrong or stale.">?</button></span>
-              <p class="modal-hint">Notes the Game-State Model keeps for itself about a process. Pick one below to review or edit.</p>
-            </label>
-            <select id="game-state-training-data-process"></select>
-            <textarea id="game-state-training-data-content" rows="14" placeholder="No training data yet for this process - the Game-State Model writes it automatically as it learns the game's UI (requires self-training to be enabled)."></textarea>
           </div>
         </section>
 
@@ -919,6 +1035,85 @@
     </div>
   </div>
 
+  <!-- ── SEND IMAGE MODAL ───────────────────────────────────────────── -->
+  <div id="send-image-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Send Image</h2>
+        <button type="button" class="modal-close" data-close="send-image-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="image-dropzone" class="image-dropzone" tabindex="0" role="button" aria-label="Browse, drag and drop, or paste an image">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <p>Drag and drop an image here, click to browse, or paste it from your clipboard.</p>
+        </div>
+        <input id="image-file-input" type="file" accept="image/*" hidden />
+        <p class="modal-hint">You can always ask the companion to take a screenshot of your active screen if you'd like to quickly share something.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PROVIDER ROUTING MODAL ──────────────────────────────────────── -->
+  <div id="provider-routing-modal" class="modal-overlay" hidden>
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h2>Providers — <span id="pr-model-name"></span></h2>
+        <button type="button" class="modal-close" data-close="provider-routing-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Choose which underlying providers OpenRouter may route this model through. Leave every checkbox unchecked to use OpenRouter's own default routing (no restriction).</p>
+        <div class="cfg-row">
+          <label>
+            <span class="cfg-label">Sort providers by <button type="button" class="cfg-help" data-tip="When more than one allowed provider remains, prefer the cheapest, highest-throughput, or lowest-latency one. Leave as 'default' to use OpenRouter's own balancing.">?</button></span>
+            <select id="pr-sort">
+              <option value="">(default)</option>
+              <option value="price">Price</option>
+              <option value="throughput">Throughput</option>
+              <option value="latency">Latency</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input id="pr-allow-fallbacks" type="checkbox" checked />
+            Allow fallback providers
+            <button type="button" class="cfg-help" data-tip="If the allowed/preferred provider is unavailable, let OpenRouter fall back to another allowed provider instead of failing the request.">?</button>
+          </label>
+        </div>
+        <div class="cfg-row">
+          <label>
+            <span class="cfg-label">Max Prompt Price ($/M tokens) <button type="button" class="cfg-help" data-tip="Exclude providers charging more than this per million prompt tokens. Leave blank for no limit.">?</button></span>
+            <input id="pr-max-price-prompt" type="number" min="0" step="0.01" placeholder="no limit" />
+          </label>
+          <label>
+            <span class="cfg-label">Max Completion Price ($/M tokens) <button type="button" class="cfg-help" data-tip="Exclude providers charging more than this per million completion tokens. Leave blank for no limit.">?</button></span>
+            <input id="pr-max-price-completion" type="number" min="0" step="0.01" placeholder="no limit" />
+          </label>
+        </div>
+        <div class="table-scroll">
+          <table class="provider-table" id="pr-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th data-sort="provider_name">Provider</th>
+                <th data-sort="pricing_prompt">Prompt $/M</th>
+                <th data-sort="pricing_completion">Completion $/M</th>
+                <th data-sort="context_length">Context</th>
+                <th data-sort="quantization">Quant</th>
+                <th data-sort="uptime_last_30m">Uptime</th>
+                <th data-sort="latency_last_30m">Latency</th>
+                <th data-sort="throughput_last_30m">Throughput</th>
+              </tr>
+            </thead>
+            <tbody id="pr-table-body"></tbody>
+          </table>
+        </div>
+        <p id="pr-empty-hint" class="modal-hint" hidden>No provider data available — pick an OpenRouter model first, or OpenRouter has no per-provider breakdown for it.</p>
+      </div>
+      <div class="modal-footer modal-footer--inline">
+        <button type="button" id="pr-save" class="primary-btn">Save Provider Settings</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── QUICK SETUP WIZARD ─────────────────────────────────────────── -->
   <!-- Auto-opens on first run (no API key configured yet); re-launchable from Settings. -->
   <div id="quick-setup-modal" class="modal-overlay" hidden>
@@ -1001,7 +1196,7 @@
           <ul class="qs-tips">
             <li><strong>Push-to-talk</strong> — the mic button records until you click it again.</li>
             <li><strong>Hands-free</strong> — the headset toggle keeps the mic open while you game; just start talking.</li>
-            <li><strong>Screenshots</strong> — the camera toggle attaches your screen to the next message.</li>
+            <li><strong>Send Image</strong> — attach a screenshot, photo, or any picture to your next message; the companion can also take its own screenshot on request.</li>
             <li><strong>Memory</strong> — it saves useful facts automatically; review them under Personal Data.</li>
             <li><strong>Game Awareness</strong> — optional background OCR that follows your quest/location; enable it in Settings.</li>
           </ul>
@@ -1040,20 +1235,6 @@
     <div id="game-state-stats" class="game-state-stats"></div>
   </div>
 
-  <!-- ── YOUTUBE PLAYER — floating panel, not a modal ──────────────── -->
-  <div id="youtube-player-panel" class="floating-panel youtube-player-panel" hidden>
-    <div class="floating-panel-header" id="youtube-player-panel-header">
-      <span class="floating-panel-title" id="youtube-player-title">YouTube</span>
-      <button type="button" class="floating-panel-close" id="youtube-player-panel-close">&times;</button>
-    </div>
-    <div class="youtube-player-frame"><div id="youtube-player-frame-mount"></div></div>
-    <div class="youtube-player-controls">
-      <button type="button" id="youtube-player-prev" title="Previous">&#9198;</button>
-      <button type="button" id="youtube-player-playpause" title="Play/Pause">&#9199;</button>
-      <button type="button" id="youtube-player-next" title="Next">&#9197;</button>
-    </div>
-  </div>
-
   <audio id="narration-audio" hidden></audio>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web/dist/bundle.min.js"></script>
@@ -1065,6 +1246,7 @@
   <script src="js/app/chat-store.js"></script>
   <script src="js/app/narration.js"></script>
   <script src="js/app/chat-stream.js"></script>
+  <script src="js/app/send-image.js"></script>
   <script src="js/app/voice.js"></script>
   <script src="js/app/wake-word.js"></script>
   <script src="js/app/settings.js"></script>

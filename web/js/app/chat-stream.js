@@ -1,3 +1,16 @@
+// Maps a rendered `.message` bubble back to its entry in the active chat's messages array,
+// by DOM position - chatLog's children are always exactly the `.message` divs in the same
+// order as chat.messages (the empty-state placeholder is removed before the first is appended,
+// and a still-streaming assistant placeholder is simply past the end of chat.messages until the
+// stream finishes and commits it, which callers must guard against via the null return).
+function getChatMessageForElement(el) {
+  const chat = getActiveChat();
+  if (!chat) return null;
+  const idx = Array.from(chatLog.children).indexOf(el);
+  if (idx === -1 || idx >= chat.messages.length) return null;
+  return { chat, idx, message: chat.messages[idx] };
+}
+
 function appendMessage(role, content, audioId, isNew = false, audioBlob = null, timestamp = null) {
   chatLog.querySelector(".chat-empty-state")?.remove();
   const el = document.createElement("div");
@@ -7,6 +20,8 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   // SVG icon helpers
   const copyIcon  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
   const checkIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 12 4 9"/></svg>`;
+  const editIcon  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>`;
+  const trashIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>`;
 
   // ── Role header ───────────────────────────────────────────
   const meta = document.createElement("div");
@@ -49,9 +64,27 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
       retryBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>`;
       retryBtn.addEventListener("click", () => sendMessage(contentDiv.textContent));
       actionsEl.appendChild(retryBtn);
+
+      // Edit — turn this message back into editable text; saving drops it and everything
+      // after it, then resends the edited text (the "forgot to paste something" flow).
+      const editBtn = document.createElement("button");
+      editBtn.className = "msg-action-btn";
+      editBtn.title = "Edit";
+      editBtn.innerHTML = editIcon;
+      editBtn.addEventListener("click", () => startEditingMessage(el, contentDiv, content));
+      actionsEl.appendChild(editBtn);
     }
 
     if (role === "assistant") {
+      // Narrate — manually replays this message's TTS without re-sending it to the LLM, so
+      // narration/voice settings can be tested against existing replies without burning tokens.
+      const narrateBtn = document.createElement("button");
+      narrateBtn.className = "msg-action-btn";
+      narrateBtn.title = "Narrate";
+      narrateBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
+      narrateBtn.addEventListener("click", () => narrate(contentDiv.textContent));
+      actionsEl.appendChild(narrateBtn);
+
       // Add to Memory — pre-fills the memory modal input
       const memBtn = document.createElement("button");
       memBtn.className = "msg-action-btn";
@@ -66,6 +99,25 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
       actionsEl.appendChild(memBtn);
     }
   }
+
+  // Delete — applies to every message, voice bubbles included. Looked up lazily by DOM
+  // position at click time so it's a no-op on a still-streaming placeholder that hasn't
+  // been committed to chat.messages yet.
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "msg-action-btn";
+  deleteBtn.title = "Delete";
+  deleteBtn.innerHTML = trashIcon;
+  deleteBtn.addEventListener("click", async () => {
+    const info = getChatMessageForElement(el);
+    if (!info) return;
+    if (!(await showConfirm("Delete this message?", { title: "Delete message", danger: true, confirmText: "Delete" }))) return;
+    const { chat, idx, message } = info;
+    if (message.audioId) deleteVoiceBlob(message.audioId);
+    chat.messages.splice(idx, 1);
+    saveChat(chat);
+    renderChatLog();
+  });
+  actionsEl.appendChild(deleteBtn);
 
   meta.appendChild(actionsEl);
   el.appendChild(meta);
@@ -221,6 +273,61 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
   return contentDiv;
 }
 
+// Swaps a user bubble's rendered content for an editable textarea. Saving drops this message
+// and everything after it from the chat (the old reply no longer answers the edited text) and
+// resends the edited text through the normal send path; cancelling just re-renders the log.
+function startEditingMessage(el, contentDiv, rawContent) {
+  if (el.querySelector(".msg-edit-textarea")) return; // already editing
+
+  contentDiv.hidden = true;
+
+  const wrap = document.createElement("div");
+  wrap.className = "msg-edit-wrap";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "msg-edit-textarea";
+  textarea.value = rawContent;
+  wrap.appendChild(textarea);
+
+  const actions = document.createElement("div");
+  actions.className = "msg-edit-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "msg-edit-cancel";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", () => {
+    wrap.remove();
+    contentDiv.hidden = false;
+  });
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "msg-edit-save";
+  saveBtn.textContent = "Save & Resend";
+  saveBtn.addEventListener("click", () => {
+    const newText = textarea.value.trim();
+    if (!newText) return;
+    const info = getChatMessageForElement(el);
+    if (!info) return;
+    const { chat, idx } = info;
+    const removed = chat.messages.splice(idx);
+    for (const message of removed) if (message.audioId) deleteVoiceBlob(message.audioId);
+    saveChat(chat);
+    renderChatLog();
+    stopNarration();
+    sendMessage(newText);
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+  wrap.appendChild(actions);
+
+  contentDiv.after(wrap);
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
 // Splits a growing text buffer into complete sentences plus a leftover
 // remainder (incomplete sentence still being streamed in). Operates on RAW
 // (unstripped) text: a sentence boundary is terminal punctuation followed by
@@ -231,6 +338,11 @@ function appendMessage(role, content, audioId, isNew = false, audioBlob = null, 
 // patterns. Punctuation at the very end of the buffer stays in the remainder
 // (more of the same token may still arrive); callers flush the remainder when
 // the stream ends.
+// Matches a *complete* markdown image/link span starting at the current scan position (sticky,
+// no backtracking risk - single bounded char classes). Used to skip over the whole pattern
+// atomically during sentence splitting, below.
+const MARKDOWN_LINK_RE = /!?\[[^\]]*\]\([^\s)]*\)/y;
+
 function extractCompleteSentences(buffer) {
   const holdAt = buffer.search(/!?\[[^\]]*(?:\]\([^)\s]*)?$/);
   const splittable = holdAt === -1 ? buffer : buffer.slice(0, holdAt);
@@ -244,6 +356,19 @@ function extractCompleteSentences(buffer) {
   let i = 0;
   while (i < splittable.length) {
     const ch = splittable[i];
+    // A complete image/link's alt text or label can itself contain ".!?" (e.g. "Red Heart
+    // icon... background. Love ..."), which would otherwise look like a sentence boundary and
+    // chop the markdown pattern in half - leaving a fragment stripMarkdownForNarration can no
+    // longer recognize as an image, so the raw fragment (URL included) gets narrated as prose.
+    // Skip the whole pattern atomically so only text outside it is eligible as a boundary.
+    if (ch === "!" || ch === "[") {
+      MARKDOWN_LINK_RE.lastIndex = i;
+      const match = MARKDOWN_LINK_RE.exec(splittable);
+      if (match) {
+        i += match[0].length;
+        continue;
+      }
+    }
     if (ch === "\n") {
       let end = i + 1;
       while (end < splittable.length && splittable[end] === "\n") end++;
@@ -298,6 +423,9 @@ async function sendMessage(text) {
   let fullReply = "";
   let sentenceBuffer = "";
 
+  const imageToSend = attachedImageDataUrl;
+  clearAttachedImage();
+
   awaitingReply = true;
   chatAbortController = new AbortController();
   setStreaming(true);
@@ -305,7 +433,7 @@ async function sendMessage(text) {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chat.messages, include_screenshot: includeScreenshot, client_overlay_toasts: narrateEnabled }),
+      body: JSON.stringify({ messages: chat.messages, image: imageToSend, client_overlay_toasts: narrateEnabled }),
       signal: chatAbortController.signal,
     });
 
@@ -408,6 +536,11 @@ async function sendMessage(text) {
       addMessageToChat(chat, "assistant", errText);
     } else if (fullReply) {
       addMessageToChat(chat, "assistant", fullReply);
+    } else {
+      // Stopped before any text arrived: the placeholder bubble is still empty, which the
+      // CSS renders as a pulsing "..." typing indicator - remove it instead of leaving that
+      // indicator (and an empty bubble) stuck on screen forever.
+      assistantEl.closest(".message")?.remove();
     }
   } finally {
     awaitingReply = false;
@@ -426,13 +559,6 @@ chatForm.addEventListener("submit", (event) => {
   if (!text) return;
   chatInput.value = "";
   sendMessage(text);
-});
-
-screenshotToggle.addEventListener("click", () => {
-  includeScreenshot = !includeScreenshot;
-  screenshotToggle.classList.toggle("active", includeScreenshot);
-  screenshotToggle.title = `Include screenshot: ${includeScreenshot ? "on" : "off"}`;
-  screenshotIndicator.hidden = !includeScreenshot;
 });
 
 // --- Voice input: always sent directly to an audio-capable LLM. Local

@@ -15,7 +15,3 @@ venv/
 !.vscode/settings.json
 image/
 /dist/
-overlay/Lykompanion-overlay.exe
-overlay/*.obj
-overlay/*.pdb
-overlay/*.ilk

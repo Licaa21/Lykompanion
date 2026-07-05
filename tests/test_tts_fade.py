@@ -1,9 +1,11 @@
-"""Tests for the TTS fade-in (_apply_fade_in in app/services/tts/__init__.py) -
-the anti-click pass applied to every synthesized WAV before playback."""
+"""Tests for the TTS post-processing pipeline (app/services/tts/__init__.py) -
+the fade-in/out and normalize passes applied to every synthesized WAV before
+playback. (A declick pass was tried and reverted - see CLAUDE.md - it misfired
+on legitimate high-frequency speech content like fricatives, producing static.)"""
 
 import struct
 
-from app.services.tts import _FADE_IN_MS, _apply_fade_in
+from app.services.tts import _FADE_MS, _apply_fades, _normalize, _postprocess
 
 
 def make_wav(samples: list[int], sample_rate: int = 24000, channels: int = 1) -> bytes:
@@ -21,64 +23,102 @@ def read_samples(wav: bytes) -> list[int]:
     return list(struct.unpack_from(f"<{count}h", wav, data_at))
 
 
-def test_fade_silences_first_sample_and_ramps_up():
-    sample_rate = 24000
-    fade_frames = sample_rate * _FADE_IN_MS // 1000
-    samples = [10000] * (fade_frames * 2)
-    out = read_samples(_apply_fade_in(make_wav(samples, sample_rate)))
+# --- _apply_fades ---
 
-    assert out[0] == 0  # a hard 10000-amplitude onset would click
-    assert out[fade_frames // 2] < 10000  # mid-fade is attenuated
-    assert out[fade_frames:] == samples[fade_frames:]  # audio past the fade is untouched
+
+def test_fade_in_and_out_silence_the_edges():
+    sample_rate = 24000
+    fade_frames = sample_rate * _FADE_MS // 1000
+    samples = [10000] * (fade_frames * 4)
+    _apply_fades(samples, sample_rate, channels=1)
+    assert samples[0] == 0
+    assert samples[-1] == 0
+    assert samples[fade_frames // 2] < 10000
+    assert samples[-(fade_frames // 2 + 1)] < 10000
+    assert samples[len(samples) // 2] == 10000  # middle of the clip is untouched
 
 
 def test_fade_is_linear_and_handles_negative_samples():
     sample_rate = 1000
-    fade_frames = sample_rate * _FADE_IN_MS // 1000  # 12 frames
-    samples = [-8000] * fade_frames + [-8000] * 5
-    out = read_samples(_apply_fade_in(make_wav(samples, sample_rate)))
+    fade_frames = sample_rate * _FADE_MS // 1000  # 12 frames
+    samples = [-8000] * (fade_frames * 3)
+    _apply_fades(samples, sample_rate, channels=1)
     for i in range(fade_frames):
-        assert out[i] == -8000 * i // fade_frames
-    assert out[fade_frames:] == [-8000] * 5
+        assert samples[i] == -8000 * i // fade_frames
 
 
 def test_stereo_fades_both_channels_per_frame():
     sample_rate = 1000
-    fade_frames = sample_rate * _FADE_IN_MS // 1000
-    frames = fade_frames + 3
-    samples = [6000, -6000] * frames  # L/R interleaved
-    out = read_samples(_apply_fade_in(make_wav(samples, sample_rate, channels=2)))
-    assert out[0] == 0 and out[1] == 0
-    # both channels of the same frame get the same gain
+    fade_frames = sample_rate * _FADE_MS // 1000
+    samples = [6000, -6000] * (fade_frames * 3)  # L/R interleaved
+    _apply_fades(samples, sample_rate, channels=2)
+    assert samples[0] == 0 and samples[1] == 0
     for frame in range(fade_frames):
-        assert out[2 * frame] == 6000 * frame // fade_frames
-        assert out[2 * frame + 1] == -6000 * frame // fade_frames
-    assert out[2 * fade_frames :] == [6000, -6000] * 3
+        assert samples[2 * frame] == 6000 * frame // fade_frames
+        assert samples[2 * frame + 1] == -6000 * frame // fade_frames
 
 
 def test_clip_shorter_than_fade_window_still_ramps():
-    wav = make_wav([5000] * 4, sample_rate=24000)
-    out = read_samples(_apply_fade_in(wav))
+    samples = [5000] * 4
+    _apply_fades(samples, sample_rate=24000, channels=1)
+    assert samples[0] == 0
+    assert all(abs(s) < 5000 for s in samples)
+
+
+# --- _normalize ---
+
+
+def test_normalize_scales_quiet_audio_up():
+    samples = [1000, -1000, 500, -500]
+    _normalize(samples)
+    assert max(abs(s) for s in samples) > 1000
+
+
+def test_normalize_scales_loud_audio_down():
+    samples = [32000, -32000, 16000]
+    _normalize(samples)
+    assert max(abs(s) for s in samples) < 32000
+
+
+def test_normalize_skips_silence():
+    samples = [0, 0, 0]
+    _normalize(samples)
+    assert samples == [0, 0, 0]
+
+
+def test_normalize_clamps_extreme_scale_up():
+    # A near-silent buffer shouldn't get amplified into noise - scale is capped at 2.5x.
+    samples = [1, -1, 0]
+    _normalize(samples)
+    assert max(abs(s) for s in samples) == 2
+
+
+# --- _postprocess (full pipeline / passthrough safety) ---
+
+
+def test_postprocess_fades_a_valid_wav():
+    wav = make_wav([10000] * 2000, sample_rate=24000)
+    out = read_samples(_postprocess(wav))
     assert out[0] == 0
-    assert all(abs(s) < 5000 for s in out)
+    assert out[-1] == 0
 
 
 def test_non_wav_bytes_pass_through_unchanged():
     mp3ish = b"ID3\x04\x00" + b"\xff" * 64
-    assert _apply_fade_in(mp3ish) == mp3ish
+    assert _postprocess(mp3ish) == mp3ish
 
 
 def test_truncated_wav_passes_through_unchanged():
     wav = make_wav([1000] * 100)
     truncated = wav[:20]
-    assert _apply_fade_in(truncated) == truncated
+    assert _postprocess(truncated) == truncated
 
 
 def test_non_16bit_wav_passes_through_unchanged():
-    # 8-bit PCM fmt chunk - fade must not touch it
+    # 8-bit PCM fmt chunk - post-processing must not touch it
     pcm = bytes([128] * 50)
     header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE"
     header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 8000, 1, 8)
     header += b"data" + struct.pack("<I", len(pcm))
     wav = header + pcm
-    assert _apply_fade_in(wav) == wav
+    assert _postprocess(wav) == wav

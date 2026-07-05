@@ -31,13 +31,20 @@ function apiUrl(path) {
 const chatLog = document.getElementById("chat-log");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
-const screenshotToggle = document.getElementById("screenshot-toggle");
-const screenshotIndicator = document.getElementById("screenshot-indicator");
+const sendImageBtn = document.getElementById("send-image-btn");
+const attachedImageIndicator = document.getElementById("attached-image-indicator");
+const attachedImageThumb = document.getElementById("attached-image-thumb");
+const attachedImageRemoveBtn = document.getElementById("attached-image-remove");
+const sendImageModal = document.getElementById("send-image-modal");
+const imageDropzone = document.getElementById("image-dropzone");
+const imageFileInput = document.getElementById("image-file-input");
 const stopNarrationBtn = document.getElementById("stop-narration-btn");
 const micBtn = document.getElementById("mic-btn");
 const liveMicToggle = document.getElementById("live-mic-toggle");
 const narrationAudio = document.getElementById("narration-audio");
 const voiceStatus = document.getElementById("voice-status");
+const sleepWordHintEl = document.getElementById("sleep-word-hint");
+const overlayEditHintEl = document.getElementById("overlay-edit-hint");
 
 // --- Audio device selection (machine-specific, so client-side in localStorage, not server settings) ---
 const MIC_DEVICE_KEY = "lyko-mic-device";
@@ -49,8 +56,18 @@ function setSelectedMicId(id) { localStorage.setItem(MIC_DEVICE_KEY, id || ""); 
 function setSelectedOutputId(id) { localStorage.setItem(OUTPUT_DEVICE_KEY, id || ""); }
 
 // Base capture constraints plus the chosen input device (if the user picked one; empty = system default).
+// echoCancellation is deliberately left OFF too (2026-07-05): Chromium's WebRTC audio processing
+// pipeline it enables includes a transient/click suppressor meant to filter keyboard-typing noise
+// during calls, which reproducibly ate the unvoiced "t's" consonant cluster in "What's" (and likely
+// other short plosive/fricative sounds) - a documented WebRTC quirk, not something specific to our
+// code. Losing that trades away narration.js's barge-in protection against speaker bleed-through
+// false-triggering an interrupt - acceptable, since dropped consonants corrupt every recording.
+// noiseSuppression also stays OFF - same class of gate/duck behavior, different dropouts.
+// autoGainControl stays ON - the hands-free live-mic VAD gate (voice.js's computeAmplitude >
+// vadThreshold/127) is calibrated assuming AGC-normalized levels; turning it off silently broke
+// hands-free detection because raw mic amplitude fell below the threshold and "loud" never triggered.
 function micAudioConstraints() {
-  const constraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const constraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: true };
   const id = getSelectedMicId();
   if (id) constraints.deviceId = { exact: id };
   return constraints;
@@ -94,7 +111,7 @@ const debugDetailBodyEl = document.getElementById("debug-detail-body");
 
 let narrationSpeed = 1.0;
 let narrationVolume = 1.0;
-let includeScreenshot = false;
+let attachedImageDataUrl = null;
 
 // User's uploaded profile picture (shown in chat in place of the initial-letter fallback).
 // Cache-busted with a version stamp each time it's changed, since the URL itself never changes.
@@ -153,11 +170,46 @@ let sleepWordPhrase = "Go to sleep";
 // "Edit overlay" phrase - opens the native overlay's edit mode directly, bypassing the LLM
 // entirely. Detected the same way as wake/sleep word, but independent of hands-free mic state.
 let overlayEditPhraseEnabled = false;
-let overlayEditPhrase = "edit overlay";
+let overlayEditPhrase = "Edit overlay";
 
 // Configurable global hotkey (Ctrl+Shift+O by default) that toggles the native overlay's edit
 // mode; the display string shown/edited in Settings.
 let overlayEditHotkey = "Ctrl+Shift+O";
+
+// Keeps the composer's phrase hints in sync with whatever's currently configured. Call this
+// any time a phrase/enabled flag changes (Settings inputs, config load/save) or hands-free
+// toggles - text baked in once and never revisited is exactly the bug that used to make the
+// wake-word hint show a stale phrase until something unrelated happened to refresh it.
+// `force` is true at a genuine hands-free-just-turned-off transition (stopLiveMic, mic-denied),
+// where the wake hint is always the right thing to show; it's false when only a phrase/enabled
+// setting changed, where voiceStatus might currently hold an unrelated in-progress status (e.g.
+// "Converting audio...") that must not be clobbered - only overwrite if it's blank or already
+// showing our own hint.
+function updateVoiceHints(force = false) {
+  // All three phrases rely on the browser's SpeechRecognition API - on an unsupported browser
+  // none of them are ever actually detected, so showing the hints would be misleading.
+  const supported = typeof wakeWordSupported === "undefined" || wakeWordSupported;
+
+  if (supported && typeof liveMicEnabled !== "undefined" && !liveMicEnabled) {
+    const current = voiceStatus.textContent;
+    const isWakeHint = current === "" || /^Say ".*" to resume$/.test(current);
+    if (force || isWakeHint) setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
+  }
+
+  if (sleepWordHintEl) {
+    const showSleepHint = supported && sleepWordEnabled && typeof liveMicEnabled !== "undefined" && liveMicEnabled;
+    sleepWordHintEl.hidden = !showSleepHint;
+    if (showSleepHint) sleepWordHintEl.textContent = `Say "${sleepWordPhrase}" to stop listening`;
+  }
+
+  if (overlayEditHintEl) {
+    const showOverlayHint = supported && overlayEditPhraseEnabled;
+    overlayEditHintEl.hidden = !showOverlayHint;
+    if (showOverlayHint) {
+      overlayEditHintEl.textContent = `Say "${overlayEditPhrase}" to edit the overlay (must be said in-game)`;
+    }
+  }
+}
 
 // Toast manager — max 3 visible, queues the rest as "+N more", deduplicates by id.
 const _toasts = (() => {
@@ -275,6 +327,7 @@ const CLEARABLE_KEY_FIELDS = {
   "cfg-custom-openai-key": "custom_openai_api_key",
   "cfg-igdb-client-secret": "igdb_client_secret",
   "cfg-steam-api-key": "steam_api_key",
+  "cfg-steamgriddb-api-key": "steamgriddb_api_key",
   "cfg-youtube-client-secret": "youtube_client_secret",
 };
 

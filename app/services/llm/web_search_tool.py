@@ -1,6 +1,8 @@
+import asyncio
 from urllib.parse import quote, urljoin
 
 import httpx
+import trafilatura
 
 from app.core.config import settings
 from app.services.llm.client import get_client
@@ -134,31 +136,68 @@ SEARXNG_HEADERS = {
 }
 
 
+# How many of the top results get a full-page fetch+extract instead of just their SearXNG
+# snippet - kept small since each is an extra page load, and the top few results are almost
+# always the relevant ones for a text query.
+_PAGE_FETCH_MAX_RESULTS = 3
+_PAGE_FETCH_TIMEOUT_SECONDS = 8
+_PAGE_CONTENT_CHAR_CAP = 3000
+
+
+async def _fetch_page_text(http_client: httpx.AsyncClient, url: str) -> str | None:
+    """Fetches a result page and extracts its main article text (nav/ads/boilerplate stripped)
+    via trafilatura, off the event loop since HTML parsing is CPU-bound. Returns None on any
+    failure (blocked, paywalled, JS-rendered, timeout, no extractable content) so the caller falls
+    back to the SearXNG snippet for that result instead of losing it entirely."""
+    if not url:
+        return None
+    try:
+        response = await http_client.get(url, timeout=_PAGE_FETCH_TIMEOUT_SECONDS, follow_redirects=True)
+        response.raise_for_status()
+    except Exception:
+        return None
+    text = await asyncio.to_thread(trafilatura.extract, response.text)
+    return text[:_PAGE_CONTENT_CHAR_CAP] if text else None
+
+
 async def _execute_web_search_searxng(query: str) -> str:
     async with httpx.AsyncClient(
         base_url=settings.searxng_base_url, timeout=15, headers=SEARXNG_HEADERS
     ) as http_client:
         try:
-            response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "general"})
+            response = await http_client.get("/search", params={"q": query, "format": "json", "categories": "web"})
             response.raise_for_status()
         except Exception as exc:
             return f"Web search failed: {exc}"
 
         results = response.json().get("results", [])[:5]
-        if results:
-            return "\n\n".join(
-                f"{r.get('title', '')}\n{r.get('url', '')}\n{r.get('content', '')}" for r in results
+        if not results:
+            # No hits. Over-restrictive queries (exact-phrase quotes, long AND/OR chains) are the
+            # usual cause and make the model reword and re-search in a loop — tell it so it
+            # broadens instead. Deliberately no image lookup here: web_search is a text tool called
+            # in the hot agent loop, and validating image candidates (streaming up to 8 URLs) added
+            # seconds per call for no text value. The model has show_image for pictures.
+            return (
+                f"No results for '{query}'. If the query used quoted phrases or many required terms, "
+                "retry ONCE with a shorter, unquoted version; otherwise tell the user you couldn't find it."
             )
 
-        # No general-category hits. Over-restrictive queries (exact-phrase quotes, long AND/OR
-        # chains) are the usual cause and make the model reword and re-search in a loop — tell it
-        # so it broadens instead. Deliberately no image lookup here: web_search is a text tool
-        # called in the hot agent loop, and validating image candidates (streaming up to 8 URLs)
-        # added seconds per call for no text value. The model has show_image for pictures.
-        return (
-            f"No results for '{query}'. If the query used quoted phrases or many required terms, "
-            "retry ONCE with a shorter, unquoted version; otherwise tell the user you couldn't find it."
-        )
+        # Fetch full page content for the top few results instead of trusting SearXNG's one-line
+        # snippet - snippets alone were too shallow for specific questions (e.g. "how do I loot
+        # this particular safe box"), where the real answer lives a few paragraphs into a wiki
+        # page. Remaining lower-ranked results still get their snippet, no fetch.
+        top = results[:_PAGE_FETCH_MAX_RESULTS]
+        pages = await asyncio.gather(*[_fetch_page_text(http_client, r.get("url", "")) for r in top])
+
+        blocks = [
+            f"{r.get('title', '')}\n{r.get('url', '')}\n{page_text or r.get('content', '')}"
+            for r, page_text in zip(top, pages)
+        ]
+        blocks += [
+            f"{r.get('title', '')}\n{r.get('url', '')}\n{r.get('content', '')}"
+            for r in results[_PAGE_FETCH_MAX_RESULTS:]
+        ]
+        return "\n\n".join(blocks)
 
 
 async def execute_web_search(arguments: dict) -> str:

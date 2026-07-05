@@ -10,10 +10,11 @@ import asyncio
 import json
 import logging
 
-from app.core import game_state, memory, observations
+from app.core import game_state, game_state_training_data, memory, observations
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
 from app.services.llm.client import chat_completion
+from app.services.llm.web_search_tool import execute_web_search
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,12 @@ CONFIRMATION_THRESHOLD = 12
 # One pass at a time per process+session - the poller can hit the threshold again while a
 # previous pass is still running.
 _in_flight: set[tuple[str, str | None]] = set()
+
+# This pass runs rarely (once per 12+ pending observations) compared to the extraction pass
+# (every poll window), so it can afford to actually dig - allow several search rounds in the same
+# review instead of just one, so it can e.g. look up an unfamiliar quest name, then follow up on
+# what that search turns up, before finalizing its save/remove/clear decisions.
+MAX_SEARCH_ROUNDS = 4
 
 
 def _format_observations_full(entries: list[dict]) -> str:
@@ -51,30 +58,77 @@ async def confirm_observations(process: str, session_id: str | None) -> None:
 
         known_facts = memory.format_memories_for_prompt(process, session_id) or "Known facts about the user: none yet."
         game_state_text = game_state.format_game_state_for_prompt()
+        training_data = game_state_training_data.format_training_data_for_prompt(process)
+        user_content = (
+            f"{current_datetime_context()}\n\nTracked game process: {process}\n\n{known_facts}\n\n"
+            + (f"{game_state_text}\n\n" if game_state_text else "")
+            + (f"{training_data}\n\n" if training_data else "")
+            + _format_observations_full(entries)
+        )
         messages = [
             {"role": "system", "content": load_prompt("observation_confirmation")},
-            {
-                "role": "user",
-                "content": (
-                    f"{current_datetime_context()}\n\nTracked game process: {process}\n\n{known_facts}\n\n"
-                    + (f"{game_state_text}\n\n" if game_state_text else "")
-                    + _format_observations_full(entries)
-                ),
-            },
+            {"role": "user", "content": user_content},
         ]
+        model = settings.memory_extraction_model or None
+        provider = settings.memory_extraction_provider or settings.llm_provider
 
         try:
             raw = await chat_completion(
                 messages,
-                model=settings.memory_extraction_model or None,
+                model=model,
                 response_format={"type": "json_object"},
                 source="observation_confirmation",
-                provider=settings.memory_extraction_provider or settings.llm_provider,
+                provider=provider,
             )
             data = json.loads(raw)
         except Exception:
             logger.exception("Observation confirmation pass failed for process=%r", process)
             return
+
+        # Research loop: this pass runs rarely, so unlike the extraction pass it can afford to dig
+        # across several rounds - each one may flag something new to check (a search result that
+        # raises a follow-up question, a second unfamiliar name) before finalizing its decisions.
+        for round_num in range(1, MAX_SEARCH_ROUNDS + 1):
+            search_query = data.get("web_search_query")
+            if not (isinstance(search_query, str) and search_query.strip()):
+                break
+            search_query = search_query.strip()
+            logger.info(
+                "Observation confirmation: requested web search %r for process=%r (round %d/%d)",
+                search_query, process, round_num, MAX_SEARCH_ROUNDS,
+            )
+            try:
+                results = await execute_web_search({"query": search_query})
+            except Exception:
+                # Keep the current output - a failed search must not cost us the whole review.
+                logger.exception("Observation confirmation web-search round failed for process=%r", process)
+                break
+            last_round = round_num == MAX_SEARCH_ROUNDS
+            followup = (
+                f"Web search results for your query \"{search_query}\":\n{results}\n\n"
+                + (
+                    "Use them, together with anything you've already learned this review, to finalize "
+                    "your save/remove/clear decisions - you've used your last search round, so do not "
+                    "request another."
+                    if last_round else
+                    "Use them to refine your understanding. If you now need to check something else "
+                    "that would change a decision, set \"web_search_query\" again; otherwise set it to "
+                    "null and finalize your save/remove/clear decisions."
+                )
+            )
+            messages = messages + [{"role": "assistant", "content": raw}, {"role": "user", "content": followup}]
+            try:
+                raw = await chat_completion(
+                    messages,
+                    model=model,
+                    response_format={"type": "json_object"},
+                    source="observation_confirmation",
+                    provider=provider,
+                )
+                data = json.loads(raw)
+            except Exception:
+                logger.exception("Observation confirmation pass failed for process=%r on search round %d", process, round_num)
+                break
 
         saved = 0
         for fact in data.get("save") or []:

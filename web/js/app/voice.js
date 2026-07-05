@@ -37,6 +37,18 @@ async function blobToWavBlob(blob) {
   return encodeWav(audioBuffer.getChannelData(0), audioBuffer.sampleRate);
 }
 
+let voiceAbortController = null;
+
+// Aborts whatever chat request (text or voice) is currently in flight. Called the instant the
+// sleep word or overlay-edit-phrase is detected, so the user isn't stuck waiting out a reply to
+// a question they've already moved on from. chatAbortController lives in chat-stream.js — safe to
+// reference here since classic <script> tags share one global scope (see CLAUDE.md).
+function cancelInFlightRequest() {
+  chatAbortController?.abort();
+  voiceAbortController?.abort();
+  stopNarration();
+}
+
 async function sendDirectVoice(wavBlob) {
   // Sleep word landed during finalize (after its own suppression check) — don't send. Reset
   // awaitingReply (finalize set it true) so a later hands-free session isn't left blocked.
@@ -56,6 +68,8 @@ async function sendDirectVoice(wavBlob) {
 
   stopNarration();
   awaitingReply = true;
+  let assistantEl = null;
+  let fullReply = "";
   try {
     // Snapshot the history BEFORE the new voice turn is added to it - the audio itself is what
     // carries this turn to the backend, so including a placeholder text message too would
@@ -79,12 +93,18 @@ async function sendDirectVoice(wavBlob) {
     const formData = new FormData();
     formData.append("audio", wavBlob, "voice.wav");
     formData.append("history", historyJson);
-    formData.append("include_screenshot", String(includeScreenshot));
+    if (attachedImageDataUrl) formData.append("image", attachedImageDataUrl);
     // When narration is on, the frontend drives overlay reply toasts itself (timed to narration);
     // tell the backend to skip its fixed-timer push so they don't double up.
     formData.append("client_overlay_toasts", String(document.getElementById("cfg-narrate").checked));
+    clearAttachedImage();
 
-    const response = await fetch("/api/chat/voice/stream", { method: "POST", body: formData });
+    voiceAbortController = new AbortController();
+    const response = await fetch("/api/chat/voice/stream", {
+      method: "POST",
+      body: formData,
+      signal: voiceAbortController.signal,
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -95,8 +115,7 @@ async function sendDirectVoice(wavBlob) {
       return;
     }
 
-    const assistantEl = appendMessage("assistant", "", null, true);
-    let fullReply = "";
+    assistantEl = appendMessage("assistant", "", null, true);
     let stopListening = false;
     let transcript = null;
     // Sentence-pipelined narration, same as the text path - narrating only after the full
@@ -179,9 +198,21 @@ async function sendDirectVoice(wavBlob) {
       await enqueueNarration(sentenceBuffer.trim());
     }
   } catch (err) {
-    setVoiceStatus("Voice chat failed", "error");
+    if (err.name === "AbortError") {
+      // Cancelled from cancelInFlightRequest() (sleep word / edit-overlay phrase) - persist
+      // whatever reply text had already streamed in, or drop the empty placeholder bubble.
+      if (fullReply) {
+        addMessageToChat(chat, "assistant", fullReply);
+      } else if (assistantEl) {
+        assistantEl.closest(".message")?.remove();
+      }
+      setVoiceStatus(liveMicEnabled ? "Listening..." : "");
+    } else {
+      setVoiceStatus("Voice chat failed", "error");
+    }
   } finally {
     awaitingReply = false;
+    voiceAbortController = null;
   }
 }
 
@@ -335,6 +366,10 @@ function extractFromRing(startAbs, endAbs) {
   return result;
 }
 
+// Loaded once per shared AudioContext (see sfx.js's ensureAudioCtx - the context persists for the
+// whole session, so re-adding the module on every startLiveMic() call would be wasted work).
+let micWorkletLoadedFor = null;
+
 async function startLiveMic() {
   try {
     liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
@@ -350,6 +385,11 @@ async function startLiveMic() {
     await audioCtx.resume();
   }
 
+  if (micWorkletLoadedFor !== audioCtx) {
+    await audioCtx.audioWorklet.addModule("js/app/mic-worklet-processor.js");
+    micWorkletLoadedFor = audioCtx;
+  }
+
   ringSampleRate = audioCtx.sampleRate;
   ringBuffer = new Float32Array(Math.ceil(RING_BUFFER_SECONDS * ringSampleRate));
   absoluteSampleCount = 0;
@@ -357,12 +397,25 @@ async function startLiveMic() {
   liveSilenceStart = null;
 
   liveSource = audioCtx.createMediaStreamSource(liveMicStream);
-  liveProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+  // AudioWorkletNode's process() runs on the dedicated audio rendering thread, so unlike the
+  // ScriptProcessorNode this replaces, main-thread jank can't delay or drop capture buffers -
+  // that was silently losing chunks of audio mid-utterance during hands-free listening.
+  liveProcessor = new AudioWorkletNode(audioCtx, "mic-capture-processor", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    channelCount: 1,
+    // "explicit" forces the Web Audio API to actually downmix a stereo (or wider) input to mono
+    // before process() sees it - the default "max" mode does NOT downmix, so a stereo capture
+    // device would leave channel 1 silently discarded (mic-worklet-processor.js only reads
+    // inputs[0][0]) instead of merged in. The ScriptProcessorNode this replaced forced true mono
+    // via its (4096, 1, 1) constructor args; this restores that behavior for AudioWorkletNode.
+    channelCountMode: "explicit",
+  });
   liveSilentGain = audioCtx.createGain();
   liveSilentGain.gain.value = 0; // keep the processor alive without echoing mic audio to speakers
 
-  liveProcessor.onaudioprocess = (event) => {
-    const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+  liveProcessor.port.onmessage = (event) => {
+    const samples = event.data;
     writeToRing(samples);
 
     if (awaitingReply) {
@@ -410,6 +463,7 @@ async function startLiveMic() {
 
   setVoiceStatus("Listening...");
   setOverlayHandsFree(true);
+  updateVoiceHints();
 }
 
 // Tell the native overlay whether hands-free (live-mic) listening is active so it
@@ -461,7 +515,7 @@ async function finalizeLiveUtterance() {
 
 function stopLiveMic() {
   if (liveProcessor) {
-    liveProcessor.onaudioprocess = null;
+    liveProcessor.port.onmessage = null;
     liveProcessor.disconnect();
     liveProcessor = null;
   }
@@ -480,8 +534,8 @@ function stopLiveMic() {
   liveRecording = false;
   ringBuffer = null;
   micBtn.classList.remove("recording");
-  setVoiceStatus(wakeWordEnabled ? `Say "${wakeWordPhrase}" to resume` : "");
   setOverlayHandsFree(false);
+  updateVoiceHints(true);
 }
 
 liveMicToggle.addEventListener("click", () => {

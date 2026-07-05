@@ -558,10 +558,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   box-shadow: 0 0 8px var(--blue-glow);
 }
 .message.assistant .msg-avatar {
-  background: var(--surface-2);
-  border: 1px solid rgba(91,95,199,0.25);
+  width: 38px; height: 38px;
+  background: none;
+  border: none;
+  border-radius: 0;
 }
 .msg-avatar img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
+.message.assistant .msg-avatar img { padding: 0; }
 .message.user .msg-avatar img { object-fit: cover; padding: 0; }
 
 .msg-role-name {
@@ -603,6 +606,52 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   word-break: break-word;
   color: var(--t1);
 }
+
+/* ── In-place message editing ── */
+.msg-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-end;
+  gap: 6px;
+  width: 100%;
+  max-width: 80%;
+}
+.msg-edit-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border-radius: var(--r3);
+  border: 1px solid var(--accent);
+  background: var(--surface-3);
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.65;
+  resize: vertical;
+}
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.msg-edit-cancel, .msg-edit-save {
+  padding: 5px 12px;
+  border-radius: var(--r1);
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.msg-edit-cancel {
+  background: rgba(255,255,255,0.03);
+  color: var(--t2);
+}
+.msg-edit-cancel:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+.msg-edit-save {
+  background: var(--accent-grad);
+  color: #fff;
+  border-color: transparent;
+}
+.msg-edit-save:hover { box-shadow: 0 2px 10px var(--accent-glow); }
 
 /* User: shrink to content, right-aligned */
 .message.user .msg-meta {
@@ -798,11 +847,71 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .voice-status.recording { color: #ff8c8c; }
 .voice-status.error     { color: var(--red); }
 
+.voice-hint {
+  font-size: 11px;
+  color: var(--t3);
+  text-align: center;
+  margin-bottom: 5px;
+}
+
 .screenshot-indicator {
   font-size: 11px;
   color: #6fa8ff;
-  text-align: center;
   margin-bottom: 5px;
+}
+.screenshot-indicator:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.attached-image-thumb {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: var(--r1);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.attached-image-remove {
+  border: none;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color var(--ease);
+}
+.attached-image-remove:hover { color: var(--t1); }
+
+.image-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 36px 20px;
+  border: 1.5px dashed var(--glass-border);
+  border-radius: var(--r3);
+  color: var(--t3);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease), color var(--ease);
+}
+.image-dropzone p { margin: 0; font-size: 13px; max-width: 320px; }
+.image-dropzone:hover,
+.image-dropzone:focus-visible {
+  border-color: var(--accent-2);
+  color: var(--t1);
+  background: rgba(91,95,199,0.06);
+  outline: none;
+}
+.image-dropzone.drag-over {
+  border-color: var(--accent-2);
+  background: rgba(91,95,199,0.12);
+  color: var(--t1);
 }
 
 .chat-form {
@@ -1393,13 +1502,157 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .floating-panel-close:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
 
+.floating-panel-pin {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--r1);
+  border: none;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.floating-panel-pin:hover { background: rgba(255,255,255,0.08); color: var(--t1); }
+.floating-panel-pin.active { color: var(--accent); }
+
 .floating-panel .game-state-fields { padding: 10px 12px; }
 
 .youtube-player-panel {
   top: auto;
   bottom: 16px;
-  right: 16px;
+  right: auto;
+  left: 16px;
   width: 320px;
+  position: fixed;
+}
+
+/* Docked mode - sits in normal document flow above the chat log (chat-panel's flex layout
+   shrinks .chat-log to make room) instead of floating over the page. Combined-class selector
+   so it outranks the plain .youtube-player-panel rule above without needing !important - inline
+   styles left over from a drag/resize still take precedence, so youtube-player.js clears those
+   when toggling into dock mode. */
+.youtube-player-panel.youtube-player-panel--docked {
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* Match .composer/.message's column width so the docked player lines up with the chat content
+     instead of stretching edge-to-edge across the (often much wider) chat-panel flex container. */
+  width: calc(100% - 40px);
+  max-width: 780px;
+  margin: 12px auto 0;
+}
+.youtube-player-panel--docked .youtube-player-resize-grip { display: none; }
+.youtube-player-panel--docked .floating-panel-header { cursor: default; }
+
+.youtube-player-title-channel { color: var(--accent); }
+
+/* Collapsed mode - hides the video frame only, keeping the seek bar/transport/volume controls so
+   audio (still playing - a hidden iframe doesn't pause it) can be controlled without the video
+   taking up space. Works the same in both docked and floating layouts. */
+.youtube-player-panel--collapsed .youtube-player-frame { display: none; }
+.youtube-player-panel-toggle-icon { transition: transform var(--ease); }
+.youtube-player-panel--collapsed .youtube-player-panel-toggle-icon { transform: rotate(180deg); }
+
+/* Shared by both the playlists list and the search/browse results list below - same row shape,
+   different data source. */
+.youtube-player-list-panel {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--glass-border);
+}
+.youtube-player-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.youtube-player-list-item:hover { background: rgba(255,255,255,0.06); color: var(--t1); }
+.youtube-player-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youtube-player-list-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--t3);
+}
+
+.youtube-player-browse-form {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--glass-border);
+}
+.youtube-player-browse-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--r1);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--t1);
+  font-size: 12px;
+}
+.youtube-player-browse-form button {
+  padding: 0 12px;
+  border-radius: var(--r1);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Fixed toolbar over the top-left of the chat view - independent of the player's docked/floating
+   state, so the player can be opened even when nothing has played yet this session. */
+.chat-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 60;
+  display: flex;
+  gap: 6px;
+}
+.chat-toolbar-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: var(--r1);
+  border: none;
+  background: rgba(255,255,255,0.05);
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.chat-toolbar-btn:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
+
+.youtube-player-resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 1;
+}
+.youtube-player-resize-grip::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--t3);
+  border-bottom: 2px solid var(--t3);
+  opacity: 0.6;
 }
 
 .youtube-player-frame {
@@ -1409,15 +1662,57 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 .youtube-player-frame iframe { width: 100%; height: 100%; display: block; border: 0; }
 
+.youtube-player-seek {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+}
+.youtube-player-time {
+  font-size: 11px;
+  color: var(--t3);
+  min-width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.youtube-player-seekbar {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Plain flex row - the two queue labels are the only flex:1 items, so they (and only they) grow
+   to fill whatever space is left, splitting it evenly and keeping the transport buttons visually
+   centered even with no text - everything else (icon group, buttons, volume) is flex-shrink:0. A
+   label with empty text still occupies its flexed share of space (no `hidden` toggling needed for
+   the centered look), it just renders nothing. */
 .youtube-player-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 8px;
+  gap: 8px;
+  padding: 8px 12px;
   border-top: 1px solid var(--glass-border);
 }
+.youtube-player-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.youtube-player-queue-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.youtube-player-queue-label--prev { text-align: right; }
+.youtube-player-queue-label--next { text-align: left; }
 .youtube-player-controls button {
+  flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px;
   border-radius: var(--r1);
@@ -1429,6 +1724,13 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   transition: background var(--ease);
 }
 .youtube-player-controls button:hover { background: rgba(255,255,255,0.1); }
+
+.youtube-player-volume {
+  flex-shrink: 0;
+  width: 90px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* ════════════════════════════════════════════════════
    TOASTS
@@ -1919,6 +2221,38 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 
 /* ════════════════════════════════════════════════════
+   PROVIDER ROUTING PICKER
+════════════════════════════════════════════════════ */
+.provider-picker-btn { margin-top: 6px; align-self: flex-start; }
+
+.table-scroll { overflow-x: auto; margin: 10px 0; }
+
+.provider-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.provider-table th, .provider-table td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+}
+.provider-table th {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--t3);
+  cursor: pointer;
+  user-select: none;
+}
+.provider-table th:hover { color: var(--t1); }
+.provider-table th.sorted::after { content: " ▾"; }
+.provider-table th.sorted.sort-asc::after { content: " ▴"; }
+.provider-table tbody tr:hover { background: var(--surface-3); }
+
+/* ════════════════════════════════════════════════════
    SETUP BANNER — shown while no API key is configured
 ════════════════════════════════════════════════════ */
 .setup-banner {
@@ -2179,6 +2513,259 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .journal-observation .memory-item-text {
   color: var(--t3);
   font-style: italic;
+}
+
+.journal-library-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.journal-library-toolbar select {
+  min-width: 150px;
+}
+#journal-sort-dir {
+  padding: 6px 10px;
+  line-height: 1;
+}
+
+/* My Games library grid — Steam-like poster cards, cover art fetched from Steam/IGDB. */
+.journal-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+.journal-game-card {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border-radius: var(--r3);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.journal-game-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(91,95,199,0.4);
+}
+.journal-game-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+}
+.journal-game-card--placeholder {
+  background: linear-gradient(160deg, rgba(91,95,199,0.25), rgba(91,95,199,0.05));
+}
+.journal-game-card-initial {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--t2);
+}
+.journal-game-card-caption {
+  margin-top: auto;
+  position: relative;
+  z-index: 1;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t1);
+  text-align: left;
+  background: linear-gradient(0deg, rgba(0,0,0,0.75), rgba(0,0,0,0));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.journal-game-card-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  /* Cover art can be any brightness/color underneath - an opaque chip + shadow keeps this
+     legible instead of the translucent tint that disappears against light/busy art. */
+  background: rgba(10,10,20,0.85);
+  border-color: rgba(255,255,255,0.25);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
+}
+
+.journal-detail-info-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.journal-detail-cover {
+  width: 110px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--r2);
+  border: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+.journal-description {
+  color: var(--t2);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* My Profiles — compact clickable cards (a game's playthroughs), not the full inline detail
+   the old flat Journal list used. Selecting one reveals its memories/observations below. */
+.journal-profiles-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.journal-profiles-row-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--t3);
+}
+/* Vertical dividers between the three groups in the tab-cards row (Universal Info | Profiles | Training Data). */
+.journal-tabs-vsep {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255,255,255,0.16);
+}
+.journal-profile-card {
+  position: relative;
+  padding: 10px 14px;
+  border-radius: var(--r2);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--t2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.journal-profile-card:hover {
+  border-color: rgba(91,95,199,0.4);
+  color: var(--t1);
+}
+.journal-profile-card--selected {
+  border-color: rgba(91,95,199,0.6);
+  background: rgba(91,95,199,0.1);
+  color: var(--t1);
+}
+.journal-profile-card--create {
+  border-style: dashed;
+  color: var(--t3);
+}
+.journal-profile-card-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  background: rgba(224,92,92,0.85);
+  color: #fff;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.journal-profile-card:hover .journal-profile-card-remove {
+  opacity: 1;
+}
+
+.journal-detail-separator {
+  height: 1px;
+  background: rgba(255,255,255,0.16);
+  margin: 6px 0;
+  flex-shrink: 0;
+}
+
+/* Content pane for the currently-selected tab-card below it - a clearly tinted background
+   (not just another plain box) so which "mode" is showing is obvious at a glance. */
+.journal-themed-card {
+  border-radius: var(--r3);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-width: 1px;
+  border-style: solid;
+}
+.journal-themed-card--memories {
+  background: rgba(91,95,199,0.12);
+  border-color: rgba(91,95,199,0.4);
+}
+.journal-themed-card--profile {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--glass-border);
+}
+.journal-themed-card--training {
+  background: rgba(74,222,128,0.1);
+  border-color: rgba(74,222,128,0.35);
+}
+/* The textarea shouldn't draw its own competing native border/background - it should read as
+   part of the tinted card around it, not a separate plain box sitting inside it. */
+.journal-themed-card textarea {
+  background: rgba(0,0,0,0.15);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--r2);
+  color: var(--t1);
+}
+.journal-themed-card--training textarea {
+  height: 340px;
+}
+
+/* The unified tab-card selector row: Universal Info and Training Data get the same tint as
+   their matching content pane above, so the color ties the tab to what it shows. */
+.journal-profile-card--universal {
+  border-color: rgba(91,95,199,0.4);
+  background: rgba(91,95,199,0.1);
+}
+.journal-profile-card--training {
+  border-color: rgba(74,222,128,0.35);
+  background: rgba(74,222,128,0.08);
+}
+.journal-profile-card--universal.journal-profile-card--selected {
+  background: rgba(91,95,199,0.22);
+  border-color: rgba(91,95,199,0.7);
+}
+.journal-profile-card--training.journal-profile-card--selected {
+  background: rgba(74,222,128,0.2);
+  border-color: rgba(74,222,128,0.6);
+}
+
+#journal-detail-view:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#journal-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#journal-detail-content .journal-game-title {
+  cursor: text;
+}
+#journal-detail-content textarea {
+  width: 100%;
+  resize: vertical;
 }
 
 /* ════════════════════════════════════════════════════

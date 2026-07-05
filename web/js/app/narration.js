@@ -35,6 +35,26 @@ async function synthesizeSentence(text) {
 // and their tails leaked to TTS on the next delta.
 const EMOJI_REGEX = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}]/gu;
 
+// The Kokoro TTS backend's phonemizer (misaki) reads some ALL-CAPS two/three-letter tokens as
+// chemical formulas instead of acronyms - e.g. "HP" becomes "Hydrogen Phosphorus" because H and P
+// are both valid single-letter element symbols. Dotting the letters ("H.P.") keeps them adjacent
+// enough to still read as an acronym while breaking the formula match. Covers common RPG/gaming
+// stat shorthand that collides with element symbols (H, B, C, N, O, F, P, S, K, V, Y, I, W, U).
+const GAMING_ACRONYM_FIXES = {
+  HP: "H.P.",
+  MP: "M.P.",
+  SP: "S.P.",
+  XP: "X.P.",
+  AP: "A.P.",
+  OP: "O.P.",
+  NP: "N.P.",
+  CP: "C.P.",
+  FP: "F.P.",
+  BP: "B.P.",
+  DPS: "D.P.S.",
+};
+const GAMING_ACRONYM_REGEX = new RegExp(`\\b(${Object.keys(GAMING_ACRONYM_FIXES).join("|")})\\b`, "g");
+
 function stripMarkdownForNarration(text) {
   return text
     .replace(/^```[^\n]*$/gm, "")
@@ -47,6 +67,7 @@ function stripMarkdownForNarration(text) {
     .replace(/^[ \t]*(?:[-*_][ \t]*){3,}$/gm, "")
     .replace(/[*_#`~]+/g, "")
     .replace(EMOJI_REGEX, "")
+    .replace(GAMING_ACRONYM_REGEX, (m) => GAMING_ACRONYM_FIXES[m])
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 }

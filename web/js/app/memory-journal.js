@@ -119,17 +119,71 @@ document.getElementById("memory-delete-all").addEventListener("click", async () 
 });
 
 // --- Gaming Journal modal ---
-// Per-game view of everything the companion knows: game-scope memories (hold across all
-// playthroughs), profiles (named sessions) with their playthrough-scope memories, and each
-// profile's unconfirmed screen observations. Also hosts the Game Awareness settings tab,
-// moved out of Settings.
+// "My Games": a Steam-like library grid (cover art fetched from Steam/IGDB) of every game the
+// companion knows something about. Clicking a card swaps in that game's full detail view -
+// game-scope memories (hold across all playthroughs), profiles (named sessions) with their
+// playthrough-scope memories, unconfirmed screen observations, and its training-data document.
+// "Journal Settings" (the former "Game Awareness" tab) still hosts the global OCR/tracker settings.
 
 const gamingJournalModal = document.getElementById("gaming-journal-modal");
 const gamingJournalBtn = document.getElementById("gaming-journal-btn");
 const gamingJournalList = document.getElementById("gaming-journal-list");
+const journalLibraryView = document.getElementById("journal-library-view");
+const journalDetailView = document.getElementById("journal-detail-view");
+const journalDetailContent = document.getElementById("journal-detail-content");
+const journalDetailBack = document.getElementById("journal-detail-back");
+const journalSortSelect = document.getElementById("journal-sort-select");
+const journalSortDirBtn = document.getElementById("journal-sort-dir");
+
+let allJournalGames = [];
+
+const JOURNAL_SORT_KEY = "lyko-journal-sort";
+const JOURNAL_SORT_DIR_KEY = "lyko-journal-sort-dir";
+let journalSortBy = localStorage.getItem(JOURNAL_SORT_KEY) || "last_played";
+let journalSortDir = localStorage.getItem(JOURNAL_SORT_DIR_KEY) || "desc";
+journalSortSelect.value = journalSortBy;
+journalSortDirBtn.textContent = journalSortDir === "asc" ? "↑" : "↓";
+
+function sortJournalGames(games) {
+  const dir = journalSortDir === "desc" ? -1 : 1;
+  const sorted = [...games];
+  sorted.sort((a, b) => {
+    if (journalSortBy === "title") {
+      return dir * (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+    }
+    // last_played / date_added: null/missing values always sort last, regardless of direction.
+    const av = a[journalSortBy];
+    const bv = b[journalSortBy];
+    if (!av && !bv) return 0;
+    if (!av) return 1;
+    if (!bv) return -1;
+    return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+  return sorted;
+}
+
+journalSortSelect.addEventListener("change", () => {
+  journalSortBy = journalSortSelect.value;
+  localStorage.setItem(JOURNAL_SORT_KEY, journalSortBy);
+  renderLibrary(sortJournalGames(allJournalGames));
+});
+
+journalSortDirBtn.addEventListener("click", () => {
+  journalSortDir = journalSortDir === "asc" ? "desc" : "asc";
+  localStorage.setItem(JOURNAL_SORT_DIR_KEY, journalSortDir);
+  journalSortDirBtn.textContent = journalSortDir === "asc" ? "↑" : "↓";
+  renderLibrary(sortJournalGames(allJournalGames));
+});
+// Which game's detail view is open, and which single tab-card is selected in it - one of
+// "universal" (game-scope memories), "training", or a profile's session_id. Reset only when a
+// *different* game is opened, so re-renders triggered by refreshJournalDetail() keep the place.
+let journalSelectedProcess = null;
+let journalSelectedTab = "universal";
+let journalShowingCreateProfileForm = false;
 
 gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
+  showJournalLibrary();
   loadGamingJournal();
   loadGameStateProcessLists();
 });
@@ -140,6 +194,14 @@ document.getElementById("journal-delete-all").addEventListener("click", async ()
   await loadGamingJournal();
 });
 
+journalDetailBack.addEventListener("click", showJournalLibrary);
+
+function showJournalLibrary() {
+  journalLibraryView.hidden = false;
+  journalDetailView.hidden = true;
+  journalDetailContent.innerHTML = "";
+}
+
 async function loadGamingJournal() {
   let games = [];
   try {
@@ -148,7 +210,8 @@ async function loadGamingJournal() {
   } catch (err) {
     games = [];
   }
-  renderGamingJournal(games);
+  allJournalGames = games;
+  renderLibrary(sortJournalGames(games));
 }
 
 function buildJournalAddForm(placeholder, buildBody) {
@@ -174,7 +237,7 @@ function buildJournalAddForm(placeholder, buildBody) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildBody(content)),
     });
-    await loadGamingJournal();
+    await refreshJournalDetail(buildBody(content).process);
   });
   return form;
 }
@@ -214,7 +277,10 @@ function buildProfileAddForm(process) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (response.ok) await loadGamingJournal();
+    if (response.ok) {
+      journalShowingCreateProfileForm = false;
+      await refreshJournalDetail(process);
+    }
   });
   return form;
 }
@@ -226,161 +292,399 @@ function buildSectionLabel(text) {
   return label;
 }
 
-function renderGamingJournal(games) {
+// Re-fetches the journal list and, if the detail view is still open on this process, re-renders
+// it in place instead of bouncing back to the library grid.
+async function refreshJournalDetail(process) {
+  await loadGamingJournal();
+  if (!journalDetailView.hidden) {
+    const game = allJournalGames.find((g) => g.process.toLowerCase() === (process || "").toLowerCase());
+    if (game) openGameDetail(game);
+    else showJournalLibrary();
+  }
+}
+
+function renderLibrary(games) {
   gamingJournalList.innerHTML = "";
 
   if (games.length === 0) {
     const hint = document.createElement("div");
     hint.className = "memory-empty-hint";
-    hint.textContent = "No games yet - approve a game for tracking (Game Awareness tab) or let the companion learn about one in conversation.";
+    hint.textContent = "No games yet - approve a game for tracking (Journal Settings tab) or let the companion learn about one in conversation.";
     gamingJournalList.appendChild(hint);
     return;
   }
 
   for (const game of games) {
-    const card = document.createElement("div");
-    card.className = "journal-game";
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "journal-game-card" + (game.cover_url ? "" : " journal-game-card--placeholder");
+    card.title = game.title;
 
-    const header = document.createElement("div");
-    header.className = "journal-game-header";
-    const title = document.createElement("span");
-    title.className = "journal-game-title";
-    title.textContent = game.process;
-    header.appendChild(title);
+    if (game.cover_url) {
+      const img = document.createElement("img");
+      img.src = game.cover_url;
+      img.alt = game.title;
+      card.appendChild(img);
+    } else {
+      const initial = document.createElement("span");
+      initial.className = "journal-game-card-initial";
+      initial.textContent = (game.title || "?").trim().charAt(0).toUpperCase();
+      card.appendChild(initial);
+    }
+
+    const caption = document.createElement("span");
+    caption.className = "journal-game-card-caption";
+    caption.textContent = game.title;
+    card.appendChild(caption);
+
     if (game.tracked) {
       const badge = document.createElement("span");
-      badge.className = "journal-badge";
+      badge.className = "journal-badge journal-game-card-badge";
       badge.textContent = "tracked";
       badge.title = "Approved for background OCR awareness";
-      header.appendChild(badge);
+      card.appendChild(badge);
     }
-    header.appendChild(buildJournalActionBtn(
-      "Delete game",
-      "Remove this game and everything tracked for it (profiles, memories, trackers, training, observations)",
-      async () => {
-        if (!(await showConfirm(`Delete "${game.process}" and ALL its profiles, game/playthrough memories, trackers, training data, and observations? It will also be un-approved for OCR. This can't be undone.`, { title: "Delete game", danger: true, confirmText: "Delete" }))) return;
-        const response = await fetch(`/api/game-state/games/${encodeURIComponent(game.process)}`, { method: "DELETE" });
-        if (response.ok) loadGamingJournal();
-      },
-      true,
-    ));
-    card.appendChild(header);
 
-    // Game-scope memories: hold across every playthrough of this game.
-    card.appendChild(buildSectionLabel("Game memories (all playthroughs)"));
-    const gameMemList = document.createElement("div");
-    gameMemList.className = "memory-list";
-    if (game.memories.length === 0) {
-      const hint = document.createElement("div");
-      hint.className = "memory-empty-hint";
-      hint.textContent = "Nothing saved for this game yet.";
-      gameMemList.appendChild(hint);
+    card.addEventListener("click", () => openGameDetail(game));
+    gamingJournalList.appendChild(card);
+
+    if (!game.cover_url || game.description == null) {
+      fetch(`/api/game-art/${encodeURIComponent(game.process)}/fetch`, { method: "POST" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((art) => {
+          if (!art) return;
+          game.description = art.description || null;
+          if (!art.cover_url) return;
+          const img = document.createElement("img");
+          img.src = art.cover_url;
+          img.alt = art.title || game.title;
+          card.classList.remove("journal-game-card--placeholder");
+          card.replaceChild(img, card.firstChild);
+        })
+        .catch(() => {});
     }
-    for (const entry of game.memories) {
-      gameMemList.appendChild(buildMemoryItem(entry, loadGamingJournal));
+  }
+}
+
+function openGameDetail(game) {
+  journalLibraryView.hidden = true;
+  journalDetailView.hidden = false;
+  journalDetailContent.innerHTML = "";
+
+  if (journalSelectedProcess !== game.process) {
+    journalSelectedProcess = game.process;
+    // Default to the universal (game-scope) memories, not whichever profile happens to be active.
+    journalSelectedTab = "universal";
+    journalShowingCreateProfileForm = false;
+  }
+  // The selected profile may have just been deleted - fall back to universal.
+  if (journalSelectedTab !== "universal" && journalSelectedTab !== "training" && !game.sessions.some((s) => s.session_id === journalSelectedTab)) {
+    journalSelectedTab = "universal";
+  }
+
+  const header = document.createElement("div");
+  header.className = "journal-game-header";
+
+  const title = document.createElement("span");
+  title.className = "journal-game-title";
+  title.contentEditable = "true";
+  title.textContent = game.title;
+  title.title = "Click to correct the title (used for cover art lookup)";
+  title.addEventListener("blur", async () => {
+    const newTitle = title.textContent.trim();
+    if (!newTitle || newTitle === game.title) {
+      title.textContent = game.title;
+      return;
     }
-    card.appendChild(gameMemList);
-    card.appendChild(buildJournalAddForm(
-      "Add a game memory (true across playthroughs)…",
-      (content) => ({ content, scope: "game", process: game.process })
-    ));
+    const response = await fetch(`/api/game-art/${encodeURIComponent(game.process)}/title`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    if (response.ok) {
+      game.title = newTitle;
+      await loadGamingJournal();
+    } else {
+      title.textContent = game.title;
+    }
+  });
+  title.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      title.blur();
+    }
+  });
+  header.appendChild(title);
 
-    // Profiles (named sessions), each with its playthrough-scope memories + observations.
-    for (const session of game.sessions) {
-      const profile = document.createElement("div");
-      profile.className = "journal-profile";
+  if (game.tracked) {
+    const badge = document.createElement("span");
+    badge.className = "journal-badge";
+    badge.textContent = "tracked";
+    badge.title = "Approved for background OCR awareness";
+    header.appendChild(badge);
+  }
+  header.appendChild(buildJournalActionBtn(
+    "Delete game",
+    "Remove this game and everything tracked for it (profiles, memories, trackers, training, observations)",
+    async () => {
+      if (!(await showConfirm(`Delete "${game.title}" and ALL its profiles, game/playthrough memories, trackers, training data, and observations? It will also be un-approved for OCR. This can't be undone.`, { title: "Delete game", danger: true, confirmText: "Delete" }))) return;
+      const response = await fetch(`/api/game-state/games/${encodeURIComponent(game.process)}`, { method: "DELETE" });
+      if (response.ok) { await loadGamingJournal(); showJournalLibrary(); }
+    },
+    true,
+  ));
+  header.appendChild(buildJournalActionBtn(
+    "Delete game and blacklist",
+    "Delete this game entirely, and blacklist its process so it's never picked up for tracking again",
+    async () => {
+      if (!(await showConfirm(`Delete "${game.title}" entirely AND blacklist "${game.process}" so it's never tracked again? This can't be undone.`, { title: "Delete game and blacklist", danger: true, confirmText: "Delete and blacklist" }))) return;
+      const deleteResponse = await fetch(`/api/game-state/games/${encodeURIComponent(game.process)}`, { method: "DELETE" });
+      if (!deleteResponse.ok) return;
+      await fetch("/api/game-state/blacklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ process: game.process }),
+      });
+      await loadGamingJournal();
+      showJournalLibrary();
+    },
+    true,
+  ));
+  journalDetailContent.appendChild(header);
 
-      const pHeader = document.createElement("div");
-      pHeader.className = "journal-game-header";
-      const pTitle = document.createElement("span");
-      pTitle.className = "journal-profile-title";
-      pTitle.textContent = `Profile: ${session.name}`;
-      pHeader.appendChild(pTitle);
-      if (session.active) {
+  // Cover art (left) + short description (right), fetched from Steam/IGDB.
+  if (game.cover_url || game.description) {
+    const infoRow = document.createElement("div");
+    infoRow.className = "journal-detail-info-row";
+    if (game.cover_url) {
+      const img = document.createElement("img");
+      img.className = "journal-detail-cover";
+      img.src = game.cover_url;
+      img.alt = game.title;
+      infoRow.appendChild(img);
+    }
+    if (game.description) {
+      const desc = document.createElement("p");
+      desc.className = "journal-description";
+      desc.textContent = game.description;
+      infoRow.appendChild(desc);
+    }
+    journalDetailContent.appendChild(infoRow);
+  }
+
+  journalDetailContent.appendChild(buildSeparator());
+
+  // Tab-cards row: Universal Info, one card per profile, + New Profile, and Training Data -
+  // a single selector row. The content pane below shows whichever one is selected.
+  const tabsRow = document.createElement("div");
+  tabsRow.className = "journal-profiles-row";
+
+  const universalCard = document.createElement("button");
+  universalCard.type = "button";
+  universalCard.className = "journal-profile-card journal-profile-card--universal" + (journalSelectedTab === "universal" ? " journal-profile-card--selected" : "");
+  universalCard.textContent = "Universal Info";
+  universalCard.addEventListener("click", () => {
+    journalSelectedTab = "universal";
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(universalCard);
+  tabsRow.appendChild(buildVerticalSeparator());
+
+  const profilesLabel = document.createElement("span");
+  profilesLabel.className = "journal-profiles-row-label";
+  profilesLabel.textContent = "Profiles:";
+  tabsRow.appendChild(profilesLabel);
+
+  for (const session of game.sessions) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "journal-profile-card" + (session.session_id === journalSelectedTab ? " journal-profile-card--selected" : "");
+    const label = document.createElement("span");
+    label.textContent = session.name + (session.active ? " ★" : "");
+    if (session.active) label.title = "The profile new playthrough facts currently go to";
+    card.appendChild(label);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "journal-profile-card-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Delete this profile and its playthrough memories";
+    removeBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
+      const response = await fetch(
+        `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
+        { method: "DELETE" },
+      );
+      if (response.ok) await refreshJournalDetail(game.process);
+    });
+    card.appendChild(removeBtn);
+
+    card.addEventListener("click", () => {
+      journalSelectedTab = session.session_id;
+      openGameDetail(game);
+    });
+    tabsRow.appendChild(card);
+  }
+
+  const createCard = document.createElement("button");
+  createCard.type = "button";
+  createCard.className = "journal-profile-card journal-profile-card--create";
+  createCard.textContent = "+ New Profile";
+  createCard.addEventListener("click", () => {
+    journalShowingCreateProfileForm = !journalShowingCreateProfileForm;
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(createCard);
+  tabsRow.appendChild(buildVerticalSeparator());
+
+  const trainingCardTab = document.createElement("button");
+  trainingCardTab.type = "button";
+  trainingCardTab.className = "journal-profile-card journal-profile-card--training" + (journalSelectedTab === "training" ? " journal-profile-card--selected" : "");
+  trainingCardTab.textContent = "Training Data";
+  trainingCardTab.addEventListener("click", () => {
+    journalSelectedTab = "training";
+    openGameDetail(game);
+  });
+  tabsRow.appendChild(trainingCardTab);
+
+  journalDetailContent.appendChild(tabsRow);
+
+  if (journalShowingCreateProfileForm) {
+    journalDetailContent.appendChild(buildProfileAddForm(game.process));
+  }
+
+  journalDetailContent.appendChild(buildSeparator());
+
+  // Content pane: whichever single tab-card is selected above - universal game memories, one
+  // profile's memories + observations, or the training data textbox. Never more than one at once.
+  const selectedSession = journalSelectedTab !== "universal" && journalSelectedTab !== "training"
+    ? game.sessions.find((s) => s.session_id === journalSelectedTab)
+    : null;
+
+  if (journalSelectedTab === "training") {
+    // Training data: the living reference document the Game-State Model self-maintains for
+    // this process (see app/core/game_state_training_data.py), editable directly.
+    const trainingCard = document.createElement("div");
+    trainingCard.className = "journal-themed-card journal-themed-card--training";
+    trainingCard.appendChild(buildSectionLabel("Training data"));
+    const trainingTextarea = document.createElement("textarea");
+    trainingTextarea.rows = 12;
+    trainingTextarea.placeholder = "No training data yet - the Game-State Model writes it automatically as it learns this game's UI (requires self-training to be enabled).";
+    trainingCard.appendChild(trainingTextarea);
+    journalDetailContent.appendChild(trainingCard);
+
+    let currentTrainingContent = "";
+    fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        currentTrainingContent = data.content || "";
+        trainingTextarea.value = currentTrainingContent;
+      })
+      .catch(() => {});
+
+    trainingTextarea.addEventListener("blur", async () => {
+      const content = trainingTextarea.value;
+      if (content === currentTrainingContent) return;
+      const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      }).then((r) => r.json());
+      currentTrainingContent = data.content;
+    });
+  } else {
+    const memoriesCard = document.createElement("div");
+    memoriesCard.className = "journal-themed-card " + (selectedSession ? "journal-themed-card--profile" : "journal-themed-card--memories");
+
+    const memHeader = document.createElement("div");
+    memHeader.className = "journal-game-header";
+    const memTitle = document.createElement("span");
+    memTitle.className = "journal-profile-title";
+    memTitle.textContent = selectedSession ? `Profile memories: ${selectedSession.name}` : "Universal game memories";
+    memHeader.appendChild(memTitle);
+    if (selectedSession) {
+      if (selectedSession.active) {
         const badge = document.createElement("span");
         badge.className = "journal-badge journal-badge--active";
         badge.textContent = "active";
         badge.title = "The profile new playthrough facts currently go to";
-        pHeader.appendChild(badge);
+        memHeader.appendChild(badge);
       } else {
-        pHeader.appendChild(buildJournalActionBtn(
+        memHeader.appendChild(buildJournalActionBtn(
           "Make active",
           "Switch to this profile — new playthrough facts will go here",
           async () => {
             const response = await fetch(
-              `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}/active`,
+              `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}/active`,
               { method: "PUT" },
             );
-            if (response.ok) loadGamingJournal();
+            if (response.ok) await refreshJournalDetail(game.process);
           },
         ));
       }
-      pHeader.appendChild(buildJournalActionBtn(
-        "Delete",
-        "Delete this profile and its playthrough memories",
-        async () => {
-          if (!(await showConfirm(`Delete profile "${session.name}" and its playthrough memories? Game-wide memories stay. This can't be undone.`, { title: "Delete profile", danger: true, confirmText: "Delete" }))) return;
-          const response = await fetch(
-            `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(session.session_id)}`,
-            { method: "DELETE" },
-          );
-          if (response.ok) loadGamingJournal();
-        },
-        true,
-      ));
-      profile.appendChild(pHeader);
-
-      const sessMemList = document.createElement("div");
-      sessMemList.className = "memory-list";
-      if (session.memories.length === 0) {
-        const hint = document.createElement("div");
-        hint.className = "memory-empty-hint";
-        hint.textContent = "Nothing saved for this playthrough yet.";
-        sessMemList.appendChild(hint);
-      }
-      for (const entry of session.memories) {
-        sessMemList.appendChild(buildMemoryItem(entry, loadGamingJournal));
-      }
-      profile.appendChild(sessMemList);
-      profile.appendChild(buildJournalAddForm(
-        "Add a playthrough memory…",
-        (content) => ({ content, scope: "session", process: game.process, session_id: session.session_id })
-      ));
-
-      if (session.observations.length > 0) {
-        profile.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
-        const obsList = document.createElement("div");
-        obsList.className = "memory-list";
-        for (const obs of session.observations) {
-          const item = document.createElement("div");
-          item.className = "memory-item journal-observation";
-          const text = document.createElement("div");
-          text.className = "memory-item-text";
-          text.textContent = obs.content;
-          const deleteBtn = document.createElement("button");
-          deleteBtn.className = "memory-item-delete";
-          deleteBtn.textContent = "×";
-          deleteBtn.title = "Discard observation";
-          deleteBtn.addEventListener("click", async () => {
-            const response = await fetch(`/api/observations/${obs.id}`, { method: "DELETE" });
-            if (response.ok) loadGamingJournal();
-          });
-          item.appendChild(text);
-          item.appendChild(deleteBtn);
-          obsList.appendChild(item);
-        }
-        profile.appendChild(obsList);
-      }
-
-      card.appendChild(profile);
     }
+    memoriesCard.appendChild(memHeader);
 
-    // Add a new profile (playthrough) for this game.
-    card.appendChild(buildSectionLabel("New profile"));
-    card.appendChild(buildProfileAddForm(game.process));
+    const memList = document.createElement("div");
+    memList.className = "memory-list";
+    const activeMemories = selectedSession ? selectedSession.memories : game.memories;
+    if (activeMemories.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "memory-empty-hint";
+      hint.textContent = selectedSession ? "Nothing saved for this playthrough yet." : "Nothing saved for this game yet.";
+      memList.appendChild(hint);
+    }
+    for (const entry of activeMemories) {
+      memList.appendChild(buildMemoryItem(entry, () => refreshJournalDetail(game.process)));
+    }
+    memoriesCard.appendChild(memList);
+    memoriesCard.appendChild(buildJournalAddForm(
+      selectedSession ? "Add a playthrough memory…" : "Add a game memory (true across playthroughs)…",
+      selectedSession
+        ? (content) => ({ content, scope: "session", process: game.process, session_id: selectedSession.session_id })
+        : (content) => ({ content, scope: "game", process: game.process })
+    ));
 
-    gamingJournalList.appendChild(card);
+    if (selectedSession && selectedSession.observations.length > 0) {
+      memoriesCard.appendChild(buildSectionLabel("Unconfirmed observations (auto-read from screen)"));
+      const obsList = document.createElement("div");
+      obsList.className = "memory-list";
+      for (const obs of selectedSession.observations) {
+        const item = document.createElement("div");
+        item.className = "memory-item journal-observation";
+        const text = document.createElement("div");
+        text.className = "memory-item-text";
+        text.textContent = obs.content;
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "memory-item-delete";
+        deleteBtn.textContent = "×";
+        deleteBtn.title = "Discard observation";
+        deleteBtn.addEventListener("click", async () => {
+          const response = await fetch(`/api/observations/${obs.id}`, { method: "DELETE" });
+          if (response.ok) await refreshJournalDetail(game.process);
+        });
+        item.appendChild(text);
+        item.appendChild(deleteBtn);
+        obsList.appendChild(item);
+      }
+      memoriesCard.appendChild(obsList);
+    }
+    journalDetailContent.appendChild(memoriesCard);
   }
+}
+
+function buildSeparator() {
+  const hr = document.createElement("div");
+  hr.className = "journal-detail-separator";
+  return hr;
+}
+
+// Vertical divider between the three groups in the tab-cards row (Universal Info | Profiles | Training Data).
+function buildVerticalSeparator() {
+  const sep = document.createElement("div");
+  sep.className = "journal-tabs-vsep";
+  return sep;
 }
 
 // --- Reminders & Alarms modal ---

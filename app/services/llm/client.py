@@ -6,6 +6,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.core import debug_log
+from app.core import provider_routing
 from app.core.config import settings
 from app.core.usage import record_usage
 
@@ -16,6 +17,33 @@ GOOGLE_AI_STUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/op
 # Asks OpenRouter to include actual generation cost (in USD) on the usage object,
 # not just token counts - off by default, and OpenRouter-specific so only sent to that provider.
 _USAGE_EXTRA_BODY = {"usage": {"include": True}}
+
+
+def _openrouter_extra_body(model: str) -> dict:
+    """Builds the extra_body sent on every OpenRouter call: usage-cost reporting plus, if the user
+    has configured provider-routing preferences for this exact model (Settings > per-model
+    "Providers" picker), OpenRouter's request-level `provider` routing object - see
+    https://openrouter.ai/docs/guides/routing/provider-selection. Only fields the user actually
+    set are included; an unconfigured model gets OpenRouter's own default routing untouched."""
+    extra_body = dict(_USAGE_EXTRA_BODY)
+    routing = provider_routing.get_for_model(model)
+    provider_obj: dict = {}
+    if routing.get("only"):
+        provider_obj["only"] = routing["only"]
+    if routing.get("sort"):
+        provider_obj["sort"] = routing["sort"]
+    if routing.get("allow_fallbacks") is False:
+        provider_obj["allow_fallbacks"] = False
+    max_price: dict = {}
+    if routing.get("max_price_prompt"):
+        max_price["prompt"] = routing["max_price_prompt"]
+    if routing.get("max_price_completion"):
+        max_price["completion"] = routing["max_price_completion"]
+    if max_price:
+        provider_obj["max_price"] = max_price
+    if provider_obj:
+        extra_body["provider"] = provider_obj
+    return extra_body
 
 
 def _provider_config(provider: str) -> tuple[str, str]:
@@ -105,6 +133,12 @@ def _track(
     )
 
 
+def _record_error(source: str, model: str, messages: list[dict], tools: list[dict] | None, exc: Exception, duration_ms: float) -> None:
+    debug_log.record_error(
+        source=source, model=model, messages=messages, tools=_tool_names(tools), error=str(exc), duration_ms=duration_ms
+    )
+
+
 def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
     if not tool_calls:
         return None
@@ -127,14 +161,18 @@ async def chat_completion(
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log."""
     resolved_model = model or settings.openrouter_model
     client = get_client(provider)
-    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
+    extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
-    response = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        response_format=response_format,
-        extra_body=extra_body,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
+        raise
     duration_ms = (time.monotonic() - start) * 1000
     content = response.choices[0].message.content or ""
     _track(
@@ -157,15 +195,19 @@ async def chat_completion_stream(
 ) -> AsyncIterator[str]:
     resolved_model = model or settings.openrouter_model
     client = get_client(provider)
-    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
+    extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
-    stream = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-        extra_body=extra_body,
-    )
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
+        raise
     full_text = ""
     usage = None
     async for chunk in stream:
@@ -199,14 +241,18 @@ async def chat_completion_message(
     """Returns the raw assistant message, which may carry tool_calls instead of (or alongside) content."""
     resolved_model = model or settings.openrouter_model
     client = get_client(provider)
-    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
+    extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
-    response = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        tools=tools,
-        extra_body=extra_body,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            tools=tools,
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
+        raise
     duration_ms = (time.monotonic() - start) * 1000
     message = response.choices[0].message
     _track(
@@ -232,18 +278,22 @@ async def stream_chat_completion_deltas(
     """Yields raw delta objects (not just text) so callers can also observe streamed tool_calls."""
     resolved_model = model or settings.openrouter_model
     client = get_client(provider)
-    extra_body = _USAGE_EXTRA_BODY if provider == "openrouter" else None
+    extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
-    stream = await client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        tools=tools,
-        stream=True,
-        stream_options={"include_usage": True},
-        extra_body=extra_body,
-    )
+    try:
+        stream = await client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            tools=tools,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
+        raise
     full_text = ""
-    tool_call_fragments: dict[int, dict] = {}
+    tool_call_fragments: dict[int | str, dict] = {}
     usage = None
     async for chunk in _iter_with_timeout(stream, _STREAM_CHUNK_TIMEOUT_SECONDS):
         if chunk.usage:
@@ -254,7 +304,15 @@ async def stream_chat_completion_deltas(
                 full_text += delta.content
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    entry = tool_call_fragments.setdefault(tc.index, {"name": "", "arguments": ""})
+                    # See the matching comment in chat.py's _stream_chat_with_tools: some providers
+                    # reuse the same delta.index for distinct parallel tool calls, so fall back to id.
+                    key = tc.index
+                    existing = tool_call_fragments.get(key)
+                    if tc.id and existing and existing.get("id") and existing["id"] != tc.id:
+                        key = tc.id
+                    entry = tool_call_fragments.setdefault(key, {"id": tc.id, "name": "", "arguments": ""})
+                    if tc.id:
+                        entry["id"] = tc.id
                     if tc.function and tc.function.name:
                         entry["name"] += tc.function.name
                     if tc.function and tc.function.arguments:
@@ -367,3 +425,42 @@ async def list_models(provider: str = "openrouter", force: bool = False) -> list
         )
     _models_cache[provider] = (time.monotonic(), models)
     return models
+
+
+# Separate cache from _models_cache (keyed by model id, not provider) since this is a distinct
+# OpenRouter endpoint (per-model provider breakdown, not the model catalog).
+_endpoints_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+async def list_model_endpoints(model_id: str, force: bool = False) -> list[dict]:
+    """Real providers OpenRouter currently routes a given model through, with per-provider price/
+    context/quantization/reliability - powers the Settings "Providers" picker next to each model
+    dropdown. OpenRouter-only (this is an OpenRouter-specific API with no equivalent on Google AI
+    Studio/custom endpoints)."""
+    cached = _endpoints_cache.get(model_id)
+    if not force and cached and time.monotonic() - cached[0] < _MODELS_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    async with httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=15) as http_client:
+        response = await http_client.get(f"/models/{model_id}/endpoints")
+        response.raise_for_status()
+        data = response.json().get("data", {})
+
+    endpoints = []
+    for ep in data.get("endpoints", []):
+        pricing = ep.get("pricing") or {}
+        endpoints.append(
+            {
+                "tag": ep.get("tag", ep.get("provider_name", "")),
+                "provider_name": ep.get("provider_name", ""),
+                "pricing_prompt": float(pricing["prompt"]) if pricing.get("prompt") is not None else None,
+                "pricing_completion": float(pricing["completion"]) if pricing.get("completion") is not None else None,
+                "context_length": ep.get("context_length"),
+                "quantization": ep.get("quantization"),
+                "uptime_last_30m": ep.get("uptime_last_30m"),
+                "latency_last_30m": ep.get("latency_last_30m"),
+                "throughput_last_30m": ep.get("throughput_last_30m"),
+            }
+        )
+    _endpoints_cache[model_id] = (time.monotonic(), endpoints)
+    return endpoints

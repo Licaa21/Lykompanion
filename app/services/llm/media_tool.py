@@ -18,6 +18,12 @@ SPOTIFY_PLAY_URL = "https://api.spotify.com/v1/me/player/play"
 # whole chat turn indefinitely instead of the tool just reporting failure.
 _SEARCH_TIMEOUT_SECONDS = 12
 
+# Separate, shorter cap for the best-effort "Mix" playlist fetch below - it's a nice-to-have on
+# top of the actual requested video, so a slow response should just fall back to playing the one
+# video rather than delaying playback further.
+_MIX_TIMEOUT_SECONDS = 8
+_MIX_MAX_VIDEOS = 25
+
 MEDIA_TOOLS = [
     {
         "type": "function",
@@ -30,7 +36,11 @@ MEDIA_TOOLS = [
                 "this whenever the user asks to play/watch/pull up/find something on YouTube, asks "
                 "for a video guide or tutorial, or just says 'play <song>' with no platform named "
                 "and Spotify isn't clearly implied. Once something is playing, use "
-                "control_youtube_player to pause/resume/restart/skip it."
+                "control_youtube_player to pause/resume/restart/skip it. This also auto-queues "
+                "YouTube's own generated 'Mix' of similar songs/videos when one is available, so "
+                "next/previous keep going - but that's an algorithmic mix, NOT the user's own "
+                "named playlist. If they asked for one of their own playlists by name, use "
+                "play_youtube_playlist instead (or first, if unsure it's connected)."
             ),
             "parameters": {
                 "type": "object",
@@ -153,6 +163,68 @@ def _search_youtube_sync(query: str) -> dict | None:
     return entries[0] if entries else info
 
 
+_BROWSE_SEARCH_RESULTS = 10
+
+
+def _search_youtube_multi_sync(query: str) -> list[dict]:
+    """Multiple results for the in-app player's own search/browse UI (youtube_search.py's
+    endpoint) - unlike _search_youtube_sync above, which only ever needs the single best match for
+    a play_on_youtube tool call. extract_flat skips per-video metadata resolution (id+title only),
+    same tradeoff as _fetch_mix_playlist_sync below - plenty for a picker list."""
+    from yt_dlp import YoutubeDL
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "default_search": f"ytsearch{_BROWSE_SEARCH_RESULTS}",
+        "js_runtimes": {},
+        "socket_timeout": _SEARCH_TIMEOUT_SECONDS,
+    }
+    with YoutubeDL(options) as ydl:
+        info = ydl.extract_info(query, download=False)
+    if not info:
+        return []
+    entries = info.get("entries") or []
+    results = []
+    for entry in entries:
+        video_id = entry.get("id")
+        if video_id:
+            results.append({"video_id": video_id, "title": entry.get("title") or "Untitled"})
+    return results
+
+
+def _fetch_mix_playlist_sync(video_id: str) -> list[dict]:
+    """YouTube auto-generates a "Mix" playlist (id `RD<video_id>`) of similar songs/videos for
+    almost every video - no OAuth or curated playlist needed. extract_flat skips per-video
+    metadata resolution (we only need id + title), which keeps this fast enough to run on every
+    play_on_youtube call without materially delaying playback."""
+    from yt_dlp import YoutubeDL
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "playlistend": _MIX_MAX_VIDEOS,
+        "js_runtimes": {},
+        "socket_timeout": _MIX_TIMEOUT_SECONDS,
+    }
+    url = f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}"
+    with YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        return []
+    entries = info.get("entries") or []
+    videos = []
+    for entry in entries:
+        entry_id = entry.get("id")
+        if entry_id:
+            videos.append({"video_id": entry_id, "title": entry.get("title") or "Untitled"})
+    return videos
+
+
 def _search_youtube_music_sync(query: str) -> dict | None:
     """Top "song" match (filter="songs" scopes to YouTube Music's music catalog, which is
     generally the official-audio/topic-channel upload, as opposed to filter=None or "videos"
@@ -165,9 +237,31 @@ def _search_youtube_music_sync(query: str) -> dict | None:
     return results[0] if results else None
 
 
+async def _build_player_payload(video_id: str, title: str) -> dict:
+    """Best-effort attaches YouTube's auto-generated "Mix" for the resolved video so
+    next/previous (control_youtube_player) walk through more of the same kind of music/video
+    instead of stopping after the one requested. Falls back to a single-video payload - same
+    shape play_on_youtube always returned - if the mix fetch fails or comes back empty."""
+    try:
+        mix = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_mix_playlist_sync, video_id), _MIX_TIMEOUT_SECONDS
+        )
+    except Exception:
+        logger.warning("YouTube Mix fetch failed for video %s", video_id, exc_info=True)
+        mix = []
+
+    if not mix:
+        return {"video_id": video_id, "title": title}
+
+    videos = [{"video_id": video_id, "title": title}]
+    videos.extend(v for v in mix if v["video_id"] != video_id)
+    return {"videos": videos, "title": title}
+
+
 async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
-    """Returns (tool_message, player_payload). player_payload (video_id + title, or None on
-    failure) drives the in-app YouTube IFrame player - callers no longer open a browser tab."""
+    """Returns (tool_message, player_payload). player_payload (video_id + title, or a videos list
+    when a Mix queue was attached, or None on failure) drives the in-app YouTube IFrame player -
+    callers no longer open a browser tab."""
     query = (arguments.get("query") or "").strip()
     if not query:
         return "No song/video given to play.", None
@@ -193,10 +287,17 @@ async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
             song = None
 
         if song and song.get("videoId"):
-            title = song.get("title") or query
+            song_title = song.get("title") or query
             artists = ", ".join(a.get("name", "") for a in song.get("artists", []) if a.get("name"))
-            label = f"'{title}'" + (f" by {artists}" if artists else "")
-            return f"Now playing {label} on YouTube Music.", {"video_id": song["videoId"], "title": title}
+            label = f"'{song_title}'" + (f" by {artists}" if artists else "")
+            # YouTube Music's "songs" search returns just the bare track name in `title` (unlike a
+            # regular video search, whose `title` is the uploader's own, usually "Artist - Song")
+            # - without the artist stitched in here, the in-app player panel/queue only ever shows
+            # the song name with no way to tell whose version is playing.
+            display_title = f"{song_title} - {artists}" if artists else song_title
+            payload = await _build_player_payload(song["videoId"], display_title)
+            suffix = " and queued a Mix of similar songs" if "videos" in payload else ""
+            return f"Now playing {label} on YouTube Music{suffix}.", payload
 
     try:
         result = await asyncio.wait_for(
@@ -216,7 +317,9 @@ async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
         return f"No YouTube results for '{query}'.", None
 
     title = result.get("title") or query
-    return f"Now playing '{title}' on YouTube.", {"video_id": video_id, "title": title}
+    payload = await _build_player_payload(video_id, title)
+    suffix = " and queued a Mix of similar videos" if "videos" in payload else ""
+    return f"Now playing '{title}' on YouTube{suffix}.", payload
 
 
 async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | None, int | None]:

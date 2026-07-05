@@ -25,6 +25,12 @@ _active_process: str | None = None
 # stop_tracking. Switches immediately when the user picks a different session from the UI.
 _active_session: str | None = None
 
+# When the current game became the tracked one (this launch/switch) - runtime only, for a
+# rough "how long they've been playing this session" signal in the chat prompt. Only reset on a
+# genuine game switch or exit, NOT on alt-tabbing to the companion, so it reflects the real
+# gaming session, not the current focus window.
+_tracking_started_at: datetime | None = None
+
 # In-memory mirror of the active session's values — avoids a disk read on every chat message.
 # Invalidated by set_game_state, stop_tracking, and switch_session.
 _cached_values: dict[str, str | None] | None = None
@@ -267,19 +273,26 @@ def start_tracking(process: str) -> None:
     """Marks a process as the active/displayed session. Called as soon as an approved game enters
     focus — the UI shows previous session values immediately instead of waiting for the first LLM
     pass to populate anything."""
-    global _active_process, _active_session, _cached_values
+    global _active_process, _active_session, _cached_values, _tracking_started_at
     _active_process = process
     _active_session = get_active_session_id(process)  # creates default session if none exists
     _cached_values = None
+    _tracking_started_at = datetime.now(timezone.utc)
 
 
 def stop_tracking() -> None:
     """Stops showing an active session (the tracked process exited) without deleting its
     persisted data — it's all still there next time that process is tracked."""
-    global _active_process, _active_session, _cached_values
+    global _active_process, _active_session, _cached_values, _tracking_started_at
     _active_process = None
     _active_session = None
     _cached_values = None
+    _tracking_started_at = None
+
+
+def get_tracking_started_at() -> datetime | None:
+    """When the currently tracked game became the active one (UTC), or None if nothing tracked."""
+    return _tracking_started_at
 
 
 def get_game_state() -> dict | None:
@@ -340,4 +353,4 @@ def format_game_state_for_prompt() -> str:
     ]
     if not lines:
         return ""
-    return f"Current game session (process: {state['process']}):\n" + "\n".join(lines)
+    return "Current game session (live, read from the player's screen):\n" + "\n".join(lines)

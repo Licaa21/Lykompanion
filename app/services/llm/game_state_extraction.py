@@ -20,7 +20,6 @@ from app.services.llm.client import chat_completion
 from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
-from app.services.llm.web_search_tool import execute_web_search
 from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
@@ -32,17 +31,6 @@ from app.services.system.processes import (
 )
 
 logger = logging.getLogger(__name__)
-
-# A captured frame is dropped (not sent to the LLM) if its normalized text is at least this
-# similar to the last kept frame - filters out an unchanging HUD/menu across consecutive
-# captures while still keeping frames that show a real on-screen change.
-_SIMILARITY_THRESHOLD = 0.9
-
-# Every captured frame is downscaled to this width before OCR (independent of the screenshot
-# settings used for vision LLM calls) - cuts OCR CPU time substantially on high-res captures,
-# with negligible accuracy loss for HUD-sized text, reducing CPU contention with whatever game
-# is running while this poller captures every tick.
-_OCR_MAX_WIDTH = 1600
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
@@ -63,15 +51,19 @@ _last_frame_b64: str | None = None
 _window_first_image: Image.Image | None = None
 _window_last_image: Image.Image | None = None
 
-# A single empty OCR result is routine (loading screens, blank/solid-color frames, a menu with no
-# text) and not worth logging every tick - only warn once capture/OCR has come back empty this
-# many consecutive ticks in a row, since that's what actually indicates a persistent problem.
-_EMPTY_OCR_WARN_THRESHOLD = 10
 _empty_ocr_streak = 0
 
 # When the last proactive message was delivered (time.monotonic), enforcing the user-configured
 # minimum interval between two of them no matter how chatty the model wants to be.
 _last_proactive_at: float | None = None
+
+# How many consecutive poll windows in a row have been skipped (no genuine OCR/visual change) for
+# the tracked process since the last real structuring pass. See game_state_max_consecutive_skips -
+# window-to-window comparisons only ever look at diffs *within* one poll window, so a state that
+# became static entirely inside a single window (e.g. a death screen reached mid-window) would
+# otherwise be skipped forever, since every later window also compares that same static screen
+# against itself and finds nothing new. Reset to 0 whenever a genuine change is detected.
+_consecutive_skips = 0
 
 
 def _proactive_allowed() -> bool:
@@ -86,6 +78,8 @@ def _proactive_allowed() -> bool:
 # right now - offering the field while it would be dropped just trains the model to waste it.
 _PROACTIVE_PROMPT_ADDON = """
 Additionally, you MAY include a **"proactive_message"** field: a short, natural, spoken-style message from the companion to the player, delivered unprompted into their chat (and read aloud). Use it ONLY when you have something genuinely worth interrupting the player for - a relevant tip for exactly the situation on screen, a warning about something they seem to have missed, or a brief comment on a real milestone. It must feel like a friend watching over their shoulder speaking up at the right moment, not a narrator or a coach spamming advice. The bar is high: most windows deserve none - set it to null unless the moment truly calls for it. Never use it to describe what's on screen back to the player (they can see it), never repeat something you (or the chat) already told them, and keep it to one or two conversational sentences.
+
+Lean on whatever real context you have about this exact situation - training data notes, known facts about the player - instead of a generic reaction. "That's the Ashen Idol, it opens with a poison cloud - don't stand still" beats "careful, tough-looking boss" every time. If you don't actually know anything specific about what's on screen, don't manufacture false confidence - say nothing this window.
 """
 
 
@@ -94,7 +88,7 @@ def _reset_window() -> None:
     state). Doesn't touch persisted tracker values - those live independently in game_state.py,
     keyed by process, and survive a process switch or the companion restarting."""
     global _frames, _last_kept_text, _window_started_at, _empty_ocr_streak
-    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image
+    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
     _frames = []
     _last_kept_text = None
     _window_started_at = None
@@ -103,13 +97,12 @@ def _reset_window() -> None:
     _last_frame_b64 = None
     _window_first_image = None
     _window_last_image = None
+    _consecutive_skips = 0
 
 
-def _frames_similar(a: str, b: str) -> bool:
-    return SequenceMatcher(None, a, b).ratio() >= _SIMILARITY_THRESHOLD
-
-
-_VISUAL_DIFF_SIZE = (64, 64)
+def _frames_similar(a: str, b: str) -> tuple[bool, float]:
+    ratio = SequenceMatcher(None, a, b).ratio()
+    return ratio >= settings.game_state_ocr_similarity_threshold, ratio
 
 
 def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
@@ -118,8 +111,9 @@ def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
     noise) and compared via mean absolute pixel difference. Used only as a fallback signal when
     OCR text found nothing to distinguish the window's frames - real camera movement/environment
     change registers here even when no on-screen text changed at all."""
-    a_thumb = a.convert("L").resize(_VISUAL_DIFF_SIZE)
-    b_thumb = b.convert("L").resize(_VISUAL_DIFF_SIZE)
+    size = (settings.game_state_visual_diff_thumbnail_size, settings.game_state_visual_diff_thumbnail_size)
+    a_thumb = a.convert("L").resize(size)
+    b_thumb = b.convert("L").resize(size)
     diff = ImageChops.difference(a_thumb, b_thumb)
     return (ImageStat.Stat(diff).mean[0] / 255) * 100
 
@@ -247,28 +241,6 @@ async def extract_and_apply_game_state(
             logger.exception("Game-state extraction failed")
             return
 
-    # One research round: the model flagged something on screen it can't decode (an unknown
-    # game-specific term/stat/UI element) - run the search and re-call with the results so it can
-    # interpret correctly and bank what it learned into the training data.
-    search_query = data.get("web_search_query")
-    if isinstance(search_query, str) and search_query.strip():
-        search_query = search_query.strip()
-        logger.info("Game-state poll: extraction pass requested web search %r for process=%r", search_query, process)
-        try:
-            results = await execute_web_search({"query": search_query})
-            enriched = content + [{
-                "type": "text",
-                "text": (
-                    f"Web search results for your query \"{search_query}\" (requested by your own "
-                    f"previous pass - use them to interpret the screen and update the training "
-                    f"data; do not request another search):\n{results}"
-                ),
-            }]
-            data = await _call_extraction(enriched, model, provider, allow_proactive)
-        except Exception:
-            # Keep the first pass's output - a failed search must not cost us the whole window.
-            logger.exception("Game-state extraction web-search round failed for process=%r", process)
-
     new_values = {}
     for tracker in trackers:
         tid = tracker["id"]
@@ -334,7 +306,7 @@ async def _capture_tick() -> None:
     """Captures+OCRs one frame locally (no LLM call) and, once a full poll window's worth of
     frames has accumulated, batches them into a single structuring LLM call."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
-    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image
+    global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -358,9 +330,9 @@ async def _capture_tick() -> None:
                 if game_state_processes.add_pending_process(foreground):
                     logger.info("Game-state poll: unfamiliar fullscreen process=%r queued for user approval", foreground)
             else:
-                logger.debug("Game-state poll: unfamiliar windowed process=%r not queued (not fullscreen)", foreground)
+                logger.info("Game-state poll: skipping unfamiliar windowed process=%r (not fullscreen, not queued for approval)", foreground)
         elif not is_game:
-            logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", foreground)
+            logger.info("Game-state poll: skipping foreground process=%r (not recognized as a game / blacklisted)", foreground)
 
         if _last_process is not None and not is_process_running(_last_process):
             logger.info(
@@ -401,11 +373,14 @@ async def _capture_tick() -> None:
 
     image = await capture_monitor_frame()
     ocr_text = None
-    if image is not None:
-        if image.width > _OCR_MAX_WIDTH:
-            ratio = _OCR_MAX_WIDTH / image.width
+    if image is None:
+        logger.info("Game-state poll: screen capture returned no frame for process=%r this tick", process)
+    else:
+        ocr_max_width = settings.game_state_ocr_max_width
+        if image.width > ocr_max_width:
+            ratio = ocr_max_width / image.width
             # Off the event loop - PIL resize is pure CPU and this runs every capture tick.
-            image = await asyncio.to_thread(image.resize, (_OCR_MAX_WIDTH, int(image.height * ratio)))
+            image = await asyncio.to_thread(image.resize, (ocr_max_width, int(image.height * ratio)))
         # Tracked regardless of the OCR-text dedupe below - the visual-diff fallback needs the
         # window's true first/last frame, not just its first/last *kept* one.
         if _window_first_image is None:
@@ -416,7 +391,11 @@ async def _capture_tick() -> None:
         ocr_text = ocr_text.strip()
         _empty_ocr_streak = 0
         normalized = " ".join(ocr_text.split())
-        if _last_kept_text is None or not _frames_similar(normalized, _last_kept_text):
+        if _last_kept_text is None:
+            similar, ratio = False, 0.0
+        else:
+            similar, ratio = _frames_similar(normalized, _last_kept_text)
+        if not similar:
             _frames.append((time.time(), ocr_text))
             _last_kept_text = normalized
             # Keep the pixels too (downscaled per the screenshot settings) - the first and most
@@ -425,11 +404,25 @@ async def _capture_tick() -> None:
             if _first_frame_b64 is None:
                 _first_frame_b64 = frame_b64
             _last_frame_b64 = frame_b64
+            logger.info(
+                "Game-state poll: kept new OCR frame for process=%r (similarity=%.2f vs last kept, "
+                "chars=%d, %d frame(s) buffered this window)",
+                process,
+                ratio,
+                len(ocr_text),
+                len(_frames),
+            )
         else:
-            logger.debug("Game-state poll: skipping near-duplicate OCR frame for process=%r", process)
+            logger.info(
+                "Game-state poll: skipping near-duplicate OCR frame for process=%r (similarity=%.2f >= "
+                "threshold=%.2f)",
+                process,
+                ratio,
+                settings.game_state_ocr_similarity_threshold,
+            )
     else:
         _empty_ocr_streak += 1
-        if _empty_ocr_streak == _EMPTY_OCR_WARN_THRESHOLD:
+        if _empty_ocr_streak == settings.game_state_empty_ocr_warn_threshold:
             logger.warning(
                 "Game-state poll: capture/OCR has returned no text for %d consecutive ticks for "
                 "process=%r. Either screen capture is failing for this window (some exclusive-"
@@ -440,11 +433,24 @@ async def _capture_tick() -> None:
                 process,
             )
         else:
-            logger.debug("Game-state poll: capture/OCR returned no text for process=%r", process)
+            logger.info(
+                "Game-state poll: capture/OCR returned no text for process=%r (empty streak=%d)",
+                process,
+                _empty_ocr_streak,
+            )
 
     elapsed = time.time() - _window_started_at
     if elapsed < settings.game_state_poll_interval_seconds:
         return
+
+    logger.info(
+        "Game-state poll: poll window closed for process=%r (elapsed=%.1fs >= interval=%ds, "
+        "%d OCR frame(s) buffered)",
+        process,
+        elapsed,
+        settings.game_state_poll_interval_seconds,
+        len(_frames),
+    )
 
     frames_to_send = _frames
     first_b64, last_b64 = _first_frame_b64, _last_frame_b64
@@ -455,14 +461,45 @@ async def _capture_tick() -> None:
     _window_started_at = None
     _window_first_image = None
     _window_last_image = None
+    diff_percent = None
+    if (
+        window_first_image is not None
+        and window_last_image is not None
+        and window_first_image is not window_last_image
+    ):
+        diff_percent = await _visual_diff_percent(window_first_image, window_last_image)
+    logger.info(
+        "Game-state poll: visual diff for process=%r this window: %s (threshold=%.1f%%)",
+        process,
+        f"{diff_percent:.1f}%" if diff_percent is not None else "n/a - no distinct first/last frame",
+        settings.game_state_visual_diff_threshold_percent,
+    )
+
+    if (
+        frames_to_send
+        and diff_percent is not None
+        and settings.game_state_visual_diff_noise_floor_percent > 0
+        and diff_percent < settings.game_state_visual_diff_noise_floor_percent
+    ):
+        # OCR flagged text as "changed," but the pixels barely moved at all - almost certainly OCR
+        # misread jitter on an otherwise static screen (a stable HUD number/glyph read slightly
+        # differently between ticks), not a real on-screen change. Discard it and fall through to
+        # the same "nothing changed" handling below rather than wasting an LLM call on noise.
+        logger.info(
+            "Game-state poll: OCR flagged %d changed frame(s) for process=%r but pixel diff is "
+            "only %.1f%% (below noise floor=%.1f%%) - treating as OCR noise, not a real change",
+            len(frames_to_send),
+            process,
+            diff_percent,
+            settings.game_state_visual_diff_noise_floor_percent,
+        )
+        frames_to_send = []
+        first_b64 = None
+        last_b64 = None
+
+    genuine_change = bool(frames_to_send)
+
     if not frames_to_send:
-        diff_percent = None
-        if (
-            window_first_image is not None
-            and window_last_image is not None
-            and window_first_image is not window_last_image
-        ):
-            diff_percent = await _visual_diff_percent(window_first_image, window_last_image)
         if diff_percent is not None and diff_percent >= settings.game_state_visual_diff_threshold_percent:
             # OCR text never changed all window, but the actual pixels did (camera movement,
             # environment change) - a minimal-UI/textless gameplay moment, not a frozen screen.
@@ -477,17 +514,57 @@ async def _capture_tick() -> None:
             frames_to_send = [(time.time(), _last_kept_text or "(no on-screen text detected)")]
             first_b64 = first_b64 or await asyncio.to_thread(image_to_b64, window_first_image)
             last_b64 = await asyncio.to_thread(image_to_b64, window_last_image)
+            genuine_change = True
         else:
-            logger.debug(
-                "Game-state poll: no changed frames captured for process=%r this window, skipping LLM pass",
-                process,
-            )
-            return
+            # Neither signal saw a change *within this window*. That comparison is blind to a state
+            # that became static entirely inside one window (e.g. a death screen reached mid-window,
+            # or one that started already on it) - every later window compares that same static
+            # screen against itself and would find nothing new forever. The first "should skip"
+            # window in a streak is therefore ALWAYS let through, unconditionally - this is the
+            # actual fix and isn't gated by the setting below. game_state_max_consecutive_skips only
+            # controls an optional periodic re-check after that: 0 (default) means skip indefinitely
+            # for the rest of the streak once the single guaranteed look has happened (no recurring
+            # cost); a positive value re-forces one through every N skips as extra insurance.
+            max_skips = settings.game_state_max_consecutive_skips
+            if _consecutive_skips == 0 or (max_skips > 0 and _consecutive_skips >= max_skips):
+                logger.info(
+                    "Game-state poll: no OCR/visual change detected for process=%r (consecutive "
+                    "skips=%d, budget=%d) - forcing one through anyway (%s)",
+                    process,
+                    _consecutive_skips,
+                    max_skips,
+                    "first skip in this streak" if _consecutive_skips == 0 else "skip budget exhausted",
+                )
+                frames_to_send = [(time.time(), _last_kept_text or "(no on-screen text detected)")]
+                if window_first_image is not None:
+                    first_b64 = first_b64 or await asyncio.to_thread(image_to_b64, window_first_image)
+                if window_last_image is not None:
+                    last_b64 = await asyncio.to_thread(image_to_b64, window_last_image)
+                _consecutive_skips = 1
+            else:
+                _consecutive_skips += 1
+                logger.info(
+                    "Game-state poll: no changed OCR frames and no meaningful visual diff (%s) for "
+                    "process=%r this window, skipping LLM pass entirely (consecutive skips=%d/%d)",
+                    f"{diff_percent:.1f}%" if diff_percent is not None else "n/a - no prior frame to diff",
+                    process,
+                    _consecutive_skips,
+                    max_skips,
+                )
+                return
 
+    if genuine_change:
+        _consecutive_skips = 0
+
+    image_count = sum(1 for b64 in (first_b64, last_b64) if b64) if first_b64 != last_b64 else (1 if last_b64 else 0)
     logger.info(
-        "Game-state poll: %d changed frame(s) captured for process=%r, running structuring pass",
+        "Game-state poll: %d changed OCR frame(s) + %d screenshot(s) for process=%r, running "
+        "structuring pass (model=%r, provider=%r)",
         len(frames_to_send),
+        image_count,
         process,
+        settings.game_state_model or "(default)",
+        settings.game_state_provider or settings.llm_provider,
     )
     await extract_and_apply_game_state(process, frames_to_send, first_b64, last_b64)
     _push_overlay_game_state(process)

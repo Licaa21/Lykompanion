@@ -18,7 +18,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, sendImageModal, document.getElementById("gaming-journal-modal"), document.getElementById("provider-routing-modal")].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -357,6 +357,169 @@ for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
   });
 }
 
+// --- Per-model OpenRouter "Providers" picker ---
+// OpenRouter routes each model across several underlying providers with their own price/context/
+// quantization/reliability - this lets the user restrict routing to specific providers per model
+// (main chat, memory extraction, game-state), rather than a single site-wide preference, since
+// which providers are worth using genuinely differs per model.
+
+const providerRoutingModal = document.getElementById("provider-routing-modal");
+const prModelNameEl = document.getElementById("pr-model-name");
+const prTableBody = document.getElementById("pr-table-body");
+const prEmptyHint = document.getElementById("pr-empty-hint");
+const prSortSelect = document.getElementById("pr-sort");
+const prAllowFallbacksInput = document.getElementById("pr-allow-fallbacks");
+const prMaxPricePromptInput = document.getElementById("pr-max-price-prompt");
+const prMaxPriceCompletionInput = document.getElementById("pr-max-price-completion");
+
+let prCurrentModelId = null;
+let prEndpoints = [];
+let prChecked = new Set();
+let prSortColumn = "pricing_prompt";
+let prSortAsc = true;
+
+function fmtMoney(perToken) {
+  return perToken == null ? "—" : (perToken * 1e6).toFixed(3);
+}
+function fmtPercent(value) {
+  return value == null ? "—" : `${value.toFixed(1)}%`;
+}
+function fmtLatency(value) {
+  return value == null ? "—" : `${Math.round(value)}ms`;
+}
+function fmtThroughput(value) {
+  return value == null ? "—" : `${value.toFixed(1)} t/s`;
+}
+
+function renderProviderTable() {
+  const sorted = [...prEndpoints].sort((a, b) => {
+    const av = a[prSortColumn];
+    const bv = b[prSortColumn];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === "string" ? av.localeCompare(bv) : av - bv;
+    return prSortAsc ? cmp : -cmp;
+  });
+
+  prTableBody.innerHTML = "";
+  for (const ep of sorted) {
+    const row = document.createElement("tr");
+    const checkboxCell = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.tag = ep.tag;
+    checkbox.checked = prChecked.has(ep.tag);
+    checkbox.addEventListener("change", (event) => {
+      if (event.target.checked) prChecked.add(ep.tag);
+      else prChecked.delete(ep.tag);
+    });
+    checkboxCell.appendChild(checkbox);
+    row.appendChild(checkboxCell);
+
+    const cellValues = [
+      ep.provider_name,
+      fmtMoney(ep.pricing_prompt),
+      fmtMoney(ep.pricing_completion),
+      ep.context_length ? ep.context_length.toLocaleString() : "—",
+      ep.quantization || "—",
+      fmtPercent(ep.uptime_last_30m),
+      fmtLatency(ep.latency_last_30m),
+      fmtThroughput(ep.throughput_last_30m),
+    ];
+    for (const value of cellValues) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    }
+    prTableBody.appendChild(row);
+  }
+
+  document.querySelectorAll("#pr-table th[data-sort]").forEach((th) => {
+    th.classList.toggle("sorted", th.dataset.sort === prSortColumn);
+    th.classList.toggle("sort-asc", th.dataset.sort === prSortColumn && prSortAsc);
+  });
+}
+
+document.querySelectorAll("#pr-table th[data-sort]").forEach((th) => {
+  th.addEventListener("click", () => {
+    if (prSortColumn === th.dataset.sort) {
+      prSortAsc = !prSortAsc;
+    } else {
+      prSortColumn = th.dataset.sort;
+      prSortAsc = true;
+    }
+    renderProviderTable();
+  });
+});
+
+async function openProviderPicker(featureKey) {
+  const spec = PROVIDER_FEATURES[featureKey];
+  const provider = effectiveProvider(spec.providerSelectId);
+  if (provider !== "openrouter") {
+    showAlert("Provider routing is an OpenRouter-only feature - this model's feature is currently set to a different provider.");
+    return;
+  }
+  const selectedModel = document.getElementById(spec.selectId).value;
+  // An empty selection on memory/gameState means "inherit the main chat model" - resolve to the
+  // actual model id so the picker (and the saved routing config) targets what's really called.
+  const modelId = selectedModel || document.getElementById("cfg-model").value;
+  if (!modelId) {
+    showAlert("Pick a model first.");
+    return;
+  }
+
+  prCurrentModelId = modelId;
+  prModelNameEl.textContent = modelId;
+  prEndpoints = [];
+  prChecked = new Set();
+  prTableBody.innerHTML = "";
+  prEmptyHint.hidden = true;
+  openModal(providerRoutingModal);
+
+  const [endpoints, routing] = await Promise.all([
+    fetch(`/api/models/providers/${modelId}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`/api/provider-routing/${modelId}`).then((r) => (r.ok ? r.json() : null)),
+  ]);
+
+  prEndpoints = endpoints;
+  prEmptyHint.hidden = endpoints.length > 0;
+
+  if (routing) {
+    prChecked = new Set(routing.only || []);
+    prSortSelect.value = routing.sort || "";
+    prAllowFallbacksInput.checked = routing.allow_fallbacks !== false;
+    prMaxPricePromptInput.value = routing.max_price_prompt ?? "";
+    prMaxPriceCompletionInput.value = routing.max_price_completion ?? "";
+  }
+  renderProviderTable();
+}
+
+document.querySelectorAll(".provider-picker-btn").forEach((btn) => {
+  btn.addEventListener("click", () => openProviderPicker(btn.dataset.providerFeature));
+});
+
+document.getElementById("pr-save").addEventListener("click", async (event) => {
+  if (!prCurrentModelId) return;
+  // Capture the button before the await - event.currentTarget is only valid during synchronous
+  // event dispatch and is already null by the time an awaited fetch() resolves.
+  const button = event.currentTarget;
+  const body = {
+    only: [...prChecked],
+    sort: prSortSelect.value || null,
+    allow_fallbacks: prAllowFallbacksInput.checked,
+    max_price_prompt: prMaxPricePromptInput.value ? parseFloat(prMaxPricePromptInput.value) : null,
+    max_price_completion: prMaxPriceCompletionInput.value ? parseFloat(prMaxPriceCompletionInput.value) : null,
+  };
+  await fetch(`/api/provider-routing/${prCurrentModelId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  flashSaved(button);
+  setTimeout(() => closeModal(providerRoutingModal), 650);
+});
+
 async function loadModels(
   selectedLlm,
   selectedKokoroVoice,
@@ -479,6 +642,57 @@ const gameStateVisualDiffValue = document.getElementById("cfg-game-state-visual-
 gameStateVisualDiffInput.addEventListener("input", () => {
   gameStateVisualDiffValue.textContent = gameStateVisualDiffInput.value;
 });
+
+const gameStateOcrSimilarityInput = document.getElementById("cfg-game-state-ocr-similarity");
+const gameStateOcrSimilarityValue = document.getElementById("cfg-game-state-ocr-similarity-value");
+
+gameStateOcrSimilarityInput.addEventListener("input", () => {
+  gameStateOcrSimilarityValue.textContent = parseFloat(gameStateOcrSimilarityInput.value).toFixed(2);
+});
+
+const gameStateVisualDiffNoiseFloorInput = document.getElementById("cfg-game-state-visual-diff-noise-floor");
+const gameStateVisualDiffNoiseFloorValue = document.getElementById("cfg-game-state-visual-diff-noise-floor-value");
+
+gameStateVisualDiffNoiseFloorInput.addEventListener("input", () => {
+  gameStateVisualDiffNoiseFloorValue.textContent = gameStateVisualDiffNoiseFloorInput.value;
+});
+
+const gameStateMaxSkipsInput = document.getElementById("cfg-game-state-max-skips");
+const gameStateMaxSkipsValue = document.getElementById("cfg-game-state-max-skips-value");
+
+gameStateMaxSkipsInput.addEventListener("input", () => {
+  gameStateMaxSkipsValue.textContent = gameStateMaxSkipsInput.value;
+});
+
+const gameStateOcrWidthInput = document.getElementById("cfg-game-state-ocr-width");
+const gameStateOcrWidthValue = document.getElementById("cfg-game-state-ocr-width-value");
+
+gameStateOcrWidthInput.addEventListener("input", () => {
+  gameStateOcrWidthValue.textContent = gameStateOcrWidthInput.value;
+});
+
+const gameStateVisualDiffThumbInput = document.getElementById("cfg-game-state-visual-diff-thumb");
+const gameStateVisualDiffThumbValue = document.getElementById("cfg-game-state-visual-diff-thumb-value");
+
+gameStateVisualDiffThumbInput.addEventListener("input", () => {
+  gameStateVisualDiffThumbValue.textContent = gameStateVisualDiffThumbInput.value;
+});
+
+const gameStateFrameTimeoutInput = document.getElementById("cfg-game-state-frame-timeout");
+const gameStateFrameTimeoutValue = document.getElementById("cfg-game-state-frame-timeout-value");
+
+gameStateFrameTimeoutInput.addEventListener("input", () => {
+  gameStateFrameTimeoutValue.textContent = gameStateFrameTimeoutInput.value;
+});
+
+const gameStateEmptyWarnInput = document.getElementById("cfg-game-state-empty-warn");
+const gameStateEmptyWarnValue = document.getElementById("cfg-game-state-empty-warn-value");
+
+gameStateEmptyWarnInput.addEventListener("input", () => {
+  gameStateEmptyWarnValue.textContent = gameStateEmptyWarnInput.value;
+});
+
+const gameStateCaptureCursorInput = document.getElementById("cfg-game-state-capture-cursor");
 
 const avatarPreviewEl = document.getElementById("cfg-avatar-preview");
 const avatarInputEl = document.getElementById("cfg-avatar-input");
@@ -677,6 +891,21 @@ function applyConfigToForm(cfg) {
   gameStateCaptureIntervalValue.textContent = cfg.game_state_capture_interval_seconds;
   gameStateVisualDiffInput.value = cfg.game_state_visual_diff_threshold_percent ?? 12;
   gameStateVisualDiffValue.textContent = cfg.game_state_visual_diff_threshold_percent ?? 12;
+  gameStateVisualDiffNoiseFloorInput.value = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
+  gameStateVisualDiffNoiseFloorValue.textContent = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
+  gameStateMaxSkipsInput.value = cfg.game_state_max_consecutive_skips ?? 0;
+  gameStateMaxSkipsValue.textContent = cfg.game_state_max_consecutive_skips ?? 0;
+  gameStateOcrSimilarityInput.value = cfg.game_state_ocr_similarity_threshold ?? 0.9;
+  gameStateOcrSimilarityValue.textContent = (cfg.game_state_ocr_similarity_threshold ?? 0.9).toFixed(2);
+  gameStateOcrWidthInput.value = cfg.game_state_ocr_max_width ?? 1600;
+  gameStateOcrWidthValue.textContent = cfg.game_state_ocr_max_width ?? 1600;
+  gameStateVisualDiffThumbInput.value = cfg.game_state_visual_diff_thumbnail_size ?? 64;
+  gameStateVisualDiffThumbValue.textContent = cfg.game_state_visual_diff_thumbnail_size ?? 64;
+  gameStateFrameTimeoutInput.value = cfg.game_state_capture_frame_timeout_seconds ?? 6;
+  gameStateFrameTimeoutValue.textContent = cfg.game_state_capture_frame_timeout_seconds ?? 6;
+  gameStateEmptyWarnInput.value = cfg.game_state_empty_ocr_warn_threshold ?? 10;
+  gameStateEmptyWarnValue.textContent = cfg.game_state_empty_ocr_warn_threshold ?? 10;
+  gameStateCaptureCursorInput.checked = cfg.game_state_capture_cursor_enabled ?? false;
   restartPendingApprovalPolling(cfg.game_state_poll_interval_seconds);
 
   document.getElementById("cfg-debug-mode-enabled").checked = cfg.debug_mode_enabled;
@@ -689,7 +918,7 @@ function applyConfigToForm(cfg) {
   sleepWordEnabled = cfg.sleep_word_enabled;
   sleepWordPhrase = cfg.sleep_word_phrase || "Go to sleep";
   overlayEditPhraseEnabled = cfg.overlay_edit_phrase_enabled;
-  overlayEditPhrase = cfg.overlay_edit_phrase || "edit overlay";
+  overlayEditPhrase = cfg.overlay_edit_phrase || "Edit overlay";
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
@@ -699,6 +928,7 @@ function applyConfigToForm(cfg) {
     overlayEditPhraseInput.value = overlayEditPhrase;
     updateWakeWordListenerState();
   }
+  updateVoiceHints();
 
   vadThreshold = cfg.vad_threshold ?? 8;
   vadSilenceMs = cfg.vad_silence_ms ?? 1200;
@@ -726,6 +956,7 @@ function applyConfigToForm(cfg) {
     : "Not set";
   document.getElementById("cfg-steam-api-key").placeholder = cfg.steam_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-steam-id").value = cfg.steam_id || "";
+  document.getElementById("cfg-steamgriddb-api-key").placeholder = cfg.steamgriddb_api_key_set ? "•••••••• (set)" : "Not set";
   document.getElementById("cfg-spotify-client-id").value = cfg.spotify_client_id || "";
   document.getElementById("cfg-spotify-account-status").textContent = cfg.spotify_connected
     ? `Connected${cfg.spotify_display_name ? " as " + cfg.spotify_display_name : ""}`
@@ -910,18 +1141,27 @@ async function saveSettings(saveButton) {
     igdb_client_secret: keyFieldValue("cfg-igdb-client-secret"),
     steam_api_key: keyFieldValue("cfg-steam-api-key"),
     steam_id: document.getElementById("cfg-steam-id").value,
+    steamgriddb_api_key: keyFieldValue("cfg-steamgriddb-api-key"),
     spotify_client_id: document.getElementById("cfg-spotify-client-id").value,
     youtube_client_id: document.getElementById("cfg-youtube-client-id").value,
     youtube_client_secret: keyFieldValue("cfg-youtube-client-secret"),
     overlay_enabled: document.getElementById("cfg-overlay-enabled").checked,
     overlay_edit_hotkey: overlayEditHotkey || "Ctrl+Shift+O",
     overlay_edit_phrase_enabled: overlayEditPhraseEnabledInput.checked,
-    overlay_edit_phrase: overlayEditPhraseInput.value.trim() || "edit overlay",
+    overlay_edit_phrase: overlayEditPhraseInput.value.trim() || "Edit overlay",
     game_state_ocr_enabled: gameStateEnabledInput.checked,
     game_state_poll_interval_seconds: parseInt(gameStateIntervalInput.value, 10),
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_visual_diff_threshold_percent: parseFloat(gameStateVisualDiffInput.value),
+    game_state_visual_diff_noise_floor_percent: parseFloat(gameStateVisualDiffNoiseFloorInput.value),
+    game_state_max_consecutive_skips: parseInt(gameStateMaxSkipsInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
+    game_state_ocr_similarity_threshold: parseFloat(gameStateOcrSimilarityInput.value),
+    game_state_ocr_max_width: parseInt(gameStateOcrWidthInput.value, 10),
+    game_state_visual_diff_thumbnail_size: parseInt(gameStateVisualDiffThumbInput.value, 10),
+    game_state_capture_frame_timeout_seconds: parseFloat(gameStateFrameTimeoutInput.value),
+    game_state_empty_ocr_warn_threshold: parseInt(gameStateEmptyWarnInput.value, 10),
+    game_state_capture_cursor_enabled: gameStateCaptureCursorInput.checked,
     game_state_training_enabled: document.getElementById("cfg-game-state-training-enabled").checked,
     proactive_messages_enabled: document.getElementById("cfg-proactive-enabled").checked,
     proactive_min_interval_minutes: parseInt(document.getElementById("cfg-proactive-interval").value, 10),
@@ -948,7 +1188,7 @@ async function saveSettings(saveButton) {
   const keyInputIds = [
     "cfg-api-key", "cfg-management-key", "cfg-google-ai-studio-key",
     "cfg-google-tts-api-key", "cfg-custom-openai-key",
-    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-youtube-client-secret",
+    "cfg-igdb-client-secret", "cfg-steam-api-key", "cfg-steamgriddb-api-key", "cfg-youtube-client-secret",
   ];
   for (const id of keyInputIds) {
     const el = document.getElementById(id);

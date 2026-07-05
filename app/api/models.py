@@ -2,7 +2,8 @@ import asyncio
 
 from fastapi import APIRouter
 
-from app.services.llm.client import list_models
+from app.models.schemas import ProviderEndpointInfo
+from app.services.llm.client import list_model_endpoints, list_models
 from app.services.tts.chirp3 import list_voices as list_chirp3_voices
 from app.services.tts.kokoro import list_voices as list_kokoro_voices
 
@@ -62,6 +63,15 @@ async def get_vision_llm_models(provider: str = "openrouter", force: bool = Fals
     if provider != "openrouter":
         return models
     return [m for m in models if "text" in m["output_modalities"] and "image" in m["input_modalities"]]
+
+
+@router.get("/providers/{model_id:path}")
+async def get_model_providers(model_id: str, force: bool = False) -> list[ProviderEndpointInfo]:
+    """Real providers OpenRouter currently routes this model through, with per-provider pricing/
+    context/quantization/uptime - powers the "Providers" picker next to a model dropdown so the
+    user can restrict routing to specific providers. OpenRouter-only."""
+    endpoints = await list_model_endpoints(model_id, force=force)
+    return [ProviderEndpointInfo(**e) for e in endpoints]
 
 
 @router.get("/tts")

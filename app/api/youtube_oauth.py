@@ -4,11 +4,12 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.core import youtube_auth
 from app.core.config import settings
+from app.services.llm.youtube_playlist_tool import _fetch_playlist_videos, _fetch_playlists
 from app.services.system.browser import open_url
 
 router = APIRouter(prefix="/api/youtube/oauth", tags=["youtube"])
@@ -149,3 +150,35 @@ async def oauth_callback(
 async def disconnect_oauth() -> dict:
     youtube_auth.disconnect()
     return {"ok": True}
+
+
+# --- Direct playlist listing for the in-app player's "Playlists" button (as opposed to the LLM
+# tool calls in youtube_playlist_tool.py, which drive the same data through chat) ---
+
+@router.get("/playlists")
+async def list_playlists() -> dict:
+    access_token = await youtube_auth.get_valid_access_token()
+    if not access_token:
+        raise HTTPException(status_code=400, detail="YouTube isn't connected.")
+    try:
+        playlists = await _fetch_playlists(access_token)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't fetch YouTube playlists: {exc}")
+    return {
+        "playlists": [
+            {"id": p.get("id"), "title": (p.get("snippet") or {}).get("title", "Untitled")}
+            for p in playlists
+        ]
+    }
+
+
+@router.get("/playlists/{playlist_id}/videos")
+async def list_playlist_videos(playlist_id: str) -> dict:
+    access_token = await youtube_auth.get_valid_access_token()
+    if not access_token:
+        raise HTTPException(status_code=400, detail="YouTube isn't connected.")
+    try:
+        videos = await _fetch_playlist_videos(access_token, playlist_id)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't fetch playlist videos: {exc}")
+    return {"videos": videos}

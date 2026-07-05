@@ -33,6 +33,10 @@ winrt-Windows.Foundation
 # specific app/game up or down in the Windows volume mixer, separate from its own narration volume.
 pycaw
 
+# Extracts main article text from a fetched web page (strips nav/ads/boilerplate) so web_search's
+# SearXNG path can hand the model real page content instead of a one-line search-engine snippet.
+trafilatura
+
 # Resolves a YouTube search query to the actual best-match video (no API key/quota) for the
 # play_on_youtube tool.
 yt-dlp

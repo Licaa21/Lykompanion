@@ -12,7 +12,9 @@ from fastapi.responses import StreamingResponse
 from openai import APIError
 from pydantic import ValidationError
 
-from app.core import debug_log, game_state, memory, observations, reminders as reminders_store
+from datetime import datetime, timezone
+
+from app.core import debug_log, game_art, game_state, memory, observations, reminders as reminders_store
 from app.core.config import settings
 from app.core.instructions import load_custom_instructions
 from app.core.prompts import current_datetime_context, load_prompt
@@ -51,7 +53,7 @@ from app.services.llm.web_search_tool import (
     execute_show_image,
     execute_web_search,
 )
-from app.services.screenshot.capture import capture_primary_monitor_b64
+from app.services.screenshot.capture import resize_uploaded_image_b64
 from app.services.system.processes import get_foreground_process_name
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -229,16 +231,19 @@ async def _peel_transcript(inner: AsyncIterator[dict]) -> AsyncIterator[dict]:
         yield {"type": "delta", "text": buffer}
 
 
-def _screenshot_message() -> dict:
-    """A user-role message carrying a fresh screenshot. Appended adjacent to the newest message
-    (not before the whole history) so the model reads it as current context, not as something
-    that was on screen dozens of messages ago."""
-    screenshot_b64 = capture_primary_monitor_b64()
+def _uploaded_image_message(image_data_url: str) -> dict:
+    """A user-role message carrying an image the user attached via the Send Image modal (browsed,
+    dragged, or pasted). Appended adjacent to the newest message (not before the whole history)
+    so the model reads it as current context, not as something shown dozens of messages ago."""
+    try:
+        image_b64 = resize_uploaded_image_b64(image_data_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid image attached.") from exc
     return {
         "role": "user",
         "content": [
-            {"type": "text", "text": load_prompt("screenshot_context")},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}},
+            {"type": "text", "text": load_prompt("image_upload_context")},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
         ],
     }
 
@@ -258,10 +263,28 @@ def _retrieval_query(history: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def _session_duration_note() -> str:
+    """Coarse "how long into this gaming session" line for the chat prompt. Deliberately fuzzy —
+    the underlying timer marks when this game became the tracked one (survives alt-tabs to the
+    companion, resets on a real game switch/exit), so false precision would be misleading."""
+    started = game_state.get_tracking_started_at()
+    if not started:
+        return ""
+    minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+    if minutes < 5:
+        phrasing = "just started this session"
+    elif minutes < 90:
+        phrasing = f"about {round(minutes / 5) * 5} minutes into this session"
+    else:
+        phrasing = f"about {minutes / 60:.1f} hours into this session"
+    return f" They're {phrasing}."
+
+
 def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     # Split into a stable prefix (rarely changes turn-to-turn: base prompt, custom instructions,
-    # sleep-word backstop, monitor list) and a variable suffix (datetime, foreground app, memories,
-    # reminders, game state, observations - different on every single call). Sent as two separate
+    # sleep-word backstop) and a variable suffix (datetime, monitors, foreground app, currently-
+    # playing game, memories, reminders, game state, observations - different on every single call).
+    # Sent as two separate
     # content blocks with an explicit cache_control breakpoint on the stable one: providers that
     # support prompt caching (e.g. Anthropic models via OpenRouter) can then reuse the cached
     # prefix instead of reprocessing it every turn. Harmless elsewhere - an unrecognized
@@ -274,21 +297,24 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
 
     # LLM backstop for the client-side sleep word: if the browser's speech recognition misses the
     # phrase (or isn't available) and it reaches the model instead, treat it as a stop command
-    # rather than a question to answer.
+    # rather than a question to answer. The full stop-listening behavior lives in the persona
+    # prompt's Awareness Tools section - this only binds the user's specific configured phrase to
+    # it, so keep it terse to avoid restating the whole rule.
     if settings.sleep_word_enabled and settings.sleep_word_phrase.strip():
         stable_content += (
-            f'\n\n[Sleep word] If the user\'s message is essentially just "{settings.sleep_word_phrase.strip()}" '
-            "(or a clear stop-listening request), treat it purely as a command to stop hands-free listening: "
-            'call stop_listening and reply with exactly "Signing off..." and nothing else. Never answer it as a '
-            "question or repeat it back."
+            f'\n\n[Sleep word] Treat a message that is essentially just "{settings.sleep_word_phrase.strip()}" '
+            "as a stop-listening command, exactly like any other sign-off (see Awareness Tools)."
         )
-
-    monitors = format_monitors_for_prompt()
-    if monitors:
-        stable_content += "\n\n" + monitors
 
     # Variable content from here on — kept out of the cached block above.
     variable_content = current_datetime_context()
+
+    # Monitor list drives take_screenshot's monitor index. Kept in the VARIABLE block (not the
+    # cached prefix) because the "(active)" marker is runtime state that would otherwise stale the
+    # cache or bust the whole cached prefix every time the active monitor changes.
+    monitors = format_monitors_for_prompt()
+    if monitors:
+        variable_content += "\n\n" + monitors
 
     # Injected instead of a fetch_active_process tool call — it's a few tokens, and having the
     # model fetch it doubled the LLM cost of every conversation that needed it.
@@ -305,6 +331,19 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     gs = game_state.get_game_state()
     tracked_process = gs["process"] if gs else None
     tracked_session = gs["session_id"] if gs else None
+
+    # Name the tracked game by its real title, not just its executable — the model shouldn't have
+    # to map "eldenring.exe" -> "Elden Ring" itself (impossible for launcher/obfuscated exe names),
+    # and this anchors every "(game: <exe>)" memory suffix to something human. Plus a coarse
+    # how-long-they've-been-playing signal so the companion can react to just-launched vs deep-in.
+    if tracked_process:
+        title = game_art.get_display_title(tracked_process)
+        variable_content += (
+            f"\n\n[Currently playing] {title} (process: {tracked_process}). This is the game being "
+            "tracked right now; the game/session facts and screen observations below are about it."
+        )
+        variable_content += _session_duration_note()
+
     memories = memory.format_memories_for_prompt(
         tracked_process,
         tracked_session,
@@ -364,11 +403,20 @@ def _schedule_memory_extraction(user_message: str, assistant_message: str) -> No
 
 
 def _tool_calls_to_dict(tool_calls: dict[int, dict], content: str | None = None) -> dict:
+    """Gemini (via Google AI Studio's OpenAI-compat endpoint) attaches an
+    extra_content.google.thought_signature to each tool call and rejects the next request if a
+    replayed tool call is missing it - so any such extra_content captured off the streamed delta
+    must be echoed back here verbatim, not just id/name/arguments."""
     return {
         "role": "assistant",
         "content": content,
         "tool_calls": [
-            {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+            {
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                **({"extra_content": tc["extra_content"]} if tc.get("extra_content") else {}),
+            }
             for tc in tool_calls.values()
         ],
     }
@@ -414,7 +462,13 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return execute_fetch_system_info(arguments), None, None
     if name == "play_on_youtube":
         message, player = await execute_play_on_youtube(arguments)
-        side_effect = {"type": "youtube_play", **player} if player else None
+        side_effect = None
+        if player:
+            # A resolved Mix queue ("videos") reuses the same youtube_playlist side effect/SSE
+            # event and frontend handling as play_youtube_playlist; a bare video (no Mix found)
+            # keeps the original single-video youtube_play shape.
+            side_effect_type = "youtube_playlist" if "videos" in player else "youtube_play"
+            side_effect = {"type": side_effect_type, **player}
         return message, None, side_effect
     if name == "control_youtube_player":
         message, action, volume = await execute_control_youtube_player(arguments)
@@ -523,7 +577,7 @@ async def _stream_chat_with_tools(
     changes something the frontend needs to react to immediately, rather than only after the
     full reply finishes."""
     for _ in range(MAX_TOOL_ITERATIONS):
-        tool_calls: dict[int, dict] = {}
+        tool_calls: dict[int | str, dict] = {}
         round_text = ""
 
         async for delta in stream_chat_completion_deltas(
@@ -534,13 +588,30 @@ async def _stream_chat_with_tools(
                 yield {"type": "delta", "text": delta.content}
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    entry = tool_calls.setdefault(tc.index, {"id": tc.id, "name": "", "arguments": ""})
+                    key = tc.index
+                    existing = tool_calls.get(key)
+                    if tc.id and existing and existing.get("id") and existing["id"] != tc.id:
+                        # Gemini's OpenAI-compat streaming layer has been observed reusing the same
+                        # delta.index for two different parallel tool calls in one round (each still
+                        # carries its own id though) - keying strictly by index then smashes both
+                        # calls' name/arguments together into one malformed call (e.g.
+                        # "play_youtube_playlistshow_image" with two concatenated JSON arg blobs),
+                        # which the model never actually requested and which Gemini then rejects on
+                        # replay. Falling back to the call's own id as the key keeps them separate.
+                        key = tc.id
+                    entry = tool_calls.setdefault(key, {"id": tc.id, "name": "", "arguments": ""})
                     if tc.id:
                         entry["id"] = tc.id
                     if tc.function and tc.function.name:
                         entry["name"] += tc.function.name
                     if tc.function and tc.function.arguments:
                         entry["arguments"] += tc.function.arguments
+                    # Gemini's thought_signature (see _tool_calls_to_dict) rides along as an
+                    # unofficial field on the delta - the openai SDK's models are extra="allow" so
+                    # it survives attribute access, but nothing captures it unless we grab it here.
+                    extra_content = getattr(tc, "extra_content", None)
+                    if extra_content:
+                        entry["extra_content"] = extra_content
 
         if not tool_calls:
             return
@@ -570,9 +641,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
     history = _limit_history([m.model_dump() for m in request.messages])
     messages = _build_base_messages(history)
     messages.extend(history)
-    if request.include_screenshot:
-        # Right before the newest user message: screenshot as context, then the question.
-        messages.insert(max(1, len(messages) - 1), _screenshot_message())
+    if request.image:
+        # Right before the newest user message: image as context, then the question.
+        messages.insert(max(1, len(messages) - 1), _uploaded_image_message(request.image))
     last_user_message = request.messages[-1].content if request.messages else ""
 
     try:
@@ -603,8 +674,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     history = _limit_history([m.model_dump() for m in request.messages])
     messages = _build_base_messages(history)
     messages.extend(history)
-    if request.include_screenshot:
-        messages.insert(max(1, len(messages) - 1), _screenshot_message())
+    if request.image:
+        messages.insert(max(1, len(messages) - 1), _uploaded_image_message(request.image))
     last_user_message = request.messages[-1].content if request.messages else ""
 
     async def event_generator():
@@ -662,7 +733,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 async def chat_voice(
     audio: UploadFile,
     history: str = Form("[]"),
-    include_screenshot: bool = Form(False),
+    image: str | None = Form(None),
 ) -> ChatResponse:
     """Sends voice audio to the LLM. In transcription mode, a dedicated audio-input model
     transcribes it first and the main model only ever sees text; otherwise the raw audio goes
@@ -670,9 +741,9 @@ async def chat_voice(
     history_messages = _parse_history_form(history)
     messages = _build_base_messages(history_messages)
     messages.extend(history_messages)
-    if include_screenshot:
-        # Right before the voice message it accompanies: screenshot as context, then the question.
-        messages.append(_screenshot_message())
+    if image:
+        # Right before the voice message it accompanies: image as context, then the question.
+        messages.append(_uploaded_image_message(image))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None
@@ -718,7 +789,7 @@ async def chat_voice(
 async def chat_voice_stream(
     audio: UploadFile,
     history: str = Form("[]"),
-    include_screenshot: bool = Form(False),
+    image: str | None = Form(None),
     client_overlay_toasts: bool = Form(False),
 ) -> StreamingResponse:
     """Streaming variant of chat_voice — same audio-to-LLM flow (including transcription mode)
@@ -726,8 +797,8 @@ async def chat_voice_stream(
     history_messages = _parse_history_form(history)
     messages = _build_base_messages(history_messages)
     messages.extend(history_messages)
-    if include_screenshot:
-        messages.append(_screenshot_message())
+    if image:
+        messages.append(_uploaded_image_message(image))
 
     audio_b64 = base64.b64encode(await audio.read()).decode("ascii")
     transcript: str | None = None

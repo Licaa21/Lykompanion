@@ -83,6 +83,39 @@ def record_request(
     _save_to_disk()
 
 
+def record_error(
+    *,
+    source: str,
+    model: str,
+    messages: list[dict],
+    tools: list[str] | None,
+    error: str,
+    duration_ms: float | None,
+) -> None:
+    """Records a provider call that raised instead of completing - the counterpart to
+    record_request(), which only ever sees successful calls. Without this, a 400/500 from the
+    provider leaves zero trace in the debug log, making post-mortem diagnosis impossible."""
+    if not settings.debug_mode_enabled:
+        return
+    entry = {
+        "id": uuid.uuid4().hex[:8],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "reply": None,
+        "tool_calls": None,
+        "error": error,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost_usd": 0.0,
+        "duration_ms": duration_ms,
+    }
+    _entries.appendleft(entry)
+    _save_to_disk()
+
+
 def record_tool_call(name: str, arguments: dict, result: str, duration_ms: float) -> None:
     """Records a local tool execution (not an LLM API call) so it shows up in the same timeline -
     the chat entry's tool_calls only shows what the model asked for, not what the tool returned."""

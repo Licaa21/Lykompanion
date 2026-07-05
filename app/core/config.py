@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -119,16 +120,27 @@ class Settings(BaseSettings):
     # client-side by the same always-listening mechanism as wake_word/sleep_word, independent of
     # hands-free mic state. No-ops if the overlay isn't running.
     overlay_edit_phrase_enabled: bool = False
-    overlay_edit_phrase: str = "edit overlay"
+    overlay_edit_phrase: str = "Edit overlay"
 
     # Passive game-state OCR awareness (quest/location/character) - opt-in, Windows only.
     game_state_ocr_enabled: bool = False
     game_state_poll_interval_seconds: int = 90
+
+    @field_validator("game_state_poll_interval_seconds", mode="before")
+    @classmethod
+    def clamp_game_state_poll_interval_seconds(cls, value: int) -> int:
+        if value is None:
+            return value
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return value
+        return max(value, 5)
     # How often (seconds) the poller captures+OCRs a frame locally while building up the batch
     # sent to the LLM once per poll interval. Cheap - no LLM call happens per capture.
     game_state_capture_interval_seconds: int = 1
     # If every frame in a poll window dedupes away as OCR-text-identical (see
-    # _SIMILARITY_THRESHOLD in game_state_extraction.py), the LLM pass is normally skipped
+    # game_state_ocr_similarity_threshold above), the LLM pass is normally skipped
     # entirely - correct for a frozen/paused screen, but it would also miss a minimal-UI game
     # where the HUD text never changes even though the player is genuinely moving through the
     # world. As a fallback in that case, the window's first and last raw screenshots are compared
@@ -136,8 +148,46 @@ class Settings(BaseSettings):
     # through anyway on pixels alone. A real frozen screen has ~0% diff and stays skipped. Set to
     # 100 to disable (never force a window through on visual diff alone).
     game_state_visual_diff_threshold_percent: float = 12.0
+    # A frame kept as "changed" by OCR-text similarity alone is still discarded if the same
+    # window's visual diff (see above) falls below this much lower floor - OCR similarity is noisy
+    # (misreads jitter a few characters between otherwise-identical frames) and used to trigger
+    # LLM passes on windows where the pixels barely moved at all. Keep this well below the main
+    # threshold: it's only meant to catch near-zero-diff noise, not veto genuine small HUD changes
+    # (e.g. an HP number ticking down), which do move some pixels even in a small thumbnail.
+    game_state_visual_diff_noise_floor_percent: float = 1.5
+    # Both the OCR-similarity and visual-diff checks only ever compare frames *within* the current
+    # poll window - a state that became static entirely inside one window (e.g. a death/game-over
+    # screen reached mid-window, or one the window started already on) would otherwise be skipped
+    # forever, since every later window also compares that same static screen against itself and
+    # finds nothing new. To fix that, the first "should skip" window in any streak is ALWAYS let
+    # through unconditionally (not gated by this setting) - the guaranteed single look that actually
+    # fixes the bug. This setting only controls an optional periodic re-check after that: 0 (default)
+    # means skip indefinitely for the rest of the streak once that one look has happened (no
+    # recurring LLM cost while genuinely static); a positive value re-forces one through every N
+    # further consecutive skips as extra insurance, at the cost of periodic calls even while paused.
+    game_state_max_consecutive_skips: int = 0
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
+    # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this
+    # similar (0-1 SequenceMatcher ratio) to the last kept frame - filters an unchanging HUD/menu
+    # across consecutive captures while still keeping frames that show a real on-screen change.
+    game_state_ocr_similarity_threshold: float = 0.9
+    # Every captured frame is downscaled to this width before OCR (independent of
+    # screenshot_max_width, which only applies to vision LLM calls) - cuts OCR CPU time
+    # substantially on high-res captures, with negligible accuracy loss for HUD-sized text.
+    game_state_ocr_max_width: int = 1600
+    # A single empty OCR result is routine (loading screens, blank frames, a menu with no text) -
+    # only warn once capture/OCR has come back empty this many consecutive ticks in a row.
+    game_state_empty_ocr_warn_threshold: int = 10
+    # Square thumbnail size (pixels) both frames are downscaled to for the coarse visual-diff
+    # fallback comparison (see game_state_visual_diff_threshold_percent) - smaller is cheaper and
+    # blurs out compression/OCR-irrelevant noise, larger is more sensitive to small changes.
+    game_state_visual_diff_thumbnail_size: int = 64
+    # How long (seconds) the Windows Graphics Capture poller waits for a single frame before giving
+    # up and treating this tick as "no capture" instead of blocking the poller indefinitely.
+    game_state_capture_frame_timeout_seconds: float = 6.0
+    # Whether the mouse cursor is included in the game-state OCR poller's captured frames.
+    game_state_capture_cursor_enabled: bool = False
     # Self-training: lets the extraction pass maintain a per-process notes document (how to decode
     # this game's HUD/UI from OCR text), fed back into every future extraction pass for that
     # process. No separate trainer model - the extraction model sees the screenshots itself.
@@ -163,6 +213,7 @@ class Settings(BaseSettings):
     igdb_client_secret: str = ""
     steam_api_key: str = ""
     steam_id: str = ""
+    steamgriddb_api_key: str = ""
 
     # Registers the OAuth app with Spotify (see app/api/spotify_oauth.py) - PKCE means no Client
     # Secret is needed anywhere in that flow, just this (non-secret) Client ID.

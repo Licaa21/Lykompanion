@@ -70,6 +70,9 @@ function handleWakeWordDetected() {
 // involvement at all. Orthogonal to hands-free state; best-effort (no-ops if the overlay isn't
 // running, which app/api/overlay.py's endpoint already guarantees).
 async function handleOverlayEditPhraseDetected() {
+  // The user is switching to editing the overlay right now - don't leave them waiting on a reply
+  // to whatever they were asking before.
+  if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   try {
     // window.fetch is patched (core.js) to attach the required auth token header.
     await fetch("/api/overlay/edit-mode", { method: "POST" });
@@ -83,6 +86,9 @@ function handleSleepWordDetected() {
   // Suppress the live-mic utterance carrying this same phrase so it's never sent to the model
   // (the client's job); the LLM stop-intent backstop covers the rare case it already went out.
   if (typeof suppressLiveUtterance === "function") suppressLiveUtterance();
+  // Also cancel any reply already in flight - the user is signing off, don't make them wait for
+  // (or hear narrated) an answer to a question they've already walked away from.
+  if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   liveMicEnabled = false;
   liveMicToggle.classList.remove("active");
   stopLiveMic();
@@ -128,7 +134,7 @@ function startWakeWordRecognition() {
       }
     }
 
-    // The "edit overlay" phrase is checked unconditionally, independent of hands-free state
+    // The "Edit overlay" phrase is checked unconditionally, independent of hands-free state
     // (unlike wake/sleep word above, which are mutually exclusive by mic state) — bypasses the
     // LLM entirely, see handleOverlayEditPhraseDetected().
     if (overlayEditPhraseEnabled) {
@@ -215,28 +221,34 @@ if (!wakeWordSupported) {
 wakeWordEnabledInput.addEventListener("change", () => {
   wakeWordEnabled = wakeWordEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-wakeWordPhraseInput.addEventListener("change", () => {
+wakeWordPhraseInput.addEventListener("input", () => {
   wakeWordPhrase = wakeWordPhraseInput.value.trim() || "Hey Buddy";
+  updateVoiceHints();
 });
 
 sleepWordEnabledInput.addEventListener("change", () => {
   sleepWordEnabled = sleepWordEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-sleepWordPhraseInput.addEventListener("change", () => {
+sleepWordPhraseInput.addEventListener("input", () => {
   sleepWordPhrase = sleepWordPhraseInput.value.trim() || "Go to sleep";
+  updateVoiceHints();
 });
 
 overlayEditPhraseEnabledInput.addEventListener("change", () => {
   overlayEditPhraseEnabled = overlayEditPhraseEnabledInput.checked;
   updateWakeWordListenerState();
+  updateVoiceHints();
 });
 
-overlayEditPhraseInput.addEventListener("change", () => {
-  overlayEditPhrase = overlayEditPhraseInput.value.trim() || "edit overlay";
+overlayEditPhraseInput.addEventListener("input", () => {
+  overlayEditPhrase = overlayEditPhraseInput.value.trim() || "Edit overlay";
+  updateVoiceHints();
 });
 
 updateWakeWordListenerState();

@@ -28,7 +28,15 @@ async def get_config() -> CompanionConfig:
         game_state_poll_interval_seconds=settings.game_state_poll_interval_seconds,
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
         game_state_visual_diff_threshold_percent=settings.game_state_visual_diff_threshold_percent,
+        game_state_visual_diff_noise_floor_percent=settings.game_state_visual_diff_noise_floor_percent,
+        game_state_max_consecutive_skips=settings.game_state_max_consecutive_skips,
         game_state_model=settings.game_state_model or None,
+        game_state_ocr_similarity_threshold=settings.game_state_ocr_similarity_threshold,
+        game_state_ocr_max_width=settings.game_state_ocr_max_width,
+        game_state_empty_ocr_warn_threshold=settings.game_state_empty_ocr_warn_threshold,
+        game_state_visual_diff_thumbnail_size=settings.game_state_visual_diff_thumbnail_size,
+        game_state_capture_frame_timeout_seconds=settings.game_state_capture_frame_timeout_seconds,
+        game_state_capture_cursor_enabled=settings.game_state_capture_cursor_enabled,
         game_state_training_enabled=settings.game_state_training_enabled,
         proactive_messages_enabled=settings.proactive_messages_enabled,
         proactive_min_interval_minutes=settings.proactive_min_interval_minutes,
@@ -67,6 +75,7 @@ async def get_config() -> CompanionConfig:
         igdb_client_secret_set=bool(settings.igdb_client_secret),
         steam_api_key_set=bool(settings.steam_api_key),
         steam_id=settings.steam_id,
+        steamgriddb_api_key_set=bool(settings.steamgriddb_api_key),
         spotify_client_id=settings.spotify_client_id,
         spotify_connected=spotify_auth.is_connected(),
         spotify_display_name=spotify_auth.get_display_name(),
@@ -179,9 +188,33 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     settings.game_state_visual_diff_threshold_percent = config.game_state_visual_diff_threshold_percent
     env_updates["GAME_STATE_VISUAL_DIFF_THRESHOLD_PERCENT"] = str(config.game_state_visual_diff_threshold_percent)
 
+    settings.game_state_visual_diff_noise_floor_percent = config.game_state_visual_diff_noise_floor_percent
+    env_updates["GAME_STATE_VISUAL_DIFF_NOISE_FLOOR_PERCENT"] = str(config.game_state_visual_diff_noise_floor_percent)
+
+    settings.game_state_max_consecutive_skips = config.game_state_max_consecutive_skips
+    env_updates["GAME_STATE_MAX_CONSECUTIVE_SKIPS"] = str(config.game_state_max_consecutive_skips)
+
     if config.game_state_model is not None:
         settings.game_state_model = config.game_state_model
         env_updates["GAME_STATE_MODEL"] = config.game_state_model
+
+    settings.game_state_ocr_similarity_threshold = config.game_state_ocr_similarity_threshold
+    env_updates["GAME_STATE_OCR_SIMILARITY_THRESHOLD"] = str(config.game_state_ocr_similarity_threshold)
+
+    settings.game_state_ocr_max_width = config.game_state_ocr_max_width
+    env_updates["GAME_STATE_OCR_MAX_WIDTH"] = str(config.game_state_ocr_max_width)
+
+    settings.game_state_empty_ocr_warn_threshold = config.game_state_empty_ocr_warn_threshold
+    env_updates["GAME_STATE_EMPTY_OCR_WARN_THRESHOLD"] = str(config.game_state_empty_ocr_warn_threshold)
+
+    settings.game_state_visual_diff_thumbnail_size = config.game_state_visual_diff_thumbnail_size
+    env_updates["GAME_STATE_VISUAL_DIFF_THUMBNAIL_SIZE"] = str(config.game_state_visual_diff_thumbnail_size)
+
+    settings.game_state_capture_frame_timeout_seconds = config.game_state_capture_frame_timeout_seconds
+    env_updates["GAME_STATE_CAPTURE_FRAME_TIMEOUT_SECONDS"] = str(config.game_state_capture_frame_timeout_seconds)
+
+    settings.game_state_capture_cursor_enabled = config.game_state_capture_cursor_enabled
+    env_updates["GAME_STATE_CAPTURE_CURSOR_ENABLED"] = str(config.game_state_capture_cursor_enabled)
 
     settings.game_state_training_enabled = config.game_state_training_enabled
     env_updates["GAME_STATE_TRAINING_ENABLED"] = str(config.game_state_training_enabled)
@@ -263,6 +296,9 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     if config.steam_id is not None:
         settings.steam_id = config.steam_id
         env_updates["STEAM_ID"] = config.steam_id
+    if config.steamgriddb_api_key is not None:
+        settings.steamgriddb_api_key = config.steamgriddb_api_key
+        env_updates["STEAMGRIDDB_API_KEY"] = config.steamgriddb_api_key
 
     if config.spotify_client_id is not None:
         settings.spotify_client_id = config.spotify_client_id
@@ -295,6 +331,7 @@ _CLEARABLE_KEYS = {
     "igdb_client_secret": "IGDB_CLIENT_SECRET",
     "youtube_client_secret": "YOUTUBE_CLIENT_SECRET",
     "steam_api_key": "STEAM_API_KEY",
+    "steamgriddb_api_key": "STEAMGRIDDB_API_KEY",
 }
 
 
