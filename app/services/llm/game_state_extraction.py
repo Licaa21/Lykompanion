@@ -92,8 +92,9 @@ def _reset_window() -> None:
     _window_last_image = None
 
 
-def _frames_similar(a: str, b: str) -> bool:
-    return SequenceMatcher(None, a, b).ratio() >= settings.game_state_ocr_similarity_threshold
+def _frames_similar(a: str, b: str) -> tuple[bool, float]:
+    ratio = SequenceMatcher(None, a, b).ratio()
+    return ratio >= settings.game_state_ocr_similarity_threshold, ratio
 
 
 def _visual_diff_percent_sync(a: Image.Image, b: Image.Image) -> float:
@@ -343,9 +344,9 @@ async def _capture_tick() -> None:
                 if game_state_processes.add_pending_process(foreground):
                     logger.info("Game-state poll: unfamiliar fullscreen process=%r queued for user approval", foreground)
             else:
-                logger.debug("Game-state poll: unfamiliar windowed process=%r not queued (not fullscreen)", foreground)
+                logger.info("Game-state poll: skipping unfamiliar windowed process=%r (not fullscreen, not queued for approval)", foreground)
         elif not is_game:
-            logger.debug("Game-state poll: skipping non-game/blacklisted/unknown foreground process=%r", foreground)
+            logger.info("Game-state poll: skipping foreground process=%r (not recognized as a game / blacklisted)", foreground)
 
         if _last_process is not None and not is_process_running(_last_process):
             logger.info(
@@ -386,7 +387,9 @@ async def _capture_tick() -> None:
 
     image = await capture_monitor_frame()
     ocr_text = None
-    if image is not None:
+    if image is None:
+        logger.info("Game-state poll: screen capture returned no frame for process=%r this tick", process)
+    else:
         ocr_max_width = settings.game_state_ocr_max_width
         if image.width > ocr_max_width:
             ratio = ocr_max_width / image.width
@@ -402,7 +405,11 @@ async def _capture_tick() -> None:
         ocr_text = ocr_text.strip()
         _empty_ocr_streak = 0
         normalized = " ".join(ocr_text.split())
-        if _last_kept_text is None or not _frames_similar(normalized, _last_kept_text):
+        if _last_kept_text is None:
+            similar, ratio = False, 0.0
+        else:
+            similar, ratio = _frames_similar(normalized, _last_kept_text)
+        if not similar:
             _frames.append((time.time(), ocr_text))
             _last_kept_text = normalized
             # Keep the pixels too (downscaled per the screenshot settings) - the first and most
@@ -411,8 +418,22 @@ async def _capture_tick() -> None:
             if _first_frame_b64 is None:
                 _first_frame_b64 = frame_b64
             _last_frame_b64 = frame_b64
+            logger.info(
+                "Game-state poll: kept new OCR frame for process=%r (similarity=%.2f vs last kept, "
+                "chars=%d, %d frame(s) buffered this window)",
+                process,
+                ratio,
+                len(ocr_text),
+                len(_frames),
+            )
         else:
-            logger.debug("Game-state poll: skipping near-duplicate OCR frame for process=%r", process)
+            logger.info(
+                "Game-state poll: skipping near-duplicate OCR frame for process=%r (similarity=%.2f >= "
+                "threshold=%.2f)",
+                process,
+                ratio,
+                settings.game_state_ocr_similarity_threshold,
+            )
     else:
         _empty_ocr_streak += 1
         if _empty_ocr_streak == settings.game_state_empty_ocr_warn_threshold:
@@ -426,11 +447,24 @@ async def _capture_tick() -> None:
                 process,
             )
         else:
-            logger.debug("Game-state poll: capture/OCR returned no text for process=%r", process)
+            logger.info(
+                "Game-state poll: capture/OCR returned no text for process=%r (empty streak=%d)",
+                process,
+                _empty_ocr_streak,
+            )
 
     elapsed = time.time() - _window_started_at
     if elapsed < settings.game_state_poll_interval_seconds:
         return
+
+    logger.info(
+        "Game-state poll: poll window closed for process=%r (elapsed=%.1fs >= interval=%ds, "
+        "%d OCR frame(s) buffered)",
+        process,
+        elapsed,
+        settings.game_state_poll_interval_seconds,
+        len(_frames),
+    )
 
     frames_to_send = _frames
     first_b64, last_b64 = _first_frame_b64, _last_frame_b64
@@ -464,16 +498,23 @@ async def _capture_tick() -> None:
             first_b64 = first_b64 or await asyncio.to_thread(image_to_b64, window_first_image)
             last_b64 = await asyncio.to_thread(image_to_b64, window_last_image)
         else:
-            logger.debug(
-                "Game-state poll: no changed frames captured for process=%r this window, skipping LLM pass",
+            logger.info(
+                "Game-state poll: no changed OCR frames and no meaningful visual diff (%s) for "
+                "process=%r this window, skipping LLM pass entirely",
+                f"{diff_percent:.1f}%" if diff_percent is not None else "n/a - no prior frame to diff",
                 process,
             )
             return
 
+    image_count = sum(1 for b64 in (first_b64, last_b64) if b64) if first_b64 != last_b64 else (1 if last_b64 else 0)
     logger.info(
-        "Game-state poll: %d changed frame(s) captured for process=%r, running structuring pass",
+        "Game-state poll: %d changed OCR frame(s) + %d screenshot(s) for process=%r, running "
+        "structuring pass (model=%r, provider=%r)",
         len(frames_to_send),
+        image_count,
         process,
+        settings.game_state_model or "(default)",
+        settings.game_state_provider or settings.llm_provider,
     )
     await extract_and_apply_game_state(process, frames_to_send, first_b64, last_b64)
     _push_overlay_game_state(process)
