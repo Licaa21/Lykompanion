@@ -18,7 +18,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(document.getElementById(btn.dataset.close)));
 });
 
-[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, sendImageModal, document.getElementById("gaming-journal-modal")].forEach((modal) => {
+[settingsModal, personalDataModal, diagnosticsModal, debugDetailModal, sendImageModal, document.getElementById("gaming-journal-modal"), document.getElementById("provider-routing-modal")].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -356,6 +356,166 @@ for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
     }
   });
 }
+
+// --- Per-model OpenRouter "Providers" picker ---
+// OpenRouter routes each model across several underlying providers with their own price/context/
+// quantization/reliability - this lets the user restrict routing to specific providers per model
+// (main chat, memory extraction, game-state), rather than a single site-wide preference, since
+// which providers are worth using genuinely differs per model.
+
+const providerRoutingModal = document.getElementById("provider-routing-modal");
+const prModelNameEl = document.getElementById("pr-model-name");
+const prTableBody = document.getElementById("pr-table-body");
+const prEmptyHint = document.getElementById("pr-empty-hint");
+const prSortSelect = document.getElementById("pr-sort");
+const prAllowFallbacksInput = document.getElementById("pr-allow-fallbacks");
+const prMaxPricePromptInput = document.getElementById("pr-max-price-prompt");
+const prMaxPriceCompletionInput = document.getElementById("pr-max-price-completion");
+
+let prCurrentModelId = null;
+let prEndpoints = [];
+let prChecked = new Set();
+let prSortColumn = "pricing_prompt";
+let prSortAsc = true;
+
+function fmtMoney(perToken) {
+  return perToken == null ? "—" : (perToken * 1e6).toFixed(3);
+}
+function fmtPercent(value) {
+  return value == null ? "—" : `${value.toFixed(1)}%`;
+}
+function fmtLatency(value) {
+  return value == null ? "—" : `${Math.round(value)}ms`;
+}
+function fmtThroughput(value) {
+  return value == null ? "—" : `${value.toFixed(1)} t/s`;
+}
+
+function renderProviderTable() {
+  const sorted = [...prEndpoints].sort((a, b) => {
+    const av = a[prSortColumn];
+    const bv = b[prSortColumn];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === "string" ? av.localeCompare(bv) : av - bv;
+    return prSortAsc ? cmp : -cmp;
+  });
+
+  prTableBody.innerHTML = "";
+  for (const ep of sorted) {
+    const row = document.createElement("tr");
+    const checkboxCell = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.tag = ep.tag;
+    checkbox.checked = prChecked.has(ep.tag);
+    checkbox.addEventListener("change", (event) => {
+      if (event.target.checked) prChecked.add(ep.tag);
+      else prChecked.delete(ep.tag);
+    });
+    checkboxCell.appendChild(checkbox);
+    row.appendChild(checkboxCell);
+
+    const cellValues = [
+      ep.provider_name,
+      fmtMoney(ep.pricing_prompt),
+      fmtMoney(ep.pricing_completion),
+      ep.context_length ? ep.context_length.toLocaleString() : "—",
+      ep.quantization || "—",
+      fmtPercent(ep.uptime_last_30m),
+      fmtLatency(ep.latency_last_30m),
+      fmtThroughput(ep.throughput_last_30m),
+    ];
+    for (const value of cellValues) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    }
+    prTableBody.appendChild(row);
+  }
+
+  document.querySelectorAll("#pr-table th[data-sort]").forEach((th) => {
+    th.classList.toggle("sorted", th.dataset.sort === prSortColumn);
+    th.classList.toggle("sort-asc", th.dataset.sort === prSortColumn && prSortAsc);
+  });
+}
+
+document.querySelectorAll("#pr-table th[data-sort]").forEach((th) => {
+  th.addEventListener("click", () => {
+    if (prSortColumn === th.dataset.sort) {
+      prSortAsc = !prSortAsc;
+    } else {
+      prSortColumn = th.dataset.sort;
+      prSortAsc = true;
+    }
+    renderProviderTable();
+  });
+});
+
+async function openProviderPicker(featureKey) {
+  const spec = PROVIDER_FEATURES[featureKey];
+  const provider = effectiveProvider(spec.providerSelectId);
+  if (provider !== "openrouter") {
+    showAlert("Provider routing is an OpenRouter-only feature - this model's feature is currently set to a different provider.");
+    return;
+  }
+  const selectedModel = document.getElementById(spec.selectId).value;
+  // An empty selection on memory/gameState means "inherit the main chat model" - resolve to the
+  // actual model id so the picker (and the saved routing config) targets what's really called.
+  const modelId = selectedModel || document.getElementById("cfg-model").value;
+  if (!modelId) {
+    showAlert("Pick a model first.");
+    return;
+  }
+
+  prCurrentModelId = modelId;
+  prModelNameEl.textContent = modelId;
+  prEndpoints = [];
+  prChecked = new Set();
+  prTableBody.innerHTML = "";
+  prEmptyHint.hidden = true;
+  openModal(providerRoutingModal);
+
+  const [endpoints, routing] = await Promise.all([
+    fetch(`/api/models/providers/${modelId}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`/api/provider-routing/${modelId}`).then((r) => (r.ok ? r.json() : null)),
+  ]);
+
+  prEndpoints = endpoints;
+  prEmptyHint.hidden = endpoints.length > 0;
+
+  if (routing) {
+    prChecked = new Set(routing.only || []);
+    prSortSelect.value = routing.sort || "";
+    prAllowFallbacksInput.checked = routing.allow_fallbacks !== false;
+    prMaxPricePromptInput.value = routing.max_price_prompt ?? "";
+    prMaxPriceCompletionInput.value = routing.max_price_completion ?? "";
+  }
+  renderProviderTable();
+}
+
+document.querySelectorAll(".provider-picker-btn").forEach((btn) => {
+  btn.addEventListener("click", () => openProviderPicker(btn.dataset.providerFeature));
+});
+
+document.getElementById("pr-save").addEventListener("click", async (event) => {
+  if (!prCurrentModelId) return;
+  const body = {
+    only: [...prChecked],
+    sort: prSortSelect.value || null,
+    allow_fallbacks: prAllowFallbacksInput.checked,
+    max_price_prompt: prMaxPricePromptInput.value ? parseFloat(prMaxPricePromptInput.value) : null,
+    max_price_completion: prMaxPriceCompletionInput.value ? parseFloat(prMaxPriceCompletionInput.value) : null,
+  };
+  await fetch(`/api/provider-routing/${prCurrentModelId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  flashSaved(event.currentTarget);
+  setTimeout(() => closeModal(providerRoutingModal), 650);
+});
 
 async function loadModels(
   selectedLlm,

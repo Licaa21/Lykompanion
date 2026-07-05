@@ -313,3 +313,23 @@ class DebugRequestEntry(BaseModel):
     completion_tokens: int
     cost_usd: float
     duration_ms: float | None = None
+
+
+class ProviderEndpointInfo(BaseModel):
+    tag: str
+    provider_name: str
+    pricing_prompt: float | None = None
+    pricing_completion: float | None = None
+    context_length: int | None = None
+    quantization: str | None = None
+    uptime_last_30m: float | None = None
+    latency_last_30m: float | None = None
+    throughput_last_30m: float | None = None
+
+
+class ProviderRoutingConfig(BaseModel):
+    only: list[str] = []
+    sort: Literal["price", "throughput", "latency"] | None = None
+    allow_fallbacks: bool = True
+    max_price_prompt: float | None = None
+    max_price_completion: float | None = None

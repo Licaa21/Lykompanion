@@ -143,6 +143,12 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 
 No API key is needed for web search — it goes through OpenRouter's own `web` plugin, billed via your existing OpenRouter account.
 
+### Per-model OpenRouter provider routing
+
+Each of the three LLM model pickers that use OpenRouter (main chat, memory extraction, game-state) has a **Providers…** button next to its dropdown. It opens a live table of the real providers OpenRouter currently routes that exact model through (DeepInfra, Together, Google Vertex, etc.) with per-provider price, context length, quantization, uptime, and latency/throughput where OpenRouter has recent samples. Check the providers you want to allow, optionally set a sort preference (price/throughput/latency), allow-fallbacks, and max price — this maps to OpenRouter's [provider routing](https://openrouter.ai/docs/guides/routing/provider-selection) request field. Leaving every box unchecked uses OpenRouter's own default routing.
+
+This is a per-model preference, not an env var — it's stored in `data/provider_routing.json` (keyed by model id) via `GET`/`PUT /api/provider-routing/{model_id}`, and merged into every OpenRouter chat completion request for that model (`app/services/llm/client.py`'s `_openrouter_extra_body`). OpenRouter-only — a feature set to Google AI Studio or a custom endpoint ignores it entirely.
+
 ### Setting up Chirp 3 HD
 
 Chirp 3 HD is Google Cloud Text-to-Speech — the highest quality TTS option. To enable it:

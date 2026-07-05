@@ -187,6 +187,7 @@
                 <span class="cfg-label">LLM Model <button type="button" class="cfg-help" data-tip="The model used for the main conversation — drives every text reply. Normally must support audio+image input (voice messages and screenshots go straight to it). With Transcription Mode enabled (Voice tab), it only needs to handle text, so any cheap text-only model works — but it can no longer see screenshots.">?</button></span>
                 <input id="cfg-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-model"></select>
+                <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="llm">Providers…</button>
               </label>
             </div>
 
@@ -205,6 +206,7 @@
                 <span class="cfg-label">Memory Extraction Model <button type="button" class="cfg-help" data-tip="Model used for the background task that extracts memorable facts from your conversations. Leave blank to reuse the main chat model.">?</button></span>
                 <input id="cfg-memory-model-search" type="text" class="model-search" placeholder="Search models…" />
                 <select id="cfg-memory-model"></select>
+                <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="memory">Providers…</button>
               </label>
             </div>
             <label>
@@ -767,6 +769,7 @@
                   <span class="cfg-label">Game-State Model <button type="button" class="cfg-help" data-tip="Vision-capable model used to interpret each poll window's OCR text plus its first/last frames as screenshots into tracked fields. Leave blank to reuse the main chat model.">?</button></span>
                   <input id="cfg-game-state-model-search" type="text" class="model-search" placeholder="Search models…" />
                   <select id="cfg-game-state-model"></select>
+                  <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="gameState">Providers…</button>
                 </label>
               </div>
               <details class="cfg-advanced">
@@ -980,6 +983,67 @@
         </div>
         <input id="image-file-input" type="file" accept="image/*" hidden />
         <p class="modal-hint">You can always ask the companion to take a screenshot of your active screen if you'd like to quickly share something.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PROVIDER ROUTING MODAL ──────────────────────────────────────── -->
+  <div id="provider-routing-modal" class="modal-overlay" hidden>
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h2>Providers — <span id="pr-model-name"></span></h2>
+        <button type="button" class="modal-close" data-close="provider-routing-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Choose which underlying providers OpenRouter may route this model through. Leave every checkbox unchecked to use OpenRouter's own default routing (no restriction).</p>
+        <div class="cfg-row">
+          <label>
+            <span class="cfg-label">Sort providers by <button type="button" class="cfg-help" data-tip="When more than one allowed provider remains, prefer the cheapest, highest-throughput, or lowest-latency one. Leave as 'default' to use OpenRouter's own balancing.">?</button></span>
+            <select id="pr-sort">
+              <option value="">(default)</option>
+              <option value="price">Price</option>
+              <option value="throughput">Throughput</option>
+              <option value="latency">Latency</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input id="pr-allow-fallbacks" type="checkbox" checked />
+            Allow fallback providers
+            <button type="button" class="cfg-help" data-tip="If the allowed/preferred provider is unavailable, let OpenRouter fall back to another allowed provider instead of failing the request.">?</button>
+          </label>
+        </div>
+        <div class="cfg-row">
+          <label>
+            <span class="cfg-label">Max Prompt Price ($/M tokens) <button type="button" class="cfg-help" data-tip="Exclude providers charging more than this per million prompt tokens. Leave blank for no limit.">?</button></span>
+            <input id="pr-max-price-prompt" type="number" min="0" step="0.01" placeholder="no limit" />
+          </label>
+          <label>
+            <span class="cfg-label">Max Completion Price ($/M tokens) <button type="button" class="cfg-help" data-tip="Exclude providers charging more than this per million completion tokens. Leave blank for no limit.">?</button></span>
+            <input id="pr-max-price-completion" type="number" min="0" step="0.01" placeholder="no limit" />
+          </label>
+        </div>
+        <div class="table-scroll">
+          <table class="provider-table" id="pr-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th data-sort="provider_name">Provider</th>
+                <th data-sort="pricing_prompt">Prompt $/M</th>
+                <th data-sort="pricing_completion">Completion $/M</th>
+                <th data-sort="context_length">Context</th>
+                <th data-sort="quantization">Quant</th>
+                <th data-sort="uptime_last_30m">Uptime</th>
+                <th data-sort="latency_last_30m">Latency</th>
+                <th data-sort="throughput_last_30m">Throughput</th>
+              </tr>
+            </thead>
+            <tbody id="pr-table-body"></tbody>
+          </table>
+        </div>
+        <p id="pr-empty-hint" class="modal-hint" hidden>No provider data available — pick an OpenRouter model first, or OpenRouter has no per-provider breakdown for it.</p>
+      </div>
+      <div class="modal-footer modal-footer--inline">
+        <button type="button" id="pr-save" class="primary-btn">Save Provider Settings</button>
       </div>
     </div>
   </div>

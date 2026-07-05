@@ -2058,6 +2058,38 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 }
 
 /* ════════════════════════════════════════════════════
+   PROVIDER ROUTING PICKER
+════════════════════════════════════════════════════ */
+.provider-picker-btn { margin-top: 6px; align-self: flex-start; }
+
+.table-scroll { overflow-x: auto; margin: 10px 0; }
+
+.provider-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.provider-table th, .provider-table td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+}
+.provider-table th {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--t3);
+  cursor: pointer;
+  user-select: none;
+}
+.provider-table th:hover { color: var(--t1); }
+.provider-table th.sorted::after { content: " ▾"; }
+.provider-table th.sorted.sort-asc::after { content: " ▴"; }
+.provider-table tbody tr:hover { background: var(--surface-3); }
+
+/* ════════════════════════════════════════════════════
    SETUP BANNER — shown while no API key is configured
 ════════════════════════════════════════════════════ */
 .setup-banner {

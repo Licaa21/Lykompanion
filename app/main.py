@@ -27,6 +27,7 @@ from app.api import (
     models,
     overlay,
     profile,
+    provider_routing,
     reminders,
     screenshot,
     spotify_oauth,
@@ -112,6 +113,7 @@ app.include_router(gaming_journal.router)
 app.include_router(debug.router)
 app.include_router(profile.router)
 app.include_router(reminders.router)
+app.include_router(provider_routing.router)
 app.include_router(backup.router)
 app.include_router(spotify_oauth.router)
 app.include_router(youtube_oauth.router)
