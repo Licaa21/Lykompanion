@@ -155,15 +155,17 @@ class Settings(BaseSettings):
     # threshold: it's only meant to catch near-zero-diff noise, not veto genuine small HUD changes
     # (e.g. an HP number ticking down), which do move some pixels even in a small thumbnail.
     game_state_visual_diff_noise_floor_percent: float = 1.5
-    # Safety net: if a poll window would otherwise be skipped (no OCR change, no meaningful visual
-    # diff) for this many consecutive seconds since the last structuring pass actually ran for the
-    # tracked process, force one through anyway on whatever's currently on screen. Guards against a
-    # real state change that both signals missed - e.g. a death/game-over screen that reads as
-    # visually similar to the prior frame in a small diff thumbnail, or coincidentally-similar OCR
-    # text - which would otherwise leave stale tracker values (health, "in combat", etc.) displayed
-    # indefinitely while the player sits on that screen. Should generally be set higher than
-    # GAME_STATE_POLL_INTERVAL_SECONDS. Set to 0 to disable.
-    game_state_max_stale_seconds: float = 120.0
+    # Both the OCR-similarity and visual-diff checks only ever compare frames *within* the current
+    # poll window - a state that became static entirely inside one window (e.g. a death/game-over
+    # screen reached mid-window, or one the window started already on) would otherwise be skipped
+    # forever, since every later window also compares that same static screen against itself and
+    # finds nothing new. Rather than a time-based fallback (which fires on a schedule regardless of
+    # whether anything is actually happening, defeating the point of skipping), the first "should
+    # skip" window in a streak is always let through anyway; this caps how many further consecutive
+    # windows may then actually be skipped (real cost savings for a genuinely static screen) before
+    # one is let through again as a safety net. Set to 0 to disable (revert to skipping indefinitely
+    # once a streak starts, the prior behavior).
+    game_state_max_consecutive_skips: int = 5
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this

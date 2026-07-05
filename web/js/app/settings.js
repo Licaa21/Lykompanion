@@ -657,11 +657,11 @@ gameStateVisualDiffNoiseFloorInput.addEventListener("input", () => {
   gameStateVisualDiffNoiseFloorValue.textContent = gameStateVisualDiffNoiseFloorInput.value;
 });
 
-const gameStateMaxStaleInput = document.getElementById("cfg-game-state-max-stale");
-const gameStateMaxStaleValue = document.getElementById("cfg-game-state-max-stale-value");
+const gameStateMaxSkipsInput = document.getElementById("cfg-game-state-max-skips");
+const gameStateMaxSkipsValue = document.getElementById("cfg-game-state-max-skips-value");
 
-gameStateMaxStaleInput.addEventListener("input", () => {
-  gameStateMaxStaleValue.textContent = gameStateMaxStaleInput.value;
+gameStateMaxSkipsInput.addEventListener("input", () => {
+  gameStateMaxSkipsValue.textContent = gameStateMaxSkipsInput.value;
 });
 
 const gameStateOcrWidthInput = document.getElementById("cfg-game-state-ocr-width");
@@ -893,8 +893,8 @@ function applyConfigToForm(cfg) {
   gameStateVisualDiffValue.textContent = cfg.game_state_visual_diff_threshold_percent ?? 12;
   gameStateVisualDiffNoiseFloorInput.value = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
   gameStateVisualDiffNoiseFloorValue.textContent = cfg.game_state_visual_diff_noise_floor_percent ?? 1.5;
-  gameStateMaxStaleInput.value = cfg.game_state_max_stale_seconds ?? 120;
-  gameStateMaxStaleValue.textContent = cfg.game_state_max_stale_seconds ?? 120;
+  gameStateMaxSkipsInput.value = cfg.game_state_max_consecutive_skips ?? 5;
+  gameStateMaxSkipsValue.textContent = cfg.game_state_max_consecutive_skips ?? 5;
   gameStateOcrSimilarityInput.value = cfg.game_state_ocr_similarity_threshold ?? 0.9;
   gameStateOcrSimilarityValue.textContent = (cfg.game_state_ocr_similarity_threshold ?? 0.9).toFixed(2);
   gameStateOcrWidthInput.value = cfg.game_state_ocr_max_width ?? 1600;
@@ -1154,7 +1154,7 @@ async function saveSettings(saveButton) {
     game_state_capture_interval_seconds: parseInt(gameStateCaptureIntervalInput.value, 10),
     game_state_visual_diff_threshold_percent: parseFloat(gameStateVisualDiffInput.value),
     game_state_visual_diff_noise_floor_percent: parseFloat(gameStateVisualDiffNoiseFloorInput.value),
-    game_state_max_stale_seconds: parseFloat(gameStateMaxStaleInput.value),
+    game_state_max_consecutive_skips: parseInt(gameStateMaxSkipsInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
     game_state_ocr_similarity_threshold: parseFloat(gameStateOcrSimilarityInput.value),
     game_state_ocr_max_width: parseInt(gameStateOcrWidthInput.value, 10),

@@ -29,7 +29,7 @@ async def get_config() -> CompanionConfig:
         game_state_capture_interval_seconds=settings.game_state_capture_interval_seconds,
         game_state_visual_diff_threshold_percent=settings.game_state_visual_diff_threshold_percent,
         game_state_visual_diff_noise_floor_percent=settings.game_state_visual_diff_noise_floor_percent,
-        game_state_max_stale_seconds=settings.game_state_max_stale_seconds,
+        game_state_max_consecutive_skips=settings.game_state_max_consecutive_skips,
         game_state_model=settings.game_state_model or None,
         game_state_ocr_similarity_threshold=settings.game_state_ocr_similarity_threshold,
         game_state_ocr_max_width=settings.game_state_ocr_max_width,
@@ -191,8 +191,8 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     settings.game_state_visual_diff_noise_floor_percent = config.game_state_visual_diff_noise_floor_percent
     env_updates["GAME_STATE_VISUAL_DIFF_NOISE_FLOOR_PERCENT"] = str(config.game_state_visual_diff_noise_floor_percent)
 
-    settings.game_state_max_stale_seconds = config.game_state_max_stale_seconds
-    env_updates["GAME_STATE_MAX_STALE_SECONDS"] = str(config.game_state_max_stale_seconds)
+    settings.game_state_max_consecutive_skips = config.game_state_max_consecutive_skips
+    env_updates["GAME_STATE_MAX_CONSECUTIVE_SKIPS"] = str(config.game_state_max_consecutive_skips)
 
     if config.game_state_model is not None:
         settings.game_state_model = config.game_state_model
