@@ -475,14 +475,21 @@ async def _capture_tick() -> None:
     _window_started_at = None
     _window_first_image = None
     _window_last_image = None
+    diff_percent = None
+    if (
+        window_first_image is not None
+        and window_last_image is not None
+        and window_first_image is not window_last_image
+    ):
+        diff_percent = await _visual_diff_percent(window_first_image, window_last_image)
+    logger.info(
+        "Game-state poll: visual diff for process=%r this window: %s (threshold=%.1f%%)",
+        process,
+        f"{diff_percent:.1f}%" if diff_percent is not None else "n/a - no distinct first/last frame",
+        settings.game_state_visual_diff_threshold_percent,
+    )
+
     if not frames_to_send:
-        diff_percent = None
-        if (
-            window_first_image is not None
-            and window_last_image is not None
-            and window_first_image is not window_last_image
-        ):
-            diff_percent = await _visual_diff_percent(window_first_image, window_last_image)
         if diff_percent is not None and diff_percent >= settings.game_state_visual_diff_threshold_percent:
             # OCR text never changed all window, but the actual pixels did (camera movement,
             # environment change) - a minimal-UI/textless gameplay moment, not a frozen screen.
