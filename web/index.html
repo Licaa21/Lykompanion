@@ -791,6 +791,10 @@
                   <input id="cfg-game-state-visual-diff-noise-floor" type="range" min="0" max="20" step="0.5" value="1.5" />
                 </label>
                 <label>
+                  <span class="cfg-label">Max Stale Time: <span id="cfg-game-state-max-stale-value">120</span>s <button type="button" class="cfg-help" data-tip="Safety net: if a poll window keeps getting skipped (no OCR change, no meaningful visual diff) for this many seconds since the last structuring pass actually ran, force one through anyway on whatever's on screen. Guards against a real state change (e.g. a death/game-over screen) that both signals missed, which would otherwise leave stale values (health, 'in combat', etc.) displayed indefinitely. Should generally be set higher than the Poll Interval above. Set to 0 to disable.">?</button></span>
+                  <input id="cfg-game-state-max-stale" type="range" min="0" max="600" step="10" value="120" />
+                </label>
+                <label>
                   <span class="cfg-label">OCR Capture Width: <span id="cfg-game-state-ocr-width-value">1600</span>px <button type="button" class="cfg-help" data-tip="Each captured frame is downscaled to this width before OCR (independent of the Screenshot Max Width used for vision LLM calls). Lower cuts OCR CPU time with negligible accuracy loss for HUD-sized text.">?</button></span>
                   <input id="cfg-game-state-ocr-width" type="range" min="640" max="3840" step="80" value="1600" />
                 </label>

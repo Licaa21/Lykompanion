@@ -1,8 +1,8 @@
 # TODO
 
 - [ ] `play_on_spotify` needs to be properly tested.
-- [ ] New "Providers" per-model routing picker (Settings, next to LLM/Memory/Game-State model dropdowns) needs real-world verification: (1) confirm OpenRouter's `provider.only` actually accepts the `tag` values we store/send (e.g. `"deepinfra/base"`) rather than requiring bare provider slugs (e.g. `"deepinfra"`) — check via Debug panel / observed provider actually used after restricting to one provider; (2) confirm `max_price.prompt`/`max_price.completion` are interpreted as $ per million tokens (matching the picker's "$/M" fields) and not $ per token.
 - [ ] New `GAME_STATE_VISUAL_DIFF_NOISE_FLOOR_PERCENT` (default `1.5`) needs real-world tuning against actual gameplay — use `tools/ocr_debug.py` to watch OCR-similarity and visual-diff numbers together while playing and confirm the default doesn't suppress genuine small HUD changes (e.g. HP ticking) or fail to filter OCR misread noise.
+- [ ] Confirmed bug (2026-07-05, Slay the Spire): died at 18HP, sat on the death screen 2 minutes, tracker panel stayed frozen at "In combat, 18HP" the whole time - the death screen's OCR/pixels apparently read similar enough to the last combat frame that no pass ran. Root-caused as likely the noise-floor merge above discarding a real OCR-detected change because the visual diff (64px thumbnail) between combat and a similar-background death screen was small. Mitigated with `GAME_STATE_MAX_STALE_SECONDS` (safety net forcing a pass through after N idle seconds regardless), but the underlying suppression case itself hasn't been reproduced/verified fixed - watch for recurrence.
 
 
 # Risky changes (do this in a separate branch and properly test before merging to main):

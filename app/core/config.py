@@ -155,6 +155,15 @@ class Settings(BaseSettings):
     # threshold: it's only meant to catch near-zero-diff noise, not veto genuine small HUD changes
     # (e.g. an HP number ticking down), which do move some pixels even in a small thumbnail.
     game_state_visual_diff_noise_floor_percent: float = 1.5
+    # Safety net: if a poll window would otherwise be skipped (no OCR change, no meaningful visual
+    # diff) for this many consecutive seconds since the last structuring pass actually ran for the
+    # tracked process, force one through anyway on whatever's currently on screen. Guards against a
+    # real state change that both signals missed - e.g. a death/game-over screen that reads as
+    # visually similar to the prior frame in a small diff thumbnail, or coincidentally-similar OCR
+    # text - which would otherwise leave stale tracker values (health, "in combat", etc.) displayed
+    # indefinitely while the player sits on that screen. Should generally be set higher than
+    # GAME_STATE_POLL_INTERVAL_SECONDS. Set to 0 to disable.
+    game_state_max_stale_seconds: float = 120.0
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
     # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this
