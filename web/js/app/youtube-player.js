@@ -56,7 +56,9 @@ let ytRestoredNeedsCue = false;
 let ytRestoredTime = 0;
 
 function ytGetSavedVolume() {
-  const saved = Number(localStorage.getItem(YOUTUBE_VOLUME_KEY));
+  const raw = localStorage.getItem(YOUTUBE_VOLUME_KEY);
+  if (raw === null) return 100;
+  const saved = Number(raw);
   return Number.isFinite(saved) && saved >= 0 && saved <= 100 ? saved : 100;
 }
 ytVolumeSlider.value = ytGetSavedVolume();
@@ -459,6 +461,7 @@ ytVolumeSlider.addEventListener("input", () => {
   const value = Number(ytVolumeSlider.value);
   if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(value);
   localStorage.setItem(YOUTUBE_VOLUME_KEY, String(value));
+  ytSyncVolumeFill();
 });
 
 // Collapsed mode hides the video frame only, keeping the seek bar/transport/volume controls -
