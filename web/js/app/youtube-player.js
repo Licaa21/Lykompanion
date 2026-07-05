@@ -95,8 +95,11 @@ setInterval(() => {
   if (ytPlayer.getPlayerState) {
     const YT_PLAYING = 1;
     const playing = ytPlayer.getPlayerState() === YT_PLAYING;
-    ytPlayIcon.hidden = playing;
-    ytPauseIcon.hidden = !playing;
+    // Plain style.display, not .hidden - SVGElement's [hidden] reflection is unreliable across
+    // WebView2/Chromium versions (observed both icons rendering at once despite one being
+    // "hidden"), whereas an inline style always wins.
+    ytPlayIcon.style.display = playing ? "none" : "";
+    ytPauseIcon.style.display = playing ? "" : "none";
     // Drives the header equalizer bars and the play-orb ripple ring.
     ytPanel.classList.toggle("youtube-player-panel--playing", playing);
   }
@@ -614,8 +617,9 @@ function ytSetFullscreenState(active) {
   ytPanel.classList.toggle("youtube-player-panel--fullscreen", active);
   ytPanelFullscreenBtn.classList.toggle("active", active);
   ytPanelFullscreenBtn.title = active ? "Exit fullscreen" : "Fullscreen";
-  ytFullscreenIconExpand.hidden = active;
-  ytFullscreenIconCompress.hidden = !active;
+  // Plain style.display, not .hidden - see the matching comment in the poll loop above.
+  ytFullscreenIconExpand.style.display = active ? "none" : "";
+  ytFullscreenIconCompress.style.display = active ? "" : "none";
 }
 
 // Auto-hide the overlay chrome after a short idle - any mouse movement brings it back.
@@ -700,8 +704,9 @@ document.addEventListener("keydown", (event) => {
 // web/player.html. Playback HANDS OFF to that window (this one stops); state travels through
 // localStorage, which both windows share (same WebView2 profile): "boot" carries the queue +
 // position out, a 1s heartbeat carries live position/index back, "cmd" relays LLM/tool control
-// commands out, and a closed flag on the heartbeat hands playback back to this panel, resuming
-// at the exact position the pop-out reached.
+// commands out, and a closed flag on the heartbeat ends the pop-out session - its "resume" flag
+// decides whether playback picks back up in this panel (its "Return to app" dock button) or just
+// stops there entirely (its X button).
 //
 // Browser (dev): Document Picture-in-Picture moves the panel's DOM node into an always-on-top
 // PiP window without reloading the iframe. ---
@@ -755,7 +760,11 @@ function ytPipPoll() {
     ytSyncVolumeFill();
     localStorage.setItem(YOUTUBE_VOLUME_KEY, String(state.volume));
   }
-  if (state.closed) ytEndNativePopout(state, true);
+  if (state.closed) {
+    const resume = state.resume !== false;
+    ytEndNativePopout(state, resume);
+    if (!resume) hideYoutubePanel();
+  }
 }
 
 async function ytOpenNativePopout() {

@@ -3,19 +3,23 @@
 // entirely through localStorage, shared with the main window via the common WebView2 profile:
 //
 //   lyko-yt-pip-boot   main -> here, once: { queue, index, time, playing, volume }
-//   lyko-yt-pip-state  here -> main, ~1s heartbeat: { ts, index, time, playing, volume, closed }
-//                      (closed:true is the handoff - main resumes playback at `time`)
+//   lyko-yt-pip-state  here -> main, ~1s heartbeat: { ts, index, time, playing, volume, closed, resume }
+//                      (closed:true ends the session; resume:true additionally hands playback
+//                      back to the main window at `time` - resume:false just stops it there)
 //   lyko-yt-pip-cmd    main -> here: { seq, action, volume? } - relayed LLM/tool commands
 //                      (play/pause/restart/next/previous/set_volume/stop)
 //
-// Closing this window (its own close button, relayed "stop", Alt+F4, or app quit) hands playback
-// back to the main window at the exact position reached here. That handoff is written from TWO
-// places for redundancy: closeSelf() below (the normal path - button click / relayed "stop"), and
-// window.__lykoPlayerHandoff, called from Python's window.events.closing (run_app.py) as a
-// fallback for close paths that never run this page's own JS at all (observed: closing via the
-// OS window chrome didn't reliably fire `pagehide` in WebView2, leaving the main window's
-// "popped out" flag stuck forever). writeState()'s closedWritten guard makes calling it from both
-// harmless.
+// Two distinct ways to end this window, both funnelled through closeSelf(resume):
+//   - The dock button ("Return to app") hands playback back to the main window's in-app player at
+//     the exact position reached here (resume:true).
+//   - The X button stops playback outright - no resume, the main window's player stays closed
+//     (resume:false).
+// Either way the window itself closes. That's also written from window.__lykoPlayerHandoff,
+// called from Python's window.events.closing (run_app.py) as a fallback for close paths that
+// never run this page's own JS at all (observed: closing via the OS window chrome didn't reliably
+// fire `pagehide` in WebView2, leaving the main window's "popped out" flag stuck forever) - it
+// defaults to resume:true, the safer of the two for an close path the user didn't explicitly pick.
+// writeState()'s closedWritten guard makes calling it from multiple paths harmless.
 
 const BOOT_KEY = "lyko-yt-pip-boot";
 const STATE_KEY = "lyko-yt-pip-state";
@@ -40,6 +44,7 @@ const fullscreenBtn = document.getElementById("player-fullscreen-btn");
 const fullscreenIconExpand = fullscreenBtn.querySelector(".youtube-player-fullscreen-icon-expand");
 const fullscreenIconCompress = fullscreenBtn.querySelector(".youtube-player-fullscreen-icon-compress");
 const closeBtn = document.getElementById("player-close-btn");
+const dockBtn = document.getElementById("player-dock-btn");
 
 let boot = null;
 try {
@@ -88,7 +93,7 @@ function syncVolumeFill() {
   volumeSlider.style.setProperty("--fill", `${Number(volumeSlider.value)}%`);
 }
 
-function writeState(closed) {
+function writeState(closed, resume) {
   if (closedWritten) return;
   if (closed) closedWritten = true;
   const playing = player && player.getPlayerState ? player.getPlayerState() === 1 : false;
@@ -99,11 +104,12 @@ function writeState(closed) {
     playing,
     volume: Number(volumeSlider.value),
     closed: !!closed,
+    resume: resume !== false,
   }));
 }
 
-function closeSelf() {
-  writeState(true);
+function closeSelf(resume) {
+  writeState(true, resume);
   if (window.pywebview && window.pywebview.api && window.pywebview.api.player_close) {
     window.pywebview.api.player_close();
   } else {
@@ -112,9 +118,10 @@ function closeSelf() {
 }
 // Called from Python (run_app.py's window.events.closing) as a fallback handoff - see the
 // top-of-file comment for why this exists alongside closeSelf()/pagehide.
-window.__lykoPlayerHandoff = () => writeState(true);
+window.__lykoPlayerHandoff = () => writeState(true, true);
 
-closeBtn.addEventListener("click", closeSelf);
+dockBtn.addEventListener("click", () => closeSelf(true));
+closeBtn.addEventListener("click", () => closeSelf(false));
 
 let fullscreenActive = false;
 fullscreenBtn.addEventListener("click", () => {
@@ -126,8 +133,9 @@ fullscreenBtn.addEventListener("click", () => {
   fullscreenActive = !fullscreenActive;
   fullscreenBtn.classList.toggle("active", fullscreenActive);
   fullscreenBtn.title = fullscreenActive ? "Exit fullscreen" : "Fullscreen";
-  fullscreenIconExpand.hidden = fullscreenActive;
-  fullscreenIconCompress.hidden = !fullscreenActive;
+  // Plain style.display, not .hidden - see youtube-player.js's matching comment.
+  fullscreenIconExpand.style.display = fullscreenActive ? "none" : "";
+  fullscreenIconCompress.style.display = fullscreenActive ? "" : "none";
 });
 
 // Frameless drag - mirrors the main window's setupDesktopTitlebar (init.js) but simplified (no
@@ -268,8 +276,9 @@ setInterval(() => {
   timeCurrent.textContent = formatTime(current);
   timeDuration.textContent = formatTime(duration);
   const playing = player.getPlayerState ? player.getPlayerState() === 1 : false;
-  playIcon.hidden = playing;
-  pauseIcon.hidden = !playing;
+  // Plain style.display, not .hidden - see youtube-player.js's matching comment.
+  playIcon.style.display = playing ? "none" : "";
+  pauseIcon.style.display = playing ? "" : "none";
   panelEl.classList.toggle("youtube-player-panel--playing", playing);
 }, 500);
 
