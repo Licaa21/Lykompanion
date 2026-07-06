@@ -3,6 +3,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 
 import httpx
+import openai as openai_module
 from openai import AsyncOpenAI
 
 from app.core import debug_log
@@ -62,15 +63,25 @@ def _provider_config(provider: str) -> tuple[str, str]:
 _client_cache: dict[tuple[str, str, str], AsyncOpenAI] = {}
 
 
-def get_client(provider: str) -> AsyncOpenAI:
+def get_client(provider: str, max_retries: int | None = None) -> AsyncOpenAI:
+    """`max_retries` overrides the SDK's default retry count (2) - notably, the SDK sleeps for
+    the upstream `Retry-After` value on a 429 (observed up to 60s) as part of "one retry," so a
+    caller that's itself inside a loop with its own natural retry cadence (the game-state
+    poller's next tick) should pass 0 to fail fast rather than stack its own cadence on top of
+    the SDK's blocking sleep. None = SDK default, used by every other (interactive) call site."""
     api_key, base_url = _provider_config(provider)
-    cache_key = (provider, api_key, base_url)
+    cache_key = (provider, api_key, base_url, max_retries)
     cached = _client_cache.get(cache_key)
     if cached is not None:
         return cached
     # Without an explicit timeout the SDK falls back to httpx's default (600s) - a hung/stalled
     # upstream response would hold a chat request open for minutes instead of failing fast.
-    fresh = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=45.0)
+    fresh = AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=45.0,
+        max_retries=max_retries if max_retries is not None else openai_module.DEFAULT_MAX_RETRIES,
+    )
     # Evict only this provider's stale entries (credentials/URL changed) - clearing the whole
     # cache would make two configured providers evict each other on every alternating call.
     for key in [k for k in _client_cache if k[0] == provider]:
@@ -156,11 +167,13 @@ async def chat_completion(
     source: str = "unknown",
     provider: str = "openrouter",
     on_usage: Callable[[float], None] | None = None,
+    max_retries: int | None = None,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
-    callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log."""
+    callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log.
+    `max_retries` - see get_client()."""
     resolved_model = model or settings.openrouter_model
-    client = get_client(provider)
+    client = get_client(provider, max_retries=max_retries)
     extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
     try:
