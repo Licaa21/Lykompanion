@@ -57,6 +57,7 @@ Every `fetch()` must send `x-lyko-token` (or `?token=` for `<img>`/`<audio>` src
 - Gamepad input can't be given to the overlay exclusively — `XInputGetState()` is a raw device poll, no per-process exclusivity API exists (would need ViGEmBus). Documented limitation, not a bug to fix casually.
 - `.env` has live API keys — never overwrite wholesale; go through `persist_env_values()`.
 - `winrt-*`/`windows-capture`/`pycaw` imports are Windows-only and import lazily/guarded.
+- **Every `WindowsCapture` instance leaks** (2026-07-06, was 15GB+ RSS after play): its `__init__` passes bound methods to the Rust-side `NativeWindowsCapture`, forming a cycle CPython's GC can't traverse (native object lacks tp_traverse). `wgc_capture.py`'s per-tick capture must keep its finally-block that detaches the frame handlers and empties the result dict, or each leaked cycle pins a ~33MB full-res frame copy. Long-term fix idea in TODO.md.
 - Background LLM passes (memory/game-state extraction) are fire-and-forget — must never add latency to or raise into the reply path.
 - Voice raw-audio replies prefix a `<transcript>` block, peeled by `_peel_transcript` (chat.py) — must be peeled on text paths too.
 - Tool-round boundary in `_stream_chat_with_tools`: the `"\n\n"` separator must be yielded the instant a text round ends (before its tool calls run), not deferred to the next round's first delta, or a trailing sentence gets stuck un-narrated.

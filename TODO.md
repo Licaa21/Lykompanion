@@ -1,6 +1,7 @@
 # TODO
 
 - [ ] Spotify integration needs to be properly tested
+- [ ] If OCR-poller memory still creeps after the 2026-07-06 leak fix (wgc_capture.py): each tick still leaks a small uncollectable WindowsCapture cycle + whatever native resources the Rust side pins. Real fix = stop per-tick session churn — either one persistent WGC session per monitor, or the `DxgiDuplicationSession` pull API the installed windows-capture package already exposes (one session, `acquire_frame()` per tick).
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 
