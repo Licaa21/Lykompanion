@@ -20,6 +20,7 @@ from app.services.llm.client import chat_completion
 from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
+from app.services.llm.variant_detection import apply_detected_variant, schedule_variant_detection
 from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
@@ -87,6 +88,12 @@ Additionally, you MAY include a **"proactive_message"** field: a short, natural,
 Lean on whatever real context you have about this exact situation - training data notes, known facts about the player - instead of a generic reaction. "That's the Ashen Idol, it opens with a poison cloud - don't stand still" beats "careful, tough-looking boss" every time. If you don't actually know anything specific about what's on screen, don't manufacture false confidence - say nothing this window.
 """
 
+# Appended only while the tracked session has no known modpack/variant yet — once one is set,
+# offering the field would just invite churn.
+_MODPACK_PROMPT_ADDON = """
+Additionally, include a **"modpack"** field: normally **null**. Set it to the modpack/overhaul/modlist's name ONLY when the screen itself names one unmistakably — a pack name in the main menu or window chrome ("FTB StoneBlock 4"), a branded splash/loading screen (e.g. Nolvus), a pack-specific quest book title. It must be a real pack identity read off the screen, never an inference from modded-looking content, and never a guess. Leave it null on every ordinary window.
+"""
+
 
 def _reset_window() -> None:
     """Resets the per-process OCR-batching buffers (frames collected this poll window, dedupe
@@ -148,10 +155,15 @@ def _format_tracker_fields(trackers: list[dict], previous_values: dict[str, str]
     return "Fields to track for this process:\n" + "\n".join(lines) + f"\n\nPrevious values: {previous_text}"
 
 
-async def _call_extraction(user_content, model: str | None, provider: str, allow_proactive: bool = False) -> dict:
+async def _call_extraction(
+    user_content, model: str | None, provider: str,
+    allow_proactive: bool = False, allow_modpack: bool = False,
+) -> dict:
     system = load_prompt("game_state_extraction")
     if allow_proactive:
         system += "\n" + _PROACTIVE_PROMPT_ADDON.strip()
+    if allow_modpack:
+        system += "\n" + _MODPACK_PROMPT_ADDON.strip()
     raw = await chat_completion(
         [
             {"role": "system", "content": system},
@@ -188,9 +200,12 @@ async def extract_and_apply_game_state(
     previous = game_state.get_game_state()
     previous_values = (previous or {}).get("values", {})
     active_session_id = (previous or {}).get("session_id")
+    active_variant = (previous or {}).get("variant") or None
     trackers = game_state_trackers.get_trackers(process)
-    known_facts = memory_store.format_memories_for_prompt(active_process=process, active_session_id=active_session_id) or "Known facts about the user: none yet."
-    training_data = game_state_training_data.format_training_data_for_prompt(process)
+    known_facts = memory_store.format_memories_for_prompt(
+        active_process=process, active_session_id=active_session_id, active_variant=active_variant
+    ) or "Known facts about the user: none yet."
+    training_data = game_state_training_data.format_training_data_for_prompt(process, active_variant)
     if not training_data and settings.game_state_training_enabled:
         # A blank document reads as "don't build one" to most models - be explicit that this
         # game has no notes yet and the pass is expected to start the document itself.
@@ -199,8 +214,9 @@ async def extract_and_apply_game_state(
             "via \"training_data_update\" as soon as this window teaches you anything about how to "
             "decode this game's UI/HUD/terms - don't wait for a complete picture."
         )
+    variant_line = f"\nActive modpack for this playthrough: {active_variant}" if active_variant else ""
     text_content = (
-        f"Foreground process: {process}\n\n{known_facts}\n\n"
+        f"Foreground process: {process}{variant_line}\n\n{known_facts}\n\n"
         + (f"{training_data}\n\n" if training_data else "")
         + f"{_format_tracker_fields(trackers, previous_values)}\n\n{_format_frames(frames)}"
     )
@@ -226,8 +242,9 @@ async def extract_and_apply_game_state(
     model = settings.game_state_model or None
     provider = settings.game_state_provider or settings.llm_provider
     allow_proactive = _proactive_allowed()
+    allow_modpack = not active_variant  # launch signals didn't name one — the screen might
     try:
-        data = await _call_extraction(content, model, provider, allow_proactive)
+        data = await _call_extraction(content, model, provider, allow_proactive, allow_modpack)
     except Exception:
         if len(content) == 1:
             logger.exception("Game-state extraction failed")
@@ -241,10 +258,21 @@ async def extract_and_apply_game_state(
             exc_info=True,
         )
         try:
-            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider, allow_proactive)
+            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider, allow_proactive, allow_modpack)
         except Exception:
             logger.exception("Game-state extraction failed")
             return
+
+    # On-screen modpack identification (offered only while no variant is known): points the
+    # active session at the pack's playthrough profile BEFORE the values below are persisted,
+    # so this window's state lands in the right session.
+    modpack = data.get("modpack") if allow_modpack else None
+    if isinstance(modpack, str) and modpack.strip():
+        apply_detected_variant(process, modpack.strip(), source="on-screen text")
+        refreshed = game_state.get_game_state()
+        if refreshed and refreshed["process"].lower() == process.lower():
+            active_session_id = refreshed.get("session_id")
+            active_variant = refreshed.get("variant") or None
 
     new_values = {}
     for tracker in trackers:
@@ -302,9 +330,9 @@ async def extract_and_apply_game_state(
         update = data.get("training_data_update")
         if isinstance(update, str) and update.strip():
             update = update.strip()
-            if update != game_state_training_data.get_training_data(process).strip():
-                logger.info("Game-state poll: extraction pass revised the training notes for process=%r", process)
-                game_state_training_data.set_training_data(process, update)
+            if update != game_state_training_data.get_training_data(process, active_variant).strip():
+                logger.info("Game-state poll: extraction pass revised the training notes for process=%r variant=%r", process, active_variant)
+                game_state_training_data.set_training_data(process, update, variant=active_variant)
 
 
 async def _capture_tick() -> None:
@@ -371,6 +399,10 @@ async def _capture_tick() -> None:
         # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
         # seed game-specific trackers + starting training data (no-op if already done/customized).
         schedule_bootstrap(process)
+        # Modpack/variant detection from launch signals (window title, cmdline, parent process)
+        # — figures out what a generic host exe (javaw.exe) really is and whether this launch is
+        # a modpack, auto-pointing the active session at the right playthrough profile.
+        schedule_variant_detection(process)
         # Also review standing "user"-scope facts for anything that's actually about this game -
         # facts stated before it was ever tracked (e.g. playtime mentioned in passing) had
         # nowhere more specific to land at save time and default to general scope.

@@ -38,7 +38,10 @@ async def _extract_and_apply_memory_locked(user_message: str, assistant_message:
     gs = game_state.get_game_state()
     tracked_process = gs["process"] if gs else None
     tracked_session = gs["session_id"] if gs else None
-    known_facts = memory.format_memories_for_prompt(tracked_process, tracked_session) or "Known facts about the user: none yet."
+    tracked_variant = (gs.get("variant") if gs else None) or None
+    known_facts = memory.format_memories_for_prompt(
+        tracked_process, tracked_session, active_variant=tracked_variant
+    ) or "Known facts about the user: none yet."
     game_state_text = game_state.format_game_state_for_prompt()
     observations_text = observations.format_observations_for_prompt(tracked_process, tracked_session) if tracked_process else ""
     # The scope decision ("user" vs "game"/"session") is anchored to what's actually running -
@@ -49,6 +52,11 @@ async def _extract_and_apply_memory_locked(user_message: str, assistant_message:
         if tracked_process
         else "No game is currently being tracked (nothing is actively played right now)."
     )
+    if tracked_process and tracked_variant:
+        tracked_line += (
+            f"\nActive modpack for this playthrough: {tracked_variant} (a modded variant of the game "
+            "— see the modpack tagging rule)."
+        )
     messages = [
         {"role": "system", "content": load_prompt("memory_extraction")},
         {
@@ -89,6 +97,9 @@ async def _extract_and_apply_memory_locked(user_message: str, assistant_message:
             (fact.get("scope") or "user").lower(),
             process=tracked_process,
             session_id=tracked_session,
+            # Honored only on game scope (remember() drops it elsewhere); anchored to the
+            # tracked variant, never to a pack name the model conjured itself.
+            variant=tracked_variant if fact.get("modpack_specific") is True else None,
         )
 
     for memory_id in data.get("remove") or []:

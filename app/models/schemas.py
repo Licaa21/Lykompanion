@@ -159,6 +159,7 @@ class GameSession(BaseModel):
     session_id: str
     name: str
     updated_at: str | None = None
+    variant: str | None = None
 
 
 class GameSessionCreate(BaseModel):
@@ -167,6 +168,10 @@ class GameSessionCreate(BaseModel):
 
 class GameSessionRename(BaseModel):
     name: str
+
+
+class GameSessionVariantUpdate(BaseModel):
+    variant: str | None = None  # None/empty clears the modpack tag
 
 
 class GameStateResponse(BaseModel):
@@ -216,6 +221,7 @@ class MemoryEntry(BaseModel):
     scope: Literal["user", "game", "session"] = "user"
     process: str | None = None
     session_id: str | None = None
+    variant: str | None = None
     saved_at: str | None = None
 
 
@@ -245,6 +251,7 @@ class GamingJournalSession(BaseModel):
     session_id: str
     name: str
     updated_at: str | None = None
+    variant: str | None = None
     active: bool = False
     memories: list[MemoryEntry] = []
     observations: list[ObservationEntry] = []

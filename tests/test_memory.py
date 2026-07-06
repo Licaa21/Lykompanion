@@ -122,6 +122,48 @@ def test_remember_rejects_empty_content():
     assert memory.remember("   ", "user") is None
 
 
+def test_remember_variant_only_sticks_on_game_scope():
+    game = memory.remember("Uses the pack's wither farm", "game", process="javaw.exe", variant="FTB StoneBlock 4")
+    assert game["variant"] == "FTB StoneBlock 4"
+    # Session facts are already variant-bound through their session; user facts have no game.
+    session = memory.remember("At quest chapter 3", "session", process="javaw.exe", session_id="runA", variant="FTB StoneBlock 4")
+    assert session["variant"] is None
+    user = memory.remember("Loves automation games", "user", variant="FTB StoneBlock 4")
+    assert user["variant"] is None
+
+
+def test_prompt_variant_scoping():
+    """Modpack-tagged game facts only show while a session of that pack is active — never in
+    vanilla runs or under a different pack. Untagged game facts show everywhere."""
+    memory.remember("Base-game fact", "game", process="skyrimse.exe")
+    memory.remember("Nolvus-only fact", "game", process="skyrimse.exe", variant="Nolvus")
+
+    nolvus = memory.format_memories_for_prompt("skyrimse.exe", None, active_variant="Nolvus")
+    assert "Base-game fact" in nolvus
+    assert "Nolvus-only fact" in nolvus
+    assert "Nolvus playthroughs only" in nolvus
+
+    vanilla = memory.format_memories_for_prompt("skyrimse.exe", None)
+    assert "Base-game fact" in vanilla
+    assert "Nolvus-only fact" not in vanilla
+
+    other_pack = memory.format_memories_for_prompt("skyrimse.exe", None, active_variant="Lorerim")
+    assert "Nolvus-only fact" not in other_pack
+
+
+def test_prompt_variant_match_is_case_insensitive():
+    memory.remember("Pack fact", "game", process="javaw.exe", variant="Nolvus")
+    assert "Pack fact" in memory.format_memories_for_prompt("javaw.exe", None, active_variant="nolvus")
+
+
+def test_remember_variant_duplicate_guard_is_per_variant():
+    """The same wording under a different variant is a different fact (each pack's version can
+    be removed/kept independently), but an exact re-save of one is still deduped."""
+    assert memory.remember("Survival mode is on", "game", process="skyrimse.exe", variant="Nolvus") is not None
+    assert memory.remember("Survival mode is on", "game", process="skyrimse.exe", variant="Nolvus") is None
+    assert memory.remember("Survival mode is on", "game", process="skyrimse.exe") is not None
+
+
 def test_scope_migration_on_read(tmp_path):
     """Pre-scope entries (no 'scope' key) get their scope derived from process/session_id."""
     import json

@@ -6,8 +6,14 @@ recent tracked session, not a narrative record.
 
 Sessions allow multiple named playthroughs per process (e.g. "Dark Urge run", "NG+"). Keys in
 game_state_sessions.json are "process::session_id". The active session per process is tracked in
-data/active_sessions.json. Training data and trackers stay per-process (the HUD doesn't change
-between save slots, so training is shared across sessions)."""
+data/active_sessions.json. Trackers stay per-process (shared across sessions); training data is
+per-variant when a variant is set (a modpack overhauls the UI) and per-process otherwise.
+
+A session may carry a "variant" — the modpack/overhaul it runs (e.g. "Nolvus" for a modded
+Skyrim playthrough), auto-detected by app/services/llm/variant_detection.py or set by the user
+from the Gaming Journal. None/absent = vanilla. The variant scopes what the companion knows:
+variant-tagged game memories and training data are only surfaced while a session of that
+variant is active."""
 
 import json
 import uuid
@@ -34,6 +40,11 @@ _tracking_started_at: datetime | None = None
 # In-memory mirror of the active session's values — avoids a disk read on every chat message.
 # Invalidated by set_game_state, stop_tracking, and switch_session.
 _cached_values: dict[str, str | None] | None = None
+
+# In-memory mirror of the active session's variant (modpack), same lifecycle as _cached_values.
+# None is a valid cached value (vanilla), so a separate loaded-flag marks cache validity.
+_cached_variant: str | None = None
+_cached_variant_loaded = False
 
 _extraction_call_count = 0
 _extraction_cost_usd = 0.0
@@ -105,7 +116,12 @@ def get_sessions(process: str) -> list[dict]:
     data = _load_all()
     prefix = process.lower() + "::"
     sessions = [
-        {"session_id": v["session_id"], "name": v["name"], "updated_at": v.get("updated_at")}
+        {
+            "session_id": v["session_id"],
+            "name": v["name"],
+            "updated_at": v.get("updated_at"),
+            "variant": v.get("variant"),
+        }
         for k, v in data.items()
         if k.startswith(prefix)
     ]
@@ -163,7 +179,7 @@ def get_session_name(process: str, session_id: str) -> str | None:
     return entry.get("name") if entry else None
 
 
-def create_session(process: str, name: str) -> dict:
+def create_session(process: str, name: str, variant: str | None = None) -> dict:
     """Creates a named session with a unique id, makes it active, returns the session dict."""
     session_id = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc).isoformat()
@@ -174,17 +190,19 @@ def create_session(process: str, name: str) -> dict:
         "process": process.lower(),
         "values": {},
         "updated_at": now,
+        "variant": variant,
     }
     _save_all(data)
     active = _load_active_sessions()
     active[process.lower()] = session_id
     _save_active_sessions(active)
     # If this is the currently tracked process, switch runtime state immediately
-    global _active_session, _cached_values
+    global _active_session, _cached_values, _cached_variant_loaded
     if _active_process and process.lower() == _active_process.lower():
         _active_session = session_id
         _cached_values = None
-    return {"session_id": session_id, "name": name, "updated_at": now}
+        _cached_variant_loaded = False
+    return {"session_id": session_id, "name": name, "updated_at": now, "variant": variant}
 
 
 def rename_session(process: str, session_id: str, name: str) -> bool:
@@ -197,6 +215,44 @@ def rename_session(process: str, session_id: str, name: str) -> bool:
     return True
 
 
+def set_session_variant(process: str, session_id: str, variant: str | None) -> bool:
+    """Sets (or clears, with None) the modpack/variant of a session. Returns False if the
+    session doesn't exist."""
+    data = _load_all()
+    key = _session_key(process, session_id)
+    if key not in data:
+        return False
+    data[key]["variant"] = (variant or "").strip() or None
+    _save_all(data)
+    global _cached_variant_loaded
+    if _active_process and process.lower() == _active_process.lower() and _active_session == session_id:
+        _cached_variant_loaded = False
+    return True
+
+
+def get_session_variant(process: str, session_id: str) -> str | None:
+    entry = _load_all().get(_session_key(process, session_id))
+    return (entry or {}).get("variant")
+
+
+def find_session_by_variant(process: str, variant: str) -> str | None:
+    """Most recently updated session of a process tagged with this variant (case-insensitive),
+    or None."""
+    target = variant.strip().lower()
+    for s in get_sessions(process):  # newest first
+        if (s.get("variant") or "").strip().lower() == target:
+            return s["session_id"]
+    return None
+
+
+def session_is_pristine(process: str, session_id: str) -> bool:
+    """True when a session has no tracked values yet — used by variant detection to decide
+    whether a just-created default session can simply be tagged/renamed in place instead of
+    spawning a second one. (Session memories are checked separately by the caller.)"""
+    entry = _load_all().get(_session_key(process, session_id))
+    return bool(entry) and not (entry.get("values") or {})
+
+
 def switch_session(process: str, session_id: str) -> bool:
     """Makes an existing session active. Returns False if the session doesn't exist."""
     data = _load_all()
@@ -205,10 +261,11 @@ def switch_session(process: str, session_id: str) -> bool:
     active = _load_active_sessions()
     active[process.lower()] = session_id
     _save_active_sessions(active)
-    global _active_session, _cached_values
+    global _active_session, _cached_values, _cached_variant_loaded
     if _active_process and process.lower() == _active_process.lower():
         _active_session = session_id
         _cached_values = None
+        _cached_variant_loaded = False
     return True
 
 
@@ -235,10 +292,11 @@ def delete_session(process: str, session_id: str) -> bool:
         _save_active_sessions(active)
 
     # If this process is the one being tracked, refresh runtime state to a valid session.
-    global _active_session, _cached_values
+    global _active_session, _cached_values, _cached_variant_loaded
     if _active_process and proc == _active_process.lower() and _active_session == session_id:
         _active_session = active.get(proc)
         _cached_values = None
+        _cached_variant_loaded = False
     return True
 
 
@@ -256,11 +314,12 @@ def delete_process(process: str) -> None:
     if active.pop(proc, None) is not None:
         _save_active_sessions(active)
 
-    global _active_process, _active_session, _cached_values
+    global _active_process, _active_session, _cached_values, _cached_variant_loaded
     if _active_process and proc == _active_process.lower():
         _active_process = None
         _active_session = None
         _cached_values = None
+        _cached_variant_loaded = False
 
 
 def get_values(process: str, session_id: str | None = None) -> dict[str, str | None]:
@@ -273,20 +332,22 @@ def start_tracking(process: str) -> None:
     """Marks a process as the active/displayed session. Called as soon as an approved game enters
     focus — the UI shows previous session values immediately instead of waiting for the first LLM
     pass to populate anything."""
-    global _active_process, _active_session, _cached_values, _tracking_started_at
+    global _active_process, _active_session, _cached_values, _tracking_started_at, _cached_variant_loaded
     _active_process = process
     _active_session = get_active_session_id(process)  # creates default session if none exists
     _cached_values = None
+    _cached_variant_loaded = False
     _tracking_started_at = datetime.now(timezone.utc)
 
 
 def stop_tracking() -> None:
     """Stops showing an active session (the tracked process exited) without deleting its
     persisted data — it's all still there next time that process is tracked."""
-    global _active_process, _active_session, _cached_values, _tracking_started_at
+    global _active_process, _active_session, _cached_values, _tracking_started_at, _cached_variant_loaded
     _active_process = None
     _active_session = None
     _cached_values = None
+    _cached_variant_loaded = False
     _tracking_started_at = None
 
 
@@ -296,12 +357,20 @@ def get_tracking_started_at() -> datetime | None:
 
 
 def get_game_state() -> dict | None:
-    global _cached_values
+    global _cached_values, _cached_variant, _cached_variant_loaded
     if _active_process is None:
         return None
     if _cached_values is None:
         _cached_values = get_values(_active_process, _active_session)
-    return {"process": _active_process, "session_id": _active_session, "values": _cached_values}
+    if not _cached_variant_loaded:
+        _cached_variant = get_session_variant(_active_process, _active_session) if _active_session else None
+        _cached_variant_loaded = True
+    return {
+        "process": _active_process,
+        "session_id": _active_session,
+        "values": _cached_values,
+        "variant": _cached_variant,
+    }
 
 
 def set_game_state(process: str, values: dict[str, str | None]) -> None:

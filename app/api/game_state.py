@@ -13,6 +13,7 @@ from app.models.schemas import (
     GameSession,
     GameSessionCreate,
     GameSessionRename,
+    GameSessionVariantUpdate,
     GameStateResponse,
     GameStateTracker,
     PendingProcessResponse,
@@ -78,6 +79,20 @@ async def rename_session(process: str, session_id: str, payload: GameSessionRena
         raise HTTPException(status_code=404, detail="Session not found.")
     sessions = game_state_store.get_sessions(process)
     session = next((s for s in sessions if s["session_id"] == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return session
+
+
+@router.put("/sessions/{process}/{session_id}/variant", response_model=GameSession)
+async def set_session_variant(process: str, session_id: str, payload: GameSessionVariantUpdate) -> GameSession:
+    """Set or clear (empty/null) the modpack/variant tag of a session — the manual override
+    for what variant detection guessed (or missed)."""
+    if not game_state_store.set_session_variant(process, session_id, payload.variant):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    session = next(
+        (s for s in game_state_store.get_sessions(process) if s["session_id"] == session_id), None
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session

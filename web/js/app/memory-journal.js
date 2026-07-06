@@ -180,6 +180,7 @@ journalSortDirBtn.addEventListener("click", () => {
 let journalSelectedProcess = null;
 let journalSelectedTab = "universal";
 let journalShowingCreateProfileForm = false;
+let journalShowingVariantForm = false;
 
 gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
@@ -503,6 +504,13 @@ function openGameDetail(game) {
     label.textContent = session.name + (session.active ? " ★" : "");
     if (session.active) label.title = "The profile new playthrough facts currently go to";
     card.appendChild(label);
+    if (session.variant) {
+      const variantChip = document.createElement("span");
+      variantChip.className = "journal-profile-variant";
+      variantChip.textContent = session.variant;
+      variantChip.title = "This profile is a modded playthrough of this pack";
+      card.appendChild(variantChip);
+    }
 
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
@@ -522,6 +530,7 @@ function openGameDetail(game) {
 
     card.addEventListener("click", () => {
       journalSelectedTab = session.session_id;
+      journalShowingVariantForm = false;
       openGameDetail(game);
     });
     tabsRow.appendChild(card);
@@ -604,6 +613,13 @@ function openGameDetail(game) {
     memTitle.textContent = selectedSession ? `Profile memories: ${selectedSession.name}` : "Universal game memories";
     memHeader.appendChild(memTitle);
     if (selectedSession) {
+      if (selectedSession.variant) {
+        const variantBadge = document.createElement("span");
+        variantBadge.className = "journal-badge journal-badge--variant";
+        variantBadge.textContent = selectedSession.variant;
+        variantBadge.title = "Modpack of this playthrough — its memories and training notes only apply while a profile of this pack is active";
+        memHeader.appendChild(variantBadge);
+      }
       if (selectedSession.active) {
         const badge = document.createElement("span");
         badge.className = "journal-badge journal-badge--active";
@@ -623,8 +639,50 @@ function openGameDetail(game) {
           },
         ));
       }
+      const variantBtn = buildJournalActionBtn(
+        selectedSession.variant ? "Edit modpack" : "Set modpack",
+        "Tag this profile with the modpack/overhaul it plays (auto-detected when possible) — clear it for a vanilla playthrough",
+        () => {
+          journalShowingVariantForm = !journalShowingVariantForm;
+          openGameDetail(game);
+        },
+      );
+      variantBtn.style.marginLeft = selectedSession.active ? "auto" : "6px";
+      memHeader.appendChild(variantBtn);
     }
     memoriesCard.appendChild(memHeader);
+
+    if (selectedSession && journalShowingVariantForm) {
+      const form = document.createElement("form");
+      form.className = "memory-add-form";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Modpack name (e.g. \"Nolvus\", \"FTB StoneBlock 4\") — leave empty for vanilla…";
+      input.autocomplete = "off";
+      input.value = selectedSession.variant || "";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "submit";
+      saveBtn.className = "secondary-btn";
+      saveBtn.textContent = "Save";
+      form.appendChild(input);
+      form.appendChild(saveBtn);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const response = await fetch(
+          `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}/variant`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ variant: input.value.trim() || null }),
+          },
+        );
+        if (response.ok) {
+          journalShowingVariantForm = false;
+          await refreshJournalDetail(game.process);
+        }
+      });
+      memoriesCard.appendChild(form);
+    }
 
     const memList = document.createElement("div");
     memList.className = "memory-list";

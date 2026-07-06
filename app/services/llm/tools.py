@@ -35,7 +35,11 @@ MEMORY_TOOLS = [
                 "playthroughs of it — e.g. the user's preferred class type for this game, how they "
                 "typically approach it, game-wide meta-preferences. Ask yourself: would this still be true "
                 "if they wiped their save and started a new game? If yes, use this tool. "
-                "Only call this when a game is actively being tracked right now."
+                "Only call this when a game is actively being tracked right now. "
+                "If a modpack is shown as active in [Currently playing] AND the fact only holds because "
+                "of that modpack (mod-added mechanics, quests, items, systems), set modpack_specific to "
+                "true so it never leaks into vanilla or other-pack playthroughs; leave it false for "
+                "base-game facts that are true regardless of mods."
             ),
             "parameters": {
                 "type": "object",
@@ -43,6 +47,10 @@ MEMORY_TOOLS = [
                     "content": {
                         "type": "string",
                         "description": "The fact to remember, written as a short standalone sentence.",
+                    },
+                    "modpack_specific": {
+                        "type": "boolean",
+                        "description": "True only when the fact depends on the currently active modpack.",
                     },
                 },
                 "required": ["content"],
@@ -124,28 +132,31 @@ MEMORY_TOOLS = [
 ]
 
 
-def _resolve_tracked_game() -> tuple[str | None, str | None]:
-    """Returns (process, session_id) from the currently tracked game state, or (None, None)."""
+def _resolve_tracked_game() -> tuple[str | None, str | None, str | None]:
+    """Returns (process, session_id, variant) from the currently tracked game state."""
     gs = game_state.get_game_state()
     if not gs:
-        return None, None
-    return gs["process"], gs.get("session_id")
+        return None, None, None
+    return gs["process"], gs.get("session_id"), gs.get("variant")
 
 
-def _save_via_remember(content: str, scope: str) -> str:
+def _save_via_remember(content: str, scope: str, modpack_specific: bool = False) -> str:
     """Shared handler for the three save tools - all placement decisions live in
     memory.remember(), including the degradation rule when the requested scope can't be
     honored (no tracked game / no active session)."""
     content = (content or "").strip()
     if not content:
         return "Nothing to save: content was empty."
-    process, session_id = _resolve_tracked_game()
-    entry = memory.remember(content, scope, process=process, session_id=session_id)
+    process, session_id, active_variant = _resolve_tracked_game()
+    variant = active_variant if (modpack_specific and scope == "game") else None
+    entry = memory.remember(content, scope, process=process, session_id=session_id, variant=variant)
     if entry is None:
         return "Not saved: an identical fact is already in memory."
     applied = entry["scope"]
     if applied == "session":
         label = f"session memory (this playthrough of {entry['process']})"
+    elif applied == "game" and entry.get("variant"):
+        label = f"game memory (game: {entry['process']}, {entry['variant']} playthroughs only)"
     elif applied == "game":
         label = f"game memory (game: {entry['process']}, all playthroughs)"
     else:
@@ -159,7 +170,8 @@ def execute_tool_call(name: str, arguments: dict) -> str:
         return _save_via_remember(arguments.get("content"), "user")
 
     if name == "save_game_memory":
-        return _save_via_remember(arguments.get("content"), "game")
+        return _save_via_remember(arguments.get("content"), "game",
+                                  modpack_specific=arguments.get("modpack_specific") is True)
 
     if name == "save_session_memory":
         return _save_via_remember(arguments.get("content"), "session")

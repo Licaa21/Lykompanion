@@ -340,6 +340,7 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     gs = game_state.get_game_state()
     tracked_process = gs["process"] if gs else None
     tracked_session = gs["session_id"] if gs else None
+    tracked_variant = (gs.get("variant") if gs else None) or None
 
     # Name the tracked game by its real title, not just its executable — the model shouldn't have
     # to map "eldenring.exe" -> "Elden Ring" itself (impossible for launcher/obfuscated exe names),
@@ -347,9 +348,14 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
     # how-long-they've-been-playing signal so the companion can react to just-launched vs deep-in.
     if tracked_process:
         title = game_art.get_display_title(tracked_process)
+        modpack_note = (
+            f" They're running the \"{tracked_variant}\" modpack/overhaul this playthrough — expect "
+            "mod-added mechanics/content on top of the base game, and keep advice consistent with it."
+            if tracked_variant else ""
+        )
         variable_content += (
             f"\n\n[Currently playing] {title} (process: {tracked_process}). This is the game being "
-            "tracked right now; the game/session facts and screen observations below are about it."
+            f"tracked right now; the game/session facts and screen observations below are about it.{modpack_note}"
         )
         variable_content += _session_duration_note()
 
@@ -358,6 +364,7 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
         tracked_session,
         retrieval_query=_retrieval_query(history or []),
         game_memory_limit=settings.memory_rag_limit,
+        active_variant=tracked_variant,
     )
     if memories:
         variable_content += "\n\n" + memories

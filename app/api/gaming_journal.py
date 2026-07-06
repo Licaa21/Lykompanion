@@ -43,6 +43,7 @@ async def get_gaming_journal() -> list[GamingJournalGame]:
                 session_id=s["session_id"],
                 name=s["name"],
                 updated_at=s.get("updated_at"),
+                variant=s.get("variant"),
                 active=s["session_id"] == active_id,
                 memories=session_memories,
                 observations=observations.get_observations(proc, s["session_id"]),

@@ -28,6 +28,58 @@ def get_foreground_process_name() -> str | None:
         return None
 
 
+def get_foreground_process_details() -> dict | None:
+    """Identity signals about the focused window's process, for modpack/variant detection:
+    window title, command line, exe path, working directory, and parent process name. Modded
+    launches leak the pack identity through these (a modded Minecraft window title names the
+    pack; javaw.exe's command line contains the pack folder; Skyrim under Mod Organizer has
+    ModOrganizer.exe as parent). Every field is best-effort and independently guarded — a
+    denied cmdline read (some anti-cheat-protected games) must not blank the rest. Returns
+    None on non-Windows or when even the process name can't be resolved."""
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return None
+
+        proc = psutil.Process(pid.value)
+        details: dict = {"process": proc.name(), "window_title": None, "cmdline": None,
+                         "exe": None, "cwd": None, "parent": None}
+    except Exception:
+        return None
+
+    try:
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length > 0:
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            details["window_title"] = buffer.value or None
+    except Exception:
+        pass
+    for field, getter in (
+        ("cmdline", lambda: " ".join(proc.cmdline()) or None),
+        ("exe", proc.exe),
+        ("cwd", proc.cwd),
+        ("parent", lambda: proc.parent().name() if proc.parent() else None),
+    ):
+        try:
+            details[field] = getter()
+        except Exception:
+            pass
+    return details
+
+
 def is_foreground_window_fullscreen() -> bool:
     """True if the focused window looks like a game: it covers (approximately) its whole monitor
     and has no normal windowed chrome (title bar / resize caption). This is the practical

@@ -43,27 +43,53 @@ def _save_all(data: dict[str, dict]) -> None:
     TRAINING_DATA_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def get_training_data(process: str) -> str:
-    return _load_all().get(process.lower(), {}).get("content", "")
+def _key(process: str, variant: str | None) -> str:
+    """Plain process key for vanilla; "process::variant" for a modpack's own document (a pack
+    overhauls UI/content enough that vanilla notes mislead and vice versa). Process keys never
+    contain "::", so the namespaces can't collide."""
+    if variant and variant.strip():
+        return f"{process.lower()}::{variant.strip().lower()}"
+    return process.lower()
 
 
-def set_training_data(process: str, content: str) -> str:
+def get_training_data(process: str, variant: str | None = None) -> str:
+    """The variant's own document when one exists; otherwise the base-game document (better
+    than nothing for a fresh pack — shared HUD basics still apply until the pack's own notes
+    take over via set_training_data writing to the variant key)."""
+    data = _load_all()
+    if variant and variant.strip():
+        content = data.get(_key(process, variant), {}).get("content", "")
+        if content:
+            return content
+    return data.get(process.lower(), {}).get("content", "")
+
+
+def has_own_training_data(process: str, variant: str | None = None) -> bool:
+    """Exact-key check (no vanilla fallback) — whether this process/variant has its own
+    document. The variant bootstrap uses it to decide whether seeding is still needed."""
+    return bool(_load_all().get(_key(process, variant), {}).get("content", "").strip())
+
+
+def set_training_data(process: str, content: str, variant: str | None = None) -> str:
     content = content.strip()
     data = _load_all()
-    data[process.lower()] = {"content": content, "updated_at": datetime.now(timezone.utc).isoformat()}
+    data[_key(process, variant)] = {"content": content, "updated_at": datetime.now(timezone.utc).isoformat()}
     _save_all(data)
     return content
 
 
 def delete_process(process: str) -> None:
-    """Drop a process's training-data document entirely (used when a tracked game is deleted)."""
+    """Drop a process's training-data documents entirely — the base one and every variant's
+    (used when a tracked game is deleted)."""
     data = _load_all()
-    if data.pop(process.lower(), None) is not None:
-        _save_all(data)
+    proc = process.lower()
+    kept = {k: v for k, v in data.items() if k != proc and not k.startswith(proc + "::")}
+    if len(kept) != len(data):
+        _save_all(kept)
 
 
-def format_training_data_for_prompt(process: str) -> str:
-    content = get_training_data(process)
+def format_training_data_for_prompt(process: str, variant: str | None = None) -> str:
+    content = get_training_data(process, variant)
     if not content:
         return ""
     return f"Known training data for this game (notes from your own earlier passes - trust this over guesses when it applies):\n{content}"

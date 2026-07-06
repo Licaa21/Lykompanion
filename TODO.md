@@ -1,6 +1,8 @@
 # TODO
 
 - [ ] Spotify integration needs to be properly tested
+- [ ] Modpack/variant system (2026-07-06) needs live testing: launch FTB StoneBlock 4 (javaw.exe → should retitle to Minecraft + create an "FTB StoneBlock 4" profile) and a Nolvus-style MO2 launch. Tune variant_detection.py confidence thresholds if it over/under-triggers.
+- [ ] Gaming Journal's Training Data tab only shows/edits the base-game document — per-variant documents (training data keyed `process::variant`) have no UI yet.
 - [ ] If OCR-poller memory still creeps after the 2026-07-06 leak fix (wgc_capture.py): each tick still leaks a small uncollectable WindowsCapture cycle + whatever native resources the Rust side pins. Real fix = stop per-tick session churn — either one persistent WGC session per monitor, or the `DxgiDuplicationSession` pull API the installed windows-capture package already exposes (one session, `acquire_frame()` per tick).
 
 # Risky changes (do this in a separate branch and properly test before merging to main):

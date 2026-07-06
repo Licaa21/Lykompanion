@@ -258,7 +258,10 @@ async def _resolve_official_title(term: str) -> str | None:
     return title
 
 
-async def fetch_art(process: str, force: bool = False) -> dict:
+async def fetch_art(process: str, force: bool = False, search_term: str | None = None) -> dict:
+    """`search_term` overrides the exe-derived search string — used by variant detection when
+    it has resolved what a generic host process (javaw.exe) actually is, so Steam/IGDB get
+    searched for the real game instead of "javaw"."""
     data = _load_all()
     key = process.lower()
     existing = data.get(key)
@@ -270,7 +273,7 @@ async def fetch_art(process: str, force: bool = False) -> dict:
     if existing and not force and is_fresh:
         return existing
 
-    term = _clean_search_term(process)
+    term = (search_term or "").strip() or _clean_search_term(process)
     result: dict | None = None
     try:
         async with httpx.AsyncClient(timeout=10) as http_client:

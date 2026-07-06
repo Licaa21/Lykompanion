@@ -26,10 +26,13 @@ _attempted: set[str] = set()
 
 
 def _guess_game_name(process: str) -> str:
-    """Best-effort human name from an exe name: 'BaldursGate3.exe' -> 'BaldursGate3'. IGDB's
-    fuzzy search and the web search engine both cope well with this form."""
-    name = process.rsplit(".", 1)[0]
-    return name.replace("_", " ").replace("-", " ").strip() or process
+    """Best-effort human name for a process: the Gaming Journal's resolved/overridden title
+    when one exists (it may name the real game behind a generic host exe like javaw.exe),
+    otherwise a cleaned-up exe name — IGDB's fuzzy search and the web search engine both cope
+    well with that form. Late import: game_art pulls in the LLM client stack."""
+    from app.core.game_art import get_display_title
+
+    return get_display_title(process)
 
 
 def _trackers_are_default(trackers: list[dict]) -> bool:
@@ -126,3 +129,81 @@ def schedule_bootstrap(process: str) -> None:
     if process.lower() in _attempted:
         return
     asyncio.get_running_loop().create_task(bootstrap_game_knowledge(process))
+
+
+async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: str) -> None:
+    """Pack-specific counterpart to the base bootstrap, run when variant detection identifies
+    a modpack: web-searches the pack itself (its mechanics, progression, added content) and
+    seeds the *variant's own* training-data document — the extraction pass reads and revises
+    that document while a session of this variant is active, so vanilla notes and pack notes
+    never overwrite each other. Also replaces the trackers when they're still the untouched
+    defaults (a skyblock pack tracks very different things than generic RPG fields)."""
+    key = f"{process.lower()}::{modpack.lower()}"
+    if key in _attempted:
+        return
+    _attempted.add(key)
+
+    if not settings.game_state_training_enabled or game_state_training_data.has_own_training_data(process, modpack):
+        return
+
+    logger.info("Variant bootstrap: gathering knowledge for %r (%s)", modpack, base_title)
+    try:
+        base_knowledge = "" if game_state_training_data.has_own_training_data(process) else await _gather_game_knowledge(base_title)
+        pack_results = await execute_web_search(
+            {"query": f"{modpack} {base_title} modpack overview features progression guide"}
+        )
+    except Exception:
+        logger.exception("Variant bootstrap: knowledge gathering failed for %r", modpack)
+        return
+    pack_knowledge = ""
+    if pack_results and not pack_results.startswith(("No web search results", "Web search failed")):
+        pack_knowledge = f"## Web search results about the modpack \"{modpack}\"\n{pack_results}"
+    if not pack_knowledge and not base_knowledge:
+        logger.info("Variant bootstrap: nothing found for %r, skipping", modpack)
+        return
+
+    user_content = (
+        f"Foreground process: {process}\n"
+        f"Base game: {base_title}\n"
+        f"The player is running the \"{modpack}\" modpack/overhaul of it — the notes you produce are for "
+        f"THAT modded experience, so pack-specific mechanics/content matter as much as base-game basics.\n\n"
+        f"Gathered information:\n\n"
+        + "\n\n".join(part for part in (base_knowledge, pack_knowledge) if part)
+    )
+
+    try:
+        raw = await chat_completion(
+            [
+                {"role": "system", "content": load_prompt("game_knowledge_bootstrap")},
+                {"role": "user", "content": user_content},
+            ],
+            model=settings.game_state_model or None,
+            response_format={"type": "json_object"},
+            source="game_bootstrap",
+            provider=settings.game_state_provider or settings.llm_provider,
+        )
+        data = json.loads(raw)
+    except Exception:
+        logger.exception("Variant bootstrap: LLM pass failed for %r", modpack)
+        return
+
+    if _trackers_are_default(game_state_trackers.get_trackers(process)):
+        new_trackers = [
+            {"label": t.get("label", ""), "description": t.get("description", "")}
+            for t in data.get("trackers") or []
+            if isinstance(t, dict) and (t.get("label") or "").strip()
+        ]
+        if new_trackers:
+            game_state_trackers.set_trackers(process, new_trackers)
+            logger.info("Variant bootstrap: seeded %d tracker(s) for process=%r (%s)", len(new_trackers), process, modpack)
+
+    training = data.get("training_data")
+    if isinstance(training, str) and training.strip():
+        game_state_training_data.set_training_data(process, training.strip(), variant=modpack)
+        logger.info("Variant bootstrap: seeded training data for process=%r variant=%r", process, modpack)
+
+
+def schedule_variant_bootstrap(process: str, base_title: str, modpack: str) -> None:
+    if f"{process.lower()}::{modpack.lower()}" in _attempted:
+        return
+    asyncio.get_running_loop().create_task(bootstrap_variant_knowledge(process, base_title, modpack))

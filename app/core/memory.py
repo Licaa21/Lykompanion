@@ -3,7 +3,10 @@
 - "user"    — about the person regardless of any game (process=None, session_id=None). Always
               injected into the system prompt.
 - "game"    — true across all playthroughs of one game (process set, session_id=None). Injected
-              only while that game is the tracked one.
+              only while that game is the tracked one. May additionally carry a "variant"
+              (modpack name, e.g. "Nolvus"): then it's only true for playthroughs of that
+              modpack and is injected only while a session of that variant is active — mod
+              mechanics must not leak into vanilla runs (or other packs), and vice versa.
 - "session" — specific to one playthrough/profile (process and session_id both set). Injected
               only while that exact session is active.
 
@@ -71,13 +74,22 @@ def save_memories(memories: list[dict]) -> None:
     _cache = memories
 
 
-def remember(content: str, scope: str, process: str | None = None, session_id: str | None = None) -> dict | None:
+def remember(
+    content: str,
+    scope: str,
+    process: str | None = None,
+    session_id: str | None = None,
+    variant: str | None = None,
+) -> dict | None:
     """The single entry point for saving a memory. Resolves the final scope from what's actually
     available, never silently re-tiering within game scopes:
 
     - "game" without a process, or "session" without a process, degrades to "user".
     - "session" with a process but no session degrades to "user" (NOT "game" - a playthrough
       fact stated game-wide would contaminate every other playthrough of that game).
+    - `variant` (a modpack name) narrows a "game" fact to playthroughs of that modpack only;
+      it's dropped on any other scope (session facts are already variant-bound through their
+      session; user facts have no game at all).
 
     Returns the saved entry (its "scope" reflects what was actually applied), or None when an
     identical fact already exists at the same placement (cheap exact-duplicate guard - semantic
@@ -103,6 +115,9 @@ def remember(content: str, scope: str, process: str | None = None, session_id: s
         session_id = None
     elif scope == "game":
         session_id = None
+    variant = (variant or "").strip() or None
+    if scope != "game":
+        variant = None
 
     with _lock:
         memories = load_memories()
@@ -110,7 +125,8 @@ def remember(content: str, scope: str, process: str | None = None, session_id: s
         for m in memories:
             if (m["content"].strip().lower() == key
                     and (m.get("process") or "").lower() == (process or "").lower()
-                    and m.get("session_id") == session_id):
+                    and m.get("session_id") == session_id
+                    and (m.get("variant") or "").lower() == (variant or "").lower()):
                 return None
         entry = {
             "id": uuid.uuid4().hex[:8],
@@ -118,6 +134,7 @@ def remember(content: str, scope: str, process: str | None = None, session_id: s
             "scope": scope,
             "process": process,
             "session_id": session_id,
+            "variant": variant,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
         memories.append(entry)
@@ -235,12 +252,14 @@ def format_memories_for_prompt(
     active_session_id: str | None = None,
     retrieval_query: str | None = None,
     game_memory_limit: int = 0,
+    active_variant: str | None = None,
 ) -> str:
     """`retrieval_query` + `game_memory_limit` enable RAG-lite injection: user-scope memories
     are always included in full, but once the matching game/session memories exceed the limit,
     only the most relevant/recent `limit` of them make the prompt (see memory_retrieval.py).
     Background extraction passes must NOT pass these - they need every fact to dedupe/remove
-    correctly."""
+    correctly. `active_variant` is the tracked session's modpack (game_state's "variant"):
+    variant-tagged game memories only show while their modpack is the active one."""
     memories = load_memories()
 
     def _include(m: dict) -> bool:
@@ -256,6 +275,11 @@ def format_memories_for_prompt(
             return False
         if m_process.lower() != active_process.lower():
             # Different game — exclude
+            return False
+        m_variant = (m.get("variant") or "").strip()
+        if m_variant and m_variant.lower() != (active_variant or "").strip().lower():
+            # Modpack-specific fact for a different variant (or a vanilla run) — exclude.
+            # Mod mechanics leaking into vanilla advice is exactly what the tag prevents.
             return False
         if not m_session:
             # Process-level memory (same game, no session) — include for all sessions
@@ -283,7 +307,11 @@ def format_memories_for_prompt(
         if m["scope"] == "session":
             suffix = f" (this playthrough of {m['process']})"
         elif m["scope"] == "game":
-            suffix = f" (game: {m['process']}, all playthroughs)"
+            variant = (m.get("variant") or "").strip()
+            if variant:
+                suffix = f" (game: {m['process']}, {variant} playthroughs only)"
+            else:
+                suffix = f" (game: {m['process']}, all playthroughs)"
         else:
             suffix = ""
         lines.append(f"- [{m['id']}] {m['content']}{suffix}")
