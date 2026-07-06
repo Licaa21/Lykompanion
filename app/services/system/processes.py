@@ -80,15 +80,11 @@ def get_foreground_process_details() -> dict | None:
     return details
 
 
-def is_foreground_window_fullscreen() -> bool:
-    """True if the focused window looks like a game: it covers (approximately) its whole monitor
-    and has no normal windowed chrome (title bar / resize caption). This is the practical
-    "smarter game detection" signal — a borderless/exclusive-fullscreen game covers the monitor
-    with no caption, whereas normal apps (even maximized) keep a caption and leave the taskbar
-    visible. Best-effort; False on non-Windows or any lookup failure.
-    """
+def _get_foreground_window_metrics() -> dict | None:
+    """hwnd + geometry + style of the focused window, shared by the fullscreen/large-window
+    heuristics and the window-capture path. None on non-Windows or any lookup failure."""
     if sys.platform != "win32":
-        return False
+        return None
 
     try:
         import ctypes
@@ -97,11 +93,11 @@ def is_foreground_window_fullscreen() -> bool:
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
-            return False
+            return None
 
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            return False
+            return None
 
         MONITOR_DEFAULTTONEAREST = 2
         hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
@@ -117,26 +113,67 @@ def is_foreground_window_fullscreen() -> bool:
         mi = MONITORINFO()
         mi.cbSize = ctypes.sizeof(MONITORINFO)
         if not user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-            return False
-
-        mon = mi.rcMonitor
-        # Cover the full monitor (a few px of slack), not just the work area — a maximized
-        # windowed app fills only rcWork (taskbar still showing), so it won't pass this.
-        covers_monitor = (
-            rect.left <= mon.left + 2
-            and rect.top <= mon.top + 2
-            and rect.right >= mon.right - 2
-            and rect.bottom >= mon.bottom - 2
-        )
-        if not covers_monitor:
-            return False
+            return None
 
         GWL_STYLE = -16
-        WS_CAPTION = 0x00C00000
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-        return not (style & WS_CAPTION)
+        return {"hwnd": hwnd, "rect": rect, "monitor": mi.rcMonitor, "work": mi.rcWork, "style": style}
     except Exception:
+        return None
+
+
+_WS_CAPTION = 0x00C00000
+
+
+def _metrics_are_fullscreen(m: dict) -> bool:
+    rect, mon = m["rect"], m["monitor"]
+    # Cover the full monitor (a few px of slack), not just the work area — a maximized
+    # windowed app fills only rcWork (taskbar still showing), so it won't pass this.
+    covers_monitor = (
+        rect.left <= mon.left + 2
+        and rect.top <= mon.top + 2
+        and rect.right >= mon.right - 2
+        and rect.bottom >= mon.bottom - 2
+    )
+    return covers_monitor and not (m["style"] & _WS_CAPTION)
+
+
+def is_foreground_window_fullscreen() -> bool:
+    """True if the focused window looks like a game: it covers (approximately) its whole monitor
+    and has no normal windowed chrome (title bar / resize caption). This is the practical
+    "smarter game detection" signal — a borderless/exclusive-fullscreen game covers the monitor
+    with no caption, whereas normal apps (even maximized) keep a caption and leave the taskbar
+    visible. Best-effort; False on non-Windows or any lookup failure.
+    """
+    m = _get_foreground_window_metrics()
+    return bool(m) and _metrics_are_fullscreen(m)
+
+
+def is_foreground_window_large(threshold: float = 0.7) -> bool:
+    """True when the focused window covers at least `threshold` of its monitor's work area —
+    the "windowed game" signal (windowed Minecraft, a maximized windowed game). Softer than
+    the fullscreen check, so callers should demand persistence (several consecutive ticks)
+    before acting on it. Best-effort; False on non-Windows or any lookup failure."""
+    m = _get_foreground_window_metrics()
+    if not m:
         return False
+    rect, work = m["rect"], m["work"]
+    # Clip to the work area so an off-screen overhang can't inflate the coverage.
+    visible_w = max(0, min(rect.right, work.right) - max(rect.left, work.left))
+    visible_h = max(0, min(rect.bottom, work.bottom) - max(rect.top, work.top))
+    work_area = max(1, (work.right - work.left) * (work.bottom - work.top))
+    return (visible_w * visible_h) / work_area >= threshold
+
+
+def get_foreground_window_if_windowed() -> int | None:
+    """HWND of the focused window when it is NOT borderless/exclusive-fullscreen, else None.
+    The OCR poller uses this to capture just the game window (clean frames — no desktop,
+    taskbar, or other windows leaking into OCR) while windowed; fullscreen games keep the
+    monitor-capture path, where window capture is unreliable anyway."""
+    m = _get_foreground_window_metrics()
+    if not m or _metrics_are_fullscreen(m):
+        return None
+    return m["hwnd"]
 
 
 def is_process_running(process_name: str) -> bool:

@@ -35,12 +35,13 @@ def _noop_closed_handler() -> None:
     pass
 
 
-def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
-    """Starts a Windows Graphics Capture session for one monitor, grabs exactly one frame, and
-    tears it down. Uses `start_free_threaded()` (capture runs on its own thread) so we can bound
-    the wait: if no frame arrives within game_state_capture_frame_timeout_seconds we stop the
-    session and return None instead of blocking indefinitely (the old blocking `start()` had no
-    escape hatch)."""
+def _capture_sync(monitor_index: int | None, window_hwnd: int | None) -> Image.Image | None:
+    """Starts a Windows Graphics Capture session for one monitor OR one window (window_hwnd
+    wins when given — used for windowed games so only the game's own pixels reach OCR), grabs
+    exactly one frame, and tears it down. Uses `start_free_threaded()` (capture runs on its own
+    thread) so we can bound the wait: if no frame arrives within
+    game_state_capture_frame_timeout_seconds we stop the session and return None instead of
+    blocking indefinitely (the old blocking `start()` had no escape hatch)."""
     result: dict[str, np.ndarray] = {}
     error: dict[str, Exception] = {}
     done = threading.Event()
@@ -50,6 +51,7 @@ def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
         cursor_capture=settings.game_state_capture_cursor_enabled,
         draw_border=False,
         monitor_index=monitor_index,
+        window_hwnd=window_hwnd,
     )
 
     @capture.event
@@ -78,10 +80,10 @@ def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
             except Exception:
                 logger.debug("Failed to stop timed-out capture session", exc_info=True)
             logger.warning(
-                "Windows Graphics Capture timed out after %.1fs for monitor_index=%r (no frame arrived "
+                "Windows Graphics Capture timed out after %.1fs for %s (no frame arrived "
                 "— exclusive-fullscreen or protected content? try borderless/windowed mode)",
                 frame_timeout,
-                monitor_index,
+                f"window_hwnd={window_hwnd}" if window_hwnd else f"monitor_index={monitor_index!r}",
             )
             return None
 
@@ -108,17 +110,40 @@ def _capture_monitor_sync(monitor_index: int) -> Image.Image | None:
         error.clear()
 
 
-async def capture_monitor_frame(monitor_index: int | None = None) -> Image.Image | None:
-    """Capture one monitor (1-based index, same convention as app/services/screenshot/capture.py)
-    off the event loop. Returns None (after logging) if the capture session fails for any reason,
-    so callers can treat that the same as "no OCR text this tick" rather than crashing the poller.
-    """
+# HWNDs whose window capture already failed once this app run — go straight to monitor capture
+# for them instead of re-paying the frame timeout on every single tick.
+_broken_window_captures: set[int] = set()
+
+
+async def capture_monitor_frame(monitor_index: int | None = None, window_hwnd: int | None = None) -> Image.Image | None:
+    """Capture one frame off the event loop: the given window when `window_hwnd` is set (clean
+    frames for windowed games — no desktop/taskbar/other windows in the OCR), else a monitor
+    (1-based index, same convention as app/services/screenshot/capture.py). A window capture
+    that fails falls back to monitor capture the same tick, and that HWND is skipped for the
+    rest of the app run. Returns None (after logging) if capture fails entirely, so callers can
+    treat it as "no OCR text this tick" rather than crashing the poller."""
+    if window_hwnd and window_hwnd not in _broken_window_captures:
+        try:
+            image = await asyncio.to_thread(_capture_sync, None, window_hwnd)
+        except Exception:
+            logger.exception("Windows Graphics Capture failed for window_hwnd=%r", window_hwnd)
+            image = None
+        if image is not None:
+            return image
+        if len(_broken_window_captures) > 64:  # HWNDs get recycled; don't grow unbounded
+            _broken_window_captures.clear()
+        _broken_window_captures.add(window_hwnd)
+        logger.warning(
+            "Window capture produced no frame for hwnd=%r — using monitor capture for this window from now on",
+            window_hwnd,
+        )
+
     if monitor_index is None or monitor_index < 1:
         # The OCR poller (this module's only caller) should follow the focused game window's
         # monitor, not the mouse cursor's — controller players often leave the cursor elsewhere.
         monitor_index = get_foreground_monitor_index()
     try:
-        return await asyncio.to_thread(_capture_monitor_sync, monitor_index)
+        return await asyncio.to_thread(_capture_sync, monitor_index, None)
     except Exception:
         logger.exception("Windows Graphics Capture failed for monitor_index=%r", monitor_index)
         return None

@@ -27,7 +27,9 @@ from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
 from app.services.system.processes import (
     get_foreground_process_name,
+    get_foreground_window_if_windowed,
     is_foreground_window_fullscreen,
+    is_foreground_window_large,
     is_process_running,
 )
 
@@ -40,6 +42,14 @@ _last_kept_text: str | None = None
 # _capture_tick (which ticks every game_state_capture_interval_seconds, default 1s) logs a
 # transition once instead of flooding INFO every tick while idling on the same app/game.
 _last_logged_skip: str | None = None
+
+# Consecutive ticks an unfamiliar WINDOWED process has held focus with a large window. A
+# borderless-fullscreen unknown queues for approval instantly, but plenty of games (windowed
+# Minecraft, most emulators) never go borderless — a large window held for a few ticks is the
+# equivalent signal, with the persistence requirement keeping briefly-focused big utility
+# windows from nagging. (process_lower, streak_count).
+_large_window_streak: tuple[str, int] | None = None
+_LARGE_WINDOW_STREAK_TICKS = 3
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
@@ -340,7 +350,7 @@ async def _capture_tick() -> None:
     frames has accumulated, batches them into a single structuring LLM call."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
-    global _last_logged_skip
+    global _last_logged_skip, _large_window_streak
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -356,16 +366,27 @@ async def _capture_tick() -> None:
         # alt-tab away mid-session (checking a guide, browsing) and shouldn't lose their snapshot
         # for it - only clear tracking once the tracked process actually exits.
         if is_game and not game_state_processes.is_whitelisted(foreground):
-            # Smarter detection: only nag for approval when the window actually looks like a game
-            # (covers the whole monitor, no title bar) — a borderless/fullscreen app. This stops
-            # every random windowed app that grabs focus from queuing as a "pending game." A
-            # windowed game can still be approved manually from the UI.
+            # Smarter detection: nag for approval when the window actually looks like a game —
+            # borderless/fullscreen queues instantly; a windowed app whose window covers most of
+            # the work area queues after holding focus a few consecutive ticks (windowed
+            # Minecraft, emulators). Small/briefly-focused windows never nag; anything can still
+            # be approved manually from the UI.
             if is_foreground_window_fullscreen():
+                _large_window_streak = None
                 if game_state_processes.add_pending_process(foreground):
                     logger.info("Game-state poll: unfamiliar fullscreen process=%r queued for user approval", foreground)
-            elif _last_logged_skip != foreground:
-                logger.info("Game-state poll: skipping unfamiliar windowed process=%r (not fullscreen, not queued for approval)", foreground)
-                _last_logged_skip = foreground
+            elif is_foreground_window_large():
+                streak = _large_window_streak[1] + 1 if _large_window_streak and _large_window_streak[0] == foreground.lower() else 1
+                _large_window_streak = (foreground.lower(), streak)
+                if streak >= _LARGE_WINDOW_STREAK_TICKS:
+                    _large_window_streak = None
+                    if game_state_processes.add_pending_process(foreground):
+                        logger.info("Game-state poll: unfamiliar large-windowed process=%r queued for user approval", foreground)
+            else:
+                _large_window_streak = None
+                if _last_logged_skip != foreground:
+                    logger.info("Game-state poll: skipping unfamiliar windowed process=%r (window too small to look like a game, not queued for approval)", foreground)
+                    _last_logged_skip = foreground
         elif not is_game:
             if _last_logged_skip != foreground:
                 logger.info("Game-state poll: skipping foreground process=%r (not recognized as a game / blacklisted)", foreground)
@@ -412,7 +433,9 @@ async def _capture_tick() -> None:
     if _window_started_at is None:
         _window_started_at = time.time()
 
-    image = await capture_monitor_frame()
+    # Windowed game: capture just its window so desktop/taskbar/other windows never reach OCR.
+    # Fullscreen (hwnd None): monitor capture, as before.
+    image = await capture_monitor_frame(window_hwnd=get_foreground_window_if_windowed())
     ocr_text = None
     if image is None:
         logger.info("Game-state poll: screen capture returned no frame for process=%r this tick", process)
