@@ -16,13 +16,19 @@ let pendingNarrationResolve = null;
 // there's nothing to interrupt and nothing useful to start recording either.
 let awaitingReply = false;
 
-// Ducks in-app music (currently YouTube only) while the companion is narrating or the user is
-// speaking hands-free - see applyMusicDucking in youtube-player.js. liveRecording lives in
-// voice.js, which loads after this file; referencing it here is safe since this only runs at
-// runtime, once every script has finished loading.
+// Ducks in-app music (currently YouTube only) while the companion is narrating, the user is
+// speaking (hands-free or push-to-talk), or a wake word just fired and an utterance is expected
+// imminently - see applyMusicDucking in youtube-player.js. liveRecording/manualRecording/wakeArmed
+// live in voice.js/wake-word.js, which load after this file; referencing them here is safe since
+// this only runs at runtime, once every script has finished loading.
 function updateMusicDucking() {
   if (typeof applyMusicDucking !== "function") return;
-  applyMusicDucking(isNarrating || (typeof liveRecording !== "undefined" && liveRecording));
+  applyMusicDucking(
+    isNarrating ||
+    (typeof liveRecording !== "undefined" && liveRecording) ||
+    (typeof manualRecording !== "undefined" && manualRecording) ||
+    (typeof wakeArmed !== "undefined" && wakeArmed)
+  );
 }
 
 async function synthesizeSentence(text) {

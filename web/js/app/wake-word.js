@@ -28,6 +28,14 @@ let wakeWordConsecutiveFailures = 0;
 let wakeWordLastError = null;
 let wakeWordMaxFailures = 3;
 
+// Anticipatory music duck: fires the instant the wake word is detected, before the user has even
+// started their actual command, so the duck isn't waiting on the VAD to notice speech. Cleared
+// once real hands-free recording takes over (voice.js's liveRecording=true path) or, if the user
+// never actually speaks, by this fallback timeout - otherwise music would stay ducked forever.
+let wakeArmed = false;
+let wakeArmedTimeout = null;
+const WAKE_ARMED_MAX_MS = 6000;
+
 // Errors that mean recognition is genuinely broken (e.g. a plain/open-source Chromium build
 // without Google's proprietary speech API key - the API exists but every start() fails). Distinct
 // from "no-speech", which fires routinely during normal continuous listening and isn't a failure.
@@ -55,6 +63,13 @@ function handleWakeWordDetected() {
   if (liveMicEnabled) return;
   liveMicEnabled = true;
   liveMicToggle.classList.add("active");
+  wakeArmed = true;
+  if (typeof updateMusicDucking === "function") updateMusicDucking();
+  clearTimeout(wakeArmedTimeout);
+  wakeArmedTimeout = setTimeout(() => {
+    wakeArmed = false;
+    if (typeof updateMusicDucking === "function") updateMusicDucking();
+  }, WAKE_ARMED_MAX_MS);
   startLiveMic();
   playWakeChime();
   if (!wakeWordDebugEl.hidden) {
@@ -91,6 +106,9 @@ function handleSleepWordDetected() {
   if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   liveMicEnabled = false;
   liveMicToggle.classList.remove("active");
+  wakeArmed = false;
+  clearTimeout(wakeArmedTimeout);
+  if (typeof updateMusicDucking === "function") updateMusicDucking();
   stopLiveMic();
   playSleepChime();
   if (!wakeWordDebugEl.hidden) {

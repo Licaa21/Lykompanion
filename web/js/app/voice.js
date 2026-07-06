@@ -218,6 +218,7 @@ async function sendDirectVoice(wavBlob) {
 
 let mediaRecorder;
 let audioChunks = [];
+let manualRecording = false;
 
 micBtn.addEventListener("click", async () => {
   if (mediaRecorder && mediaRecorder.state === "recording") {
@@ -240,6 +241,8 @@ micBtn.addEventListener("click", async () => {
 
   mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
   mediaRecorder.onstop = async () => {
+    manualRecording = false;
+    updateMusicDucking();
     micBtn.classList.remove("recording");
     beep(440, 0.12);
     stream.getTracks().forEach((track) => track.stop());
@@ -260,6 +263,8 @@ micBtn.addEventListener("click", async () => {
   };
 
   mediaRecorder.start();
+  manualRecording = true;
+  updateMusicDucking();
   micBtn.classList.add("recording");
   setVoiceStatus("Listening...", "recording");
   beep(880, 0.12);
@@ -432,6 +437,7 @@ async function startLiveMic() {
     if (!liveRecording) {
       if (loud) {
         liveRecording = true;
+        if (typeof wakeArmed !== "undefined") wakeArmed = false;
         updateMusicDucking();
         liveSilenceStart = null;
         liveSpeechStartTime = Date.now();
