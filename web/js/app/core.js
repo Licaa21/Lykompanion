@@ -210,7 +210,7 @@ function updateVoiceHints(force = false) {
   }
 
   if (overlayEditHintEl) {
-    const showOverlayHint = supported && overlayEditPhraseEnabled && handsfreeMode !== "single_command";
+    const showOverlayHint = supported && overlayEditPhraseEnabled;
     overlayEditHintEl.hidden = !showOverlayHint;
     if (showOverlayHint) {
       overlayEditHintEl.textContent = `Say "${overlayEditPhrase}" to edit the overlay (must be said in-game)`;

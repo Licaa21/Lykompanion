@@ -161,10 +161,9 @@ function startWakeWordRecognition() {
     }
 
     // The "Edit overlay" phrase is checked unconditionally, independent of hands-free state
-    // (unlike wake/sleep word above, which are mutually exclusive by mic state) — bypasses the
-    // LLM entirely, see handleOverlayEditPhraseDetected(). Gated off in Single Command mode (the
-    // recognizer may still be running here purely for the wake word while liveMicEnabled is false).
-    if (overlayEditPhraseEnabled && handsfreeMode !== "single_command") {
+    // (unlike wake/sleep word above, which are mutually exclusive by mic state) AND independent of
+    // Listening Mode — bypasses the LLM entirely, see handleOverlayEditPhraseDetected().
+    if (overlayEditPhraseEnabled) {
       const normalizedEdit = normalizeForWakeMatch(overlayEditPhrase);
       if (normalizedEdit && normalizedTranscript.includes(normalizedEdit)) {
         handleOverlayEditPhraseDetected();
@@ -210,13 +209,12 @@ function stopWakeWordRecognition() {
 
 function updateWakeWordListenerState() {
   const wasRunning = wakeWordShouldRun;
-  // Single Command mode has no use for the sleep word or edit-overlay phrase - both are
-  // hands-free-SESSION features (something to say while a continuous session is already running),
-  // and Single Command never runs a session longer than one utterance. Gate them off here rather
-  // than in each caller, so every consumer of these flags (recognizer state, debug status text,
-  // updateVoiceHints in core.js) automatically agrees.
+  // Single Command mode has no use for the sleep word - it's a hands-free-SESSION feature
+  // (something to say while a continuous session is already running), and Single Command never
+  // runs a session longer than one utterance. The "Edit overlay" phrase, unlike the sleep word,
+  // is genuinely independent of hands-free state entirely (works with hands-free on OR off,
+  // bypasses the LLM) - it stays available in both modes.
   const sleepWordActive = sleepWordEnabled && handsfreeMode !== "single_command";
-  const overlayEditPhraseActive = overlayEditPhraseEnabled && handsfreeMode !== "single_command";
 
   // The recognizer runs to catch the wake phrase (while hands-free is off) OR the sleep phrase
   // (while it's on) — so it stays alive across the on/off transition instead of stopping.
@@ -224,7 +222,7 @@ function updateWakeWordListenerState() {
   const wantSleep = wakeWordSupported && sleepWordActive && liveMicEnabled;
   // Independent of liveMicEnabled — the edit-overlay phrase must be caught whether or not
   // hands-free is on, so the recognizer stays alive purely for it even if wake/sleep are both off.
-  const wantEditPhrase = wakeWordSupported && overlayEditPhraseActive;
+  const wantEditPhrase = wakeWordSupported && overlayEditPhraseEnabled;
   wakeWordShouldRun = wantWake || wantSleep || wantEditPhrase;
 
   if (wakeWordShouldRun) {
@@ -236,7 +234,6 @@ function updateWakeWordListenerState() {
 
   wakeWordDependentEl.hidden = !wakeWordEnabled;
   sleepWordControlsEl.hidden = handsfreeMode === "single_command";
-  overlayEditPhraseControlsEl.hidden = handsfreeMode === "single_command";
   sleepWordDependentEl.hidden = !sleepWordEnabled;
   overlayEditPhraseDependentEl.hidden = !overlayEditPhraseEnabled;
   wakeWordDebugEl.hidden = !(wakeWordSupported && (wakeWordEnabled || sleepWordActive));
