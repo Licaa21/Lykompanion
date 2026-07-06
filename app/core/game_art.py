@@ -6,6 +6,7 @@ needs a configured API key) as a last resort for whatever still has no cover art
 A user-corrected title (title_overridden=True) is never clobbered by a later re-fetch."""
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,8 @@ import httpx
 
 from app.core.config import settings
 from app.services.llm.client import get_client
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 GAME_ART_PATH = DATA_DIR / "game_art.json"
@@ -71,6 +74,13 @@ def delete_process(process: str) -> None:
     data = _load_all()
     if data.pop(process.lower(), None) is not None:
         _save_all(data)
+
+
+def _titles_match(a: str, b: str) -> bool:
+    """Loose equality for store-result validation: lowercased, punctuation/spacing stripped.
+    Deliberately NOT containment — "Minecraft" must not match "Minecraft Dungeons"."""
+    normalize = lambda s: re.sub(r"[^a-z0-9]+", "", (s or "").lower())  # noqa: E731
+    return normalize(a) == normalize(b) and bool(normalize(a))
 
 
 def _clean_search_term(process: str) -> str:
@@ -273,6 +283,12 @@ async def fetch_art(process: str, force: bool = False, search_term: str | None =
     if existing and not force and is_fresh:
         return existing
 
+    # A caller-supplied search_term is a *resolved, trusted* title (variant detection or the
+    # user correcting the title) - store results are only accepted when they're actually that
+    # game. Without this, Steam's fuzzy search silently substitutes a lookalike: searching
+    # "Minecraft" (not on Steam) returns Minecraft Dungeons, which then overwrote both title
+    # and cover art.
+    trusted = bool((search_term or "").strip())
     term = (search_term or "").strip() or _clean_search_term(process)
     result: dict | None = None
     try:
@@ -281,15 +297,23 @@ async def fetch_art(process: str, force: bool = False, search_term: str | None =
                 result = await _fetch_steam(http_client, term)
             except httpx.HTTPError:
                 result = None
+            if trusted and result and not _titles_match(result.get("title") or "", term):
+                logger.info("Game art: rejecting Steam match %r for trusted title %r (process=%r)",
+                            result.get("title"), term, process)
+                result = None
             # Steam matching the game doesn't mean it *has* cover art (e.g. an unreleased title
             # with a store page but no library image yet) - fall through to IGDB then
             # SteamGridDB for art in that case too, not only when Steam found nothing at all.
             result = await _augment_with_cover(http_client, result, term)
+            if trusted and result and not _titles_match(result.get("title") or "", term):
+                logger.info("Game art: rejecting fallback-source match %r for trusted title %r (process=%r)",
+                            result.get("title"), term, process)
+                result = None
     except httpx.HTTPError:
         result = None
 
     official_title: str | None = None
-    if result is None or not result.get("cover_url"):
+    if not trusted and (result is None or not result.get("cover_url")):
         # Only worth the LLM+web-search round trip if we still don't have art (or nothing at
         # all) - a resolved official title gives every source above a better shot at matching.
         official_title = await _resolve_official_title(term)

@@ -81,4 +81,12 @@ async def set_game_art_title(process: str, payload: GameArtTitleUpdate) -> GameA
     title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title cannot be empty.")
-    return GameArtRecord(**game_art.set_title_override(process, title))
+    game_art.set_title_override(process, title)
+    # Re-resolve cover art/description under the corrected title (a wrong fuzzy store match —
+    # e.g. Minecraft Dungeons art on a Minecraft install — follows the title fix instead of
+    # sticking around). The override itself survives the refetch; art fetch failures shouldn't
+    # fail the rename.
+    try:
+        return GameArtRecord(**await game_art.fetch_art(process, force=True, search_term=title))
+    except Exception:
+        return GameArtRecord(**game_art.get_art(process))
