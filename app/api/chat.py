@@ -31,6 +31,7 @@ from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listen
 from app.services.llm.media_tool import (
     MEDIA_TOOLS,
     execute_control_youtube_player,
+    execute_get_now_playing,
     execute_play_on_spotify,
     execute_play_on_youtube,
 )
@@ -480,6 +481,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return message, None, side_effect
     if name == "play_on_spotify":
         return await execute_play_on_spotify(arguments), None, None
+    if name == "get_now_playing":
+        return execute_get_now_playing(arguments), None, None
     if name == "list_youtube_playlists":
         return await execute_list_youtube_playlists(arguments), None, None
     if name == "play_youtube_playlist":

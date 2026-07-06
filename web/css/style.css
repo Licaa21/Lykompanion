@@ -321,6 +321,12 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 /* When no chat is active, center the chat-log + composer as a group */
 .chat-panel.empty {
   justify-content: center;
+  /* .youtube-player-panel is a flex sibling of .chat-log/.composer in this same container (docked
+     above the chat log) - centering the group can push their combined height past what's actually
+     available on a short window. Safety net so the composer/input scrolls into view instead of
+     being silently clipped by .app-shell's overflow:hidden; harmless on a normal-height window
+     where everything already fits and nothing scrolls. */
+  overflow-y: auto;
 }
 .chat-panel.empty .chat-log {
   flex: 0 0 auto;
@@ -1530,6 +1536,12 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   width: calc(100% - 40px);
   max-width: 780px;
   margin: 12px auto 0;
+  /* Without this, the empty-state's .chat-panel.empty group (this panel + the greeting + the
+     composer) could exceed the available height on a short window, and this panel - the only flex
+     item among the three without its own flex-shrink:0 (.composer already has one; .chat-log gets
+     one from its "flex: 0 0 auto" in that state) - absorbed 100% of that overflow, compressing its
+     own box height and clipping the transport-controls row via its internal overflow. */
+  flex-shrink: 0;
   border-radius: 18px;
   /* Gradient hairline border: opaque-ish panel fill painted to padding-box, accent gradient
      painted to border-box showing through the 1px transparent border. */

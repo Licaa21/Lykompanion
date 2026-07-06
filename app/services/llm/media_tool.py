@@ -3,7 +3,7 @@ import logging
 
 import httpx
 
-from app.core import spotify_auth
+from app.core import media_state, spotify_auth
 from app.services.system.browser import open_url as _open
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,21 @@ MEDIA_TOOLS = [
                 },
                 "required": ["action"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_now_playing",
+            "description": (
+                "Check what's actually playing right now in the in-app YouTube player (title, "
+                "channel, and what's next/previous in the queue) - use this whenever you need to "
+                "answer a question like 'what song is this' or 'what are we listening to' "
+                "instead of guessing from memory of what you last played, since the user may have "
+                "skipped, picked something from the player's own search/playlist buttons, or the "
+                "queue may have auto-advanced since then."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
@@ -325,8 +340,9 @@ async def execute_play_on_youtube(arguments: dict) -> tuple[str, dict | None]:
 async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | None, int | None]:
     """Returns (tool_message, action, volume). action (or None if invalid/unrecognized) and volume
     (only for action='set_volume') are relayed to the frontend's in-app YouTube player as a side
-    effect - this tool has no way to know the player's actual state (nothing is playing, queue is
-    empty, etc.), it just forwards the request."""
+    effect - this tool itself has no way to know the player's actual state (nothing is playing,
+    queue is empty, etc.), it just forwards the request; media_state's last-pushed snapshot (see
+    get_now_playing below) is used on a best-effort basis to name the next/previous track."""
     action = (arguments.get("action") or "").strip().lower()
     if action not in _PLAYER_ACTIONS:
         return f"Unknown player action '{action}'.", None, None
@@ -338,7 +354,37 @@ async def execute_control_youtube_player(arguments: dict) -> tuple[str, str | No
             return "No volume level given.", None, None
         return f"Set the video's volume to {volume}%.", action, volume
 
+    if action in ("next", "previous"):
+        now_playing = media_state.get_now_playing()
+        neighbor = now_playing and now_playing[action]  # "next"/"previous" key matches the action
+        if neighbor:
+            verb = "Skipping to" if action == "next" else "Going back to"
+            return f"{verb} '{neighbor['title']}'.", action, None
+        # No queue known, or already at that end - fall back to the generic message rather than
+        # claiming a title we don't actually have.
+
     return _PLAYER_ACTION_MESSAGES[action], action, None
+
+
+def execute_get_now_playing(arguments: dict) -> str:
+    now_playing = media_state.get_now_playing()
+    if not now_playing:
+        return "Nothing is currently playing in the in-app YouTube player."
+
+    current = now_playing["current"]
+    label = f"'{current['title']}'" + (f" by {current['channel']}" if current.get("channel") else "")
+    state = "playing" if now_playing["playing"] else "paused"
+    position = f"{now_playing['index'] + 1} of {now_playing['queue_length']}"
+    parts = [f"Now {state}: {label} (track {position} in the queue)."]
+
+    next_entry = now_playing.get("next")
+    if next_entry:
+        parts.append(f"Up next: '{next_entry['title']}'.")
+    previous_entry = now_playing.get("previous")
+    if previous_entry:
+        parts.append(f"Previous: '{previous_entry['title']}'.")
+
+    return " ".join(parts)
 
 
 async def execute_play_on_spotify(arguments: dict) -> str:

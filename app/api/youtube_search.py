@@ -2,7 +2,9 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
+from app.core import media_state
 from app.services.llm.media_tool import (
     _SEARCH_TIMEOUT_SECONDS,
     _build_player_payload,
@@ -12,6 +14,26 @@ from app.services.llm.media_tool import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
+
+
+class NowPlayingEntry(BaseModel):
+    video_id: str
+    title: str
+    channel: str | None = None
+
+
+class NowPlayingUpdate(BaseModel):
+    queue: list[NowPlayingEntry]
+    index: int
+    playing: bool = True
+
+
+@router.post("/now-playing")
+async def set_now_playing(update: NowPlayingUpdate) -> dict:
+    """Pushed by youtube-player.js on every track change (play, skip, mix/playlist load,
+    auto-advance, or the pop-out window's own heartbeat) - see app/core/media_state.py."""
+    media_state.set_now_playing([e.model_dump() for e in update.queue], update.index, update.playing)
+    return {"ok": True}
 
 
 @router.get("/search")

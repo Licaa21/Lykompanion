@@ -186,12 +186,39 @@ function ytAdvanceQueue() {
   }
 }
 
+// Lets the backend (get_now_playing / control_youtube_player's next-previous messages, see
+// media_tool.py) know what's actually in the queue - it only ever lives in this browser tab's JS
+// memory otherwise. Best-effort: failures here must never break local playback.
+function ytPushNowPlaying(playing) {
+  fetch("/api/youtube/now-playing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      queue: ytQueue.map((e) => ({ video_id: e.videoId, title: e.title, channel: e.channel || null })),
+      index: ytQueueIndex,
+      playing,
+    }),
+  }).catch(() => {});
+}
+
+// Explicit "nothing is playing" report - stopping doesn't clear ytQueue/ytQueueIndex (they're
+// still this session's play history for next/previous-through-history), so ytPushNowPlaying's
+// normal payload would keep reporting the last-stopped track as "current" otherwise.
+function ytPushNowPlayingCleared() {
+  fetch("/api/youtube/now-playing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queue: [], index: -1, playing: false }),
+  }).catch(() => {});
+}
+
 // opts.startSeconds resumes mid-video (used when playback returns from the pop-out window);
 // opts.paused cues the video at that position without autoplaying (pop-out was closed paused).
 function ytPlayQueueEntry(entry, opts) {
   if (!ytApiReady || !entry) return;
   const startSeconds = opts && Number.isFinite(opts.startSeconds) ? opts.startSeconds : 0;
   const paused = !!(opts && opts.paused);
+  ytPushNowPlaying(!paused);
   ytSeekBar.value = 0;
   ytSeekBar.style.setProperty("--fill", "0%");
   ytTimeCurrent.textContent = "0:00";
@@ -357,9 +384,11 @@ window.controlYoutubePlayer = function (action, volume) {
       // re-show it, or the video plays audibly with no panel visible anywhere.
       if (ytPlayer && currentEntry) showYoutubePanel(currentEntry.title, currentEntry.channel);
       if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
+      if (currentEntry) ytPushNowPlaying(true);
       break;
     case "pause":
       if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+      if (currentEntry) ytPushNowPlaying(false);
       break;
     case "restart":
       if (ytPlayer && currentEntry) showYoutubePanel(currentEntry.title, currentEntry.channel);
@@ -367,6 +396,7 @@ window.controlYoutubePlayer = function (action, volume) {
         ytPlayer.seekTo(0, true);
         ytPlayer.playVideo();
       }
+      if (currentEntry) ytPushNowPlaying(true);
       break;
     case "next":
       ytAdvanceQueue();
@@ -383,6 +413,7 @@ window.controlYoutubePlayer = function (action, volume) {
     case "stop":
       if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
       hideYoutubePanel();
+      ytPushNowPlayingCleared();
       break;
     case "set_volume":
       if (ytPlayer && ytPlayer.setVolume && Number.isFinite(volume)) {
@@ -455,8 +486,18 @@ function ytFadeVolumeTo(target) {
 // re-ducks, all within ~200ms of each other): the re-duck would read getVolume() mid-restore-ramp
 // and capture an already-lowered value as the "original" to restore to later, so the real
 // restore at the end permanently landed below the true original - "the volume never came back up."
+// While popped out, THIS window's ytPlayer is stopped/idle (the pop-out owns actual playback), so
+// there's nothing here to duck - relay to the pop-out instead, which applies the identical
+// ratio/floor/fade logic to its own player+slider (see player-window.js's pipDuck/pipUnduck).
+// Deliberately doesn't consult ytDucked before relaying (unlike the in-app path below): the
+// pop-out's own pipDucked flag is the actual source of truth for whether IT is ducked, and a stale
+// ytDucked here (e.g. left over from before the user popped out) must not suppress a real command.
 window.applyMusicDucking = function (active) {
-  if (ytNativePopout || !ytPlayer || !ytPlayer.setVolume) return;
+  if (ytNativePopout) {
+    ytPipSendCommand(active ? "duck" : "unduck");
+    return;
+  }
+  if (!ytPlayer || !ytPlayer.setVolume) return;
   if (active === ytDucked) return;
   ytDucked = active;
   const realVolume = Number(ytVolumeSlider.value);
@@ -834,8 +875,18 @@ function ytPipPoll() {
   if (state.closed) {
     const resume = state.resume !== false;
     ytEndNativePopout(state, resume);
-    if (!resume) hideYoutubePanel();
+    if (!resume) {
+      hideYoutubePanel();
+      ytPushNowPlayingCleared();
+    }
+    // resume:true re-enters via ytEndNativePopout -> ytPlayQueueEntry, which pushes its own
+    // now-playing state once the in-app player picks playback back up.
+    return;
   }
+  // The pop-out window owns playback right now - its heartbeat is the only accurate source for
+  // "what's actually playing" (get_now_playing/media_tool.py had no visibility into it at all
+  // otherwise, since the in-app ytPlayer here is stopped/idle for the whole pop-out session).
+  ytPushNowPlaying(!!state.playing);
 }
 
 async function ytOpenNativePopout() {

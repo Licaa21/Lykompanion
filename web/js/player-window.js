@@ -397,8 +397,55 @@ function handleCommand(cmd) {
         syncVolumeFill();
       }
       break;
+    case "duck": pipDuck(); break;
+    case "unduck": pipUnduck(); break;
     case "stop": closeSelf(); break;
   }
+}
+
+// Music ducking, relayed here from the main window's applyMusicDucking (youtube-player.js) since
+// playback lives in THIS window while popped out - the main window's own ytPlayer is stopped/idle
+// then, so it has nothing of its own to duck. Mirrors youtube-player.js's ratio/floor/fade design
+// exactly (see its comments for why): duck to a percentage of the current volume rather than a
+// fixed absolute number (system volume-agnostic), with a floor so a quiet source doesn't get
+// chased down to a full mute, and restore against volumeSlider.value (never touched by these
+// fades) rather than a live-sampled player volume, so overlapping duck/un-duck calls can't corrupt
+// the baseline to restore to.
+const PIP_DUCK_RATIO = 0.15;
+const PIP_DUCK_FLOOR = 4;
+const PIP_DUCK_FADE_MS = 220;
+const PIP_DUCK_FADE_STEPS = 8;
+let pipDucked = false;
+let pipDuckFadeTimer = null;
+
+function pipDuckTargetFor(current) {
+  if (current <= PIP_DUCK_FLOOR) return current;
+  return Math.max(PIP_DUCK_FLOOR, Math.round(current * PIP_DUCK_RATIO));
+}
+
+function pipFadeVolumeTo(target) {
+  if (!player || !player.setVolume) return;
+  clearInterval(pipDuckFadeTimer);
+  const start = player.getVolume ? player.getVolume() : target;
+  if (start === target) return;
+  let step = 0;
+  pipDuckFadeTimer = setInterval(() => {
+    step += 1;
+    player.setVolume(Math.round(start + (target - start) * (step / PIP_DUCK_FADE_STEPS)));
+    if (step >= PIP_DUCK_FADE_STEPS) clearInterval(pipDuckFadeTimer);
+  }, PIP_DUCK_FADE_MS / PIP_DUCK_FADE_STEPS);
+}
+
+function pipDuck() {
+  if (pipDucked) return;
+  pipDucked = true;
+  pipFadeVolumeTo(pipDuckTargetFor(Number(volumeSlider.value)));
+}
+
+function pipUnduck() {
+  if (!pipDucked) return;
+  pipDucked = false;
+  pipFadeVolumeTo(Number(volumeSlider.value));
 }
 
 // Command relay + heartbeat. The storage event is unreliable across separate WebView2 windows,
