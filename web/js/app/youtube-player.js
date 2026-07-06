@@ -405,17 +405,27 @@ window.controlYoutubePlayer = function (action, volume) {
 // through YT_PIP_STATE_KEY (ytPipPoll, below) which would persist the ducked value as "saved volume",
 // so ducking is skipped entirely while popped out (documented gap, not a bug: see CLAUDE.md).
 //
-// Ducks to a fixed ABSOLUTE target (clamped to never exceed the current volume), not a percentage
-// OF the current volume - "duck to 10% of current" broke at both ends: at a quiet base volume
-// (e.g. 5) it rounded to ~0 and fully muted the music instead of just turning it down further, and
-// at max volume duck-to-10 could still read as "too loud" depending on YouTube's own internal
-// volume curve (its 0-100 scale isn't guaranteed linear amplitude, so a fixed *ratio* of it doesn't
-// correspond to a fixed, predictable loudness drop). Real ducking implementations (OBS's sidechain
-// ducking filter, Windows' communications-activity auto-duck) work the same way in spirit: a fixed
-// reduction target, independent of the source's current level - tune DUCK_TARGET_VOLUME to taste.
-const DUCK_TARGET_VOLUME = 12;
+// Ducks to a PERCENTAGE of the current volume (like Windows' own communications-activity auto-duck,
+// which reduces whatever the current session volume already is by a fixed 50%/80% - not to some
+// fixed absolute number). This has to stay relative, not an absolute target: we only ever touch
+// YouTube's own in-player 0-100 volume, with zero visibility into the user's actual Windows
+// per-app/master volume from browser JS - an absolute target means something different (louder or
+// quieter in real terms) depending on wherever that separate OS-level volume happens to sit, while
+// a percentage-of-current stays correct regardless, since it scales whatever loudness the user
+// already dialed in rather than assuming a fixed baseline.
+// The bug in the original ratio-only version wasn't "relative is wrong" - it was rounding to 0 at a
+// low current volume (Math.round(5 * 0.1) === 1, effectively muting instead of just ducking
+// further). DUCK_FLOOR fixes that: below it, the source is already quiet enough that ducking is a
+// no-op rather than a full mute.
+const DUCK_RATIO = 0.15;
+const DUCK_FLOOR = 4;
 const DUCK_FADE_MS = 220;
 const DUCK_FADE_STEPS = 8;
+
+function ytDuckTargetFor(current) {
+  if (current <= DUCK_FLOOR) return current; // already quiet - don't chase it down to a mute
+  return Math.max(DUCK_FLOOR, Math.round(current * DUCK_RATIO));
+}
 
 let ytDucked = false;
 let ytPreDuckVolume = null;
@@ -443,7 +453,7 @@ window.applyMusicDucking = function (active) {
   if (active) {
     ytPreDuckVolume = ytPlayer.getVolume ? ytPlayer.getVolume() : Number(ytVolumeSlider.value);
     ytDucked = true;
-    ytFadeVolumeTo(Math.min(ytPreDuckVolume, DUCK_TARGET_VOLUME));
+    ytFadeVolumeTo(ytDuckTargetFor(ytPreDuckVolume));
   } else {
     ytDucked = false;
     if (ytPreDuckVolume !== null) ytFadeVolumeTo(ytPreDuckVolume);
