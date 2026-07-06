@@ -215,8 +215,18 @@ async function processTtsQueue() {
     pendingNarrationResolve = null;
     ttsPlaying = false;
     isNarrating = false;
-    updateMusicDucking();
-    if (ttsQueue.length === 0) stopNarrationBtn.hidden = true;
+    // Only release ducking once the queue is actually drained, not on every individual sentence -
+    // processTtsQueue() below immediately re-enters and flips isNarrating back to true within the
+    // same tick whenever more sentences are already queued (multi-sentence replies enqueue several
+    // at once), so calling updateMusicDucking() unconditionally here caused a real bug: the
+    // un-duck→re-duck round trip re-captured "current volume" via ytPlayer.getVolume() mid-fade
+    // (before the un-duck ramp had time to finish), corrupting the saved pre-duck baseline lower
+    // and lower with each sentence gap - so the final restore, at the true end of narration,
+    // brought the volume back to that corrupted low value instead of the real original.
+    if (ttsQueue.length === 0) {
+      stopNarrationBtn.hidden = true;
+      updateMusicDucking();
+    }
     processTtsQueue();
   }
 }
