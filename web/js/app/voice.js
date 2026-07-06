@@ -432,6 +432,7 @@ async function startLiveMic() {
     if (!liveRecording) {
       if (loud) {
         liveRecording = true;
+        updateMusicDucking();
         liveSilenceStart = null;
         liveSpeechStartTime = Date.now();
         const preRollSamples = Math.round((preRollMs / 1000) * ringSampleRate);
@@ -479,6 +480,7 @@ function setOverlayHandsFree(active) {
 async function finalizeLiveUtterance() {
   if (!liveRecording) return;
   liveRecording = false;
+  updateMusicDucking();
   // The sleep word was just detected — this utterance is the sleep phrase itself; drop it silently
   // instead of sending it to the model.
   if (Date.now() < suppressUtteranceUntil) {

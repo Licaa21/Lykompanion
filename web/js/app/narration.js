@@ -16,6 +16,15 @@ let pendingNarrationResolve = null;
 // there's nothing to interrupt and nothing useful to start recording either.
 let awaitingReply = false;
 
+// Ducks in-app music (currently YouTube only) while the companion is narrating or the user is
+// speaking hands-free - see applyMusicDucking in youtube-player.js. liveRecording lives in
+// voice.js, which loads after this file; referencing it here is safe since this only runs at
+// runtime, once every script has finished loading.
+function updateMusicDucking() {
+  if (typeof applyMusicDucking !== "function") return;
+  applyMusicDucking(isNarrating || (typeof liveRecording !== "undefined" && liveRecording));
+}
+
 async function synthesizeSentence(text) {
   const response = await fetch("/api/tts", {
     method: "POST",
@@ -155,6 +164,7 @@ async function processTtsQueue() {
   if (ttsPlaying || ttsQueue.length === 0) return;
   ttsPlaying = true;
   isNarrating = true;
+  updateMusicDucking();
   stopNarrationBtn.hidden = false;
   const item = ttsQueue.shift();
   let blobUrl = null;
@@ -199,6 +209,7 @@ async function processTtsQueue() {
     pendingNarrationResolve = null;
     ttsPlaying = false;
     isNarrating = false;
+    updateMusicDucking();
     if (ttsQueue.length === 0) stopNarrationBtn.hidden = true;
     processTtsQueue();
   }
@@ -220,6 +231,7 @@ function stopNarration() {
   narrationAudio.currentTime = 0;
   ttsPlaying = false;
   isNarrating = false;
+  updateMusicDucking();
   if (pendingNarrationResolve) {
     const resolve = pendingNarrationResolve;
     pendingNarrationResolve = null;

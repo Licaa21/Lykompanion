@@ -398,6 +398,28 @@ window.controlYoutubePlayer = function (action, volume) {
   }
 };
 
+// Music ducking: called by narration.js/voice.js whenever the companion is speaking or the user
+// is speaking hands-free, so the game/companion voice isn't fighting music for attention. Applies
+// directly to ytPlayer (bypassing the slider/localStorage) so the duck never overwrites the user's
+// real saved volume. Only affects the in-app player - a popped-out native window relays volume back
+// through YT_PIP_STATE_KEY (ytPipPoll, below) which would persist the ducked value as "saved volume",
+// so ducking is skipped entirely while popped out (documented gap, not a bug: see CLAUDE.md).
+let ytDucked = false;
+let ytPreDuckVolume = null;
+window.applyMusicDucking = function (active) {
+  if (ytNativePopout || !ytPlayer || !ytPlayer.setVolume) return;
+  if (active === ytDucked) return;
+  if (active) {
+    ytPreDuckVolume = ytPlayer.getVolume ? ytPlayer.getVolume() : Number(ytVolumeSlider.value);
+    ytDucked = true;
+    ytPlayer.setVolume(Math.round(ytPreDuckVolume * 0.1));
+  } else {
+    ytDucked = false;
+    if (ytPreDuckVolume !== null) ytPlayer.setVolume(ytPreDuckVolume);
+    ytPreDuckVolume = null;
+  }
+};
+
 ytPanelClose.addEventListener("click", () => window.controlYoutubePlayer("stop"));
 ytPrevBtn.addEventListener("click", () => window.controlYoutubePlayer("previous"));
 ytNextBtn.addEventListener("click", () => window.controlYoutubePlayer("next"));

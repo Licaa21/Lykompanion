@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Spotify integration needs to be properly tested.
+- [ ] Spotify integration needs to be properly tested
 
 # Risky changes (do this in a separate branch and properly test before merging to main):
 
