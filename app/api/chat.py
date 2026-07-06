@@ -121,11 +121,19 @@ _TRANSCRIPT_BUFFER_CAP = 600
 def _voice_user_message(audio_b64: str) -> dict:
     """The raw-audio user turn, with the transcript-prefix instruction attached to it (not the
     system prompt, so text chats and transcription mode are unaffected)."""
+    # The trailing reminder sits AFTER the audio on purpose: small models (Gemini Flash) mirror
+    # the speaker's language, and an instruction that precedes the audio loses to that pull —
+    # the last thing before generation has to be the English-only rule.
     return {
         "role": "user",
         "content": [
             {"type": "text", "text": load_prompt("voice_transcript")},
             {"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}},
+            {
+                "type": "text",
+                "text": "(Transcript block above in the speaker's own language; the reply after it "
+                "must be in English only, even though the speaker used another language.)",
+            },
         ],
     }
 
@@ -368,6 +376,13 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
             variable_content += "\n\n" + observations_text
     if divergence_warning:
         variable_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
+
+    # Kept as the LAST line of the system prompt: small models (Gemini Flash) mirror the user's
+    # language and ignore an English-only rule buried mid-prompt — recency is what makes it stick.
+    variable_content += (
+        "\n\n[Language] Your reply must be in English only, even when the user writes or speaks "
+        "another language. Never reply in their language."
+    )
 
     # Only emit the two-block form with an explicit cache_control breakpoint for models that
     # actually honor it (Anthropic via OpenRouter). For everyone else — notably Gemini, which is
