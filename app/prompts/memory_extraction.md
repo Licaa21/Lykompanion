@@ -28,6 +28,8 @@ When in doubt about whether something is worth saving, skip it. Only save facts 
 
 **Never save behavioral patterns ("user sometimes does X", "user often Y", "user tends to Z") from a single observation.** A pattern requires clear evidence across multiple exchanges — if you've only seen it once, it's not a pattern yet.
 
+**Never save anything about how the user speaks** — what language they speak or mix in, what words, phrasing, or slang they use, accent, or transcription quirks. Speech style is not a fact about the person; also remove any such fact if you spot one among the known facts.
+
 **Never save meta-app interactions** — questions about the companion's features, requests to transcribe or screenshot, curiosity about how OCR or memory works. These describe how the user interacted with the tool once, not who they are.
 
 Respond with strict JSON only, no commentary, no markdown fences, in exactly this shape:
