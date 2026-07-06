@@ -36,6 +36,17 @@ let wakeArmed = false;
 let wakeArmedTimeout = null;
 const WAKE_ARMED_MAX_MS = 6000;
 
+// Cancels the anticipatory duck-arming above. Must run on every path that can end hands-free
+// listening before the real utterance ever starts (sleep word, the manual toggle button, the
+// agent's stop_listening tool) - otherwise wakeArmed is only cleared by the fallback timeout,
+// leaving music ducked for up to WAKE_ARMED_MAX_MS after the user already turned hands-free off
+// by hand, instead of restoring immediately like every other ducking trigger does.
+function disarmWakeWord() {
+  wakeArmed = false;
+  clearTimeout(wakeArmedTimeout);
+  if (typeof updateMusicDucking === "function") updateMusicDucking();
+}
+
 // Errors that mean recognition is genuinely broken (e.g. a plain/open-source Chromium build
 // without Google's proprietary speech API key - the API exists but every start() fails). Distinct
 // from "no-speech", which fires routinely during normal continuous listening and isn't a failure.
@@ -66,10 +77,7 @@ function handleWakeWordDetected() {
   wakeArmed = true;
   if (typeof updateMusicDucking === "function") updateMusicDucking();
   clearTimeout(wakeArmedTimeout);
-  wakeArmedTimeout = setTimeout(() => {
-    wakeArmed = false;
-    if (typeof updateMusicDucking === "function") updateMusicDucking();
-  }, WAKE_ARMED_MAX_MS);
+  wakeArmedTimeout = setTimeout(disarmWakeWord, WAKE_ARMED_MAX_MS);
   startLiveMic();
   playWakeChime();
   if (!wakeWordDebugEl.hidden) {
@@ -106,9 +114,7 @@ function handleSleepWordDetected() {
   if (typeof cancelInFlightRequest === "function") cancelInFlightRequest();
   liveMicEnabled = false;
   liveMicToggle.classList.remove("active");
-  wakeArmed = false;
-  clearTimeout(wakeArmedTimeout);
-  if (typeof updateMusicDucking === "function") updateMusicDucking();
+  disarmWakeWord();
   stopLiveMic();
   playSleepChime();
   if (!wakeWordDebugEl.hidden) {

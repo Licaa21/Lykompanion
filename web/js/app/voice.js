@@ -437,8 +437,8 @@ async function startLiveMic() {
     if (!liveRecording) {
       if (loud) {
         liveRecording = true;
-        if (typeof wakeArmed !== "undefined") wakeArmed = false;
-        updateMusicDucking();
+        if (typeof disarmWakeWord === "function") disarmWakeWord();
+        else updateMusicDucking();
         liveSilenceStart = null;
         liveSpeechStartTime = Date.now();
         const preRollSamples = Math.round((preRollMs / 1000) * ringSampleRate);
@@ -553,6 +553,10 @@ liveMicToggle.addEventListener("click", () => {
     startLiveMic();
   } else {
     stopLiveMic();
+    // Turning hands-free off by hand (not via the sleep word) skipped disarming a still-pending
+    // wake-word duck-arm - it self-healed after WAKE_ARMED_MAX_MS, but music stayed ducked until
+    // then instead of restoring immediately.
+    if (typeof disarmWakeWord === "function") disarmWakeWord();
   }
   updateWakeWordListenerState();
 });
@@ -575,6 +579,7 @@ function agentStopListening() {
   liveMicEnabled = false;
   liveMicToggle.classList.remove("active");
   stopLiveMic();
+  if (typeof disarmWakeWord === "function") disarmWakeWord();
   updateWakeWordListenerState();
 }
 
