@@ -58,8 +58,8 @@ function setupDesktopTitlebar() {
       snapZone = zone;
       if (!maxBtn) return;
       const maximized = zone === 'max';
-      maxBtn.title = maximized ? 'Restore' : 'Maximize';
-      maxBtn.setAttribute('aria-label', maximized ? 'Restore' : 'Maximize');
+      maxBtn.title = maximized ? 'Minimize' : 'Maximize';
+      maxBtn.setAttribute('aria-label', maximized ? 'Minimize' : 'Maximize');
       if (maxIcon) maxIcon.style.display = maximized ? 'none' : '';
       if (restoreIcon) restoreIcon.style.display = maximized ? '' : 'none';
     };
