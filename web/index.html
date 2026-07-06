@@ -603,6 +603,15 @@
           <p class="modal-hint">Tune how the hands-free mic decides when you're speaking. Stored server-side.</p>
           <div class="cfg-row">
             <label>
+              <span class="cfg-label">Listening Mode <button type="button" class="cfg-help" data-tip="Hands-free: the wake word turns on continuous listening, which stays on (with a sleep word/edit-overlay phrase available) until you turn it off yourself. Single Command: the wake word arms listening for exactly one question - the mic turns itself back off automatically the instant that question is sent, no sleep word needed.">?</button></span>
+              <select id="cfg-handsfree-mode">
+                <option value="handsfree">Hands-free (stays on)</option>
+                <option value="single_command">Single Command (auto-off after one question)</option>
+              </select>
+            </label>
+          </div>
+          <div class="cfg-row">
+            <label>
               <span class="cfg-label">Voice Activation Threshold (<span id="cfg-vad-threshold-value">8</span>) <button type="button" class="cfg-help" data-tip="Microphone input level that counts as speech starting. Raise it in noisy environments to avoid false triggers.">?</button></span>
               <input id="cfg-vad-threshold" type="range" min="1" max="40" step="1" value="8" />
             </label>

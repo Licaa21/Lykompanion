@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     sleep_word_enabled: bool = False
     sleep_word_phrase: str = "Go to sleep"
 
+    # "handsfree": classic behavior above - wake word turns listening on, stays on until the sleep
+    # word/manual toggle turns it off. "single_command": wake word arms listening for exactly one
+    # utterance; the mic auto-disables itself the instant that utterance is actually sent to the
+    # LLM, so sleep word/edit-overlay-phrase (both hands-free-session features) don't apply.
+    handsfree_mode: str = "handsfree"
+
     vad_threshold: int = 8
     vad_silence_ms: int = 3000
     vad_min_speech_ms: int = 300

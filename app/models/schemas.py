@@ -104,6 +104,7 @@ class CompanionConfig(BaseModel):
     wake_word_max_failures: int = 3
     sleep_word_enabled: bool = False
     sleep_word_phrase: str = "Go to sleep"
+    handsfree_mode: Literal["handsfree", "single_command"] = "handsfree"
     vad_threshold: int = 8
     # Keep in sync with Settings.vad_silence_ms (app/core/config.py).
     vad_silence_ms: int = 3000

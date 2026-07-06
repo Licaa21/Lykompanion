@@ -118,6 +118,7 @@ Everything is configurable from the Settings UI and persisted to a `.env` file i
 | `CONTEXT_WINDOW_MESSAGES` | How many of the most recent messages to send as context. `0` = unlimited. |
 | `WAKE_WORD_ENABLED`, `WAKE_WORD_PHRASE` | Enables the wake phrase (default `false`) and what to listen for (default `"Hey Buddy"`). |
 | `SLEEP_WORD_ENABLED`, `SLEEP_WORD_PHRASE` | Enables the sleep phrase (default `false`) that turns hands-free off while it's on (default `"Go to sleep"`). Detected in-browser and suppressed from being sent; also enforced as an LLM stop-intent backstop. |
+| `HANDSFREE_MODE` | `"handsfree"` (default) or `"single_command"` — see [Live mic / hands-free mode](#live-mic--hands-free-mode). |
 | `VAD_THRESHOLD`, `VAD_SILENCE_MS`, `VAD_MIN_SPEECH_MS` | Live-mic voice-activity-detection tuning — amplitude threshold, how long to wait after speech stops before sending, and the minimum recording length to bother sending. Defaults `8` / `1200` / `300`. |
 | `SCREENSHOT_MAX_WIDTH` | Downscale width (px) for screenshots sent to the LLM. Default `960`. Lower = cheaper in image tokens. |
 | `SCREENSHOT_JPEG_QUALITY` | JPEG quality (1-95) for screenshots sent to the LLM. Default `70`. |
@@ -255,6 +256,8 @@ The live mic (🎙️) continuously records into a rolling ring buffer (not just
 While narrating, the live mic doesn't suppress itself — any loud sound is treated as the user interrupting ("barge-in"), cutting narration immediately and starting a new recording, so you can cut the companion off mid-sentence.
 
 Once hands-free is off, optionally say the configured **wake word** (Settings → Live Mic, default "Hey Buddy") to turn it back on — a separate `SpeechRecognition` instance listens only while hands-free is off (so it never competes with the live mic's own capture), with a debug transcript panel in Settings to see what it's hearing and confirm detection works. Chrome/Edge only (Web Speech API).
+
+**Listening Mode** (Settings → Live Mic, top of the tab) picks between two hands-free styles: **Hands-free** (default) keeps listening indefinitely once woken, with the sleep word and "Edit overlay" phrase both available to end/interact with the session; **Single Command** arms listening for exactly one question after the wake word — the mic automatically turns itself back off the instant that utterance is actually sent to the LLM, so there's no need for a sleep word (its settings, along with "Edit overlay", are hidden while this mode is selected since neither applies to a session that's never longer than one utterance). The mic toggle button's tooltip in the chat toolbar reflects whichever mode is currently selected.
 
 ### Narration
 

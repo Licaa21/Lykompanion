@@ -63,6 +63,7 @@ async def get_config() -> CompanionConfig:
         wake_word_phrase=settings.wake_word_phrase,
         sleep_word_enabled=settings.sleep_word_enabled,
         sleep_word_phrase=settings.sleep_word_phrase,
+        handsfree_mode=settings.handsfree_mode,
         wake_word_max_failures=settings.wake_word_max_failures,
         vad_threshold=settings.vad_threshold,
         vad_silence_ms=settings.vad_silence_ms,
@@ -263,6 +264,8 @@ async def update_config(config: CompanionConfig) -> CompanionConfig:
     env_updates["SLEEP_WORD_ENABLED"] = str(config.sleep_word_enabled)
     settings.sleep_word_phrase = config.sleep_word_phrase
     env_updates["SLEEP_WORD_PHRASE"] = config.sleep_word_phrase
+    settings.handsfree_mode = config.handsfree_mode
+    env_updates["HANDSFREE_MODE"] = config.handsfree_mode
     settings.wake_word_max_failures = config.wake_word_max_failures
     env_updates["WAKE_WORD_MAX_FAILURES"] = str(config.wake_word_max_failures)
 

@@ -519,6 +519,17 @@ async function finalizeLiveUtterance() {
 
   // awaitingReply stays true — sendDirectVoice owns it from here
   sendDirectVoice(encodeWav(samples, ringSampleRate));
+
+  // Single Command mode: one utterance per wake word. Only the actual-dispatch path above (not
+  // the too-short/not-speech rejections earlier in this function) counts, so a false trigger
+  // doesn't burn the "one command" and force saying the wake word again for nothing.
+  if (handsfreeMode === "single_command" && liveMicEnabled) {
+    liveMicEnabled = false;
+    liveMicToggle.classList.remove("active");
+    stopLiveMic();
+    if (typeof disarmWakeWord === "function") disarmWakeWord();
+    updateWakeWordListenerState();
+  }
 }
 
 function stopLiveMic() {

@@ -428,7 +428,6 @@ function ytDuckTargetFor(current) {
 }
 
 let ytDucked = false;
-let ytPreDuckVolume = null;
 let ytDuckFadeTimer = null;
 
 // Ramps setVolume over a few steps instead of an instant jump - an abrupt volume cut/restore is
@@ -447,18 +446,21 @@ function ytFadeVolumeTo(target) {
   }, DUCK_FADE_MS / DUCK_FADE_STEPS);
 }
 
+// The "restore to" reference is ytVolumeSlider.value, NOT a sampled ytPlayer.getVolume() - the
+// slider is never touched by our own duck fades (that's the whole point of bypassing it above),
+// so it's a stable ground truth no matter how many duck/un-duck calls overlap or race each other.
+// This used to sample ytPlayer.getVolume() into a ytPreDuckVolume variable at the moment ducking
+// engaged, which broke whenever a duck/un-duck landed while a PREVIOUS fade was still ramping (e.g.
+// wake-word ducks -> user speaks -> utterance ends and un-ducks -> reply narration starts and
+// re-ducks, all within ~200ms of each other): the re-duck would read getVolume() mid-restore-ramp
+// and capture an already-lowered value as the "original" to restore to later, so the real
+// restore at the end permanently landed below the true original - "the volume never came back up."
 window.applyMusicDucking = function (active) {
   if (ytNativePopout || !ytPlayer || !ytPlayer.setVolume) return;
   if (active === ytDucked) return;
-  if (active) {
-    ytPreDuckVolume = ytPlayer.getVolume ? ytPlayer.getVolume() : Number(ytVolumeSlider.value);
-    ytDucked = true;
-    ytFadeVolumeTo(ytDuckTargetFor(ytPreDuckVolume));
-  } else {
-    ytDucked = false;
-    if (ytPreDuckVolume !== null) ytFadeVolumeTo(ytPreDuckVolume);
-    ytPreDuckVolume = null;
-  }
+  ytDucked = active;
+  const realVolume = Number(ytVolumeSlider.value);
+  ytFadeVolumeTo(active ? ytDuckTargetFor(realVolume) : realVolume);
 };
 
 ytPanelClose.addEventListener("click", () => window.controlYoutubePlayer("stop"));

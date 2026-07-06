@@ -919,6 +919,8 @@ function applyConfigToForm(cfg) {
   sleepWordPhrase = cfg.sleep_word_phrase || "Go to sleep";
   overlayEditPhraseEnabled = cfg.overlay_edit_phrase_enabled;
   overlayEditPhrase = cfg.overlay_edit_phrase || "Edit overlay";
+  handsfreeMode = cfg.handsfree_mode || "handsfree";
+  handsfreeModeSelect.value = handsfreeMode;
   if (wakeWordSupported) {
     wakeWordEnabledInput.checked = wakeWordEnabled;
     wakeWordPhraseInput.value = wakeWordPhrase;
@@ -928,6 +930,7 @@ function applyConfigToForm(cfg) {
     overlayEditPhraseInput.value = overlayEditPhrase;
     updateWakeWordListenerState();
   }
+  updateLiveMicToggleLabel();
   updateVoiceHints();
 
   vadThreshold = cfg.vad_threshold ?? 8;
@@ -1170,6 +1173,7 @@ async function saveSettings(saveButton) {
     wake_word_phrase: wakeWordPhraseInput.value.trim() || "Hey Buddy",
     sleep_word_enabled: sleepWordEnabledInput.checked,
     sleep_word_phrase: sleepWordPhraseInput.value.trim() || "Go to sleep",
+    handsfree_mode: handsfreeModeSelect.value,
     wake_word_max_failures: wakeWordMaxFailures,
     vad_threshold: vadThreshold,
     vad_silence_ms: vadSilenceMs,

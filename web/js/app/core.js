@@ -167,6 +167,12 @@ let wakeWordPhrase = "Hey Buddy";
 let sleepWordEnabled = false;
 let sleepWordPhrase = "Go to sleep";
 
+// "handsfree" (default) or "single_command" - see the Listening Mode select in the Live Mic
+// settings tab. Single Command mode has no use for the sleep word/edit-overlay phrase (both are
+// hands-free-session features - see wake-word.js's updateWakeWordListenerState), and voice.js's
+// finalizeLiveUtterance auto-disables the mic once a real utterance is actually sent in that mode.
+let handsfreeMode = "handsfree";
+
 // "Edit overlay" phrase - opens the native overlay's edit mode directly, bypassing the LLM
 // entirely. Detected the same way as wake/sleep word, but independent of hands-free mic state.
 let overlayEditPhraseEnabled = false;
@@ -197,13 +203,14 @@ function updateVoiceHints(force = false) {
   }
 
   if (sleepWordHintEl) {
-    const showSleepHint = supported && sleepWordEnabled && typeof liveMicEnabled !== "undefined" && liveMicEnabled;
+    const showSleepHint = supported && sleepWordEnabled && handsfreeMode !== "single_command"
+      && typeof liveMicEnabled !== "undefined" && liveMicEnabled;
     sleepWordHintEl.hidden = !showSleepHint;
     if (showSleepHint) sleepWordHintEl.textContent = `Say "${sleepWordPhrase}" to stop listening`;
   }
 
   if (overlayEditHintEl) {
-    const showOverlayHint = supported && overlayEditPhraseEnabled;
+    const showOverlayHint = supported && overlayEditPhraseEnabled && handsfreeMode !== "single_command";
     overlayEditHintEl.hidden = !showOverlayHint;
     if (showOverlayHint) {
       overlayEditHintEl.textContent = `Say "${overlayEditPhrase}" to edit the overlay (must be said in-game)`;

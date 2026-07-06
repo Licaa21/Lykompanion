@@ -1,3 +1,5 @@
+const handsfreeModeSelect = document.getElementById("cfg-handsfree-mode");
+
 const wakeWordUnsupportedEl = document.getElementById("wake-word-unsupported");
 const wakeWordControlsEl = document.getElementById("wake-word-controls");
 const wakeWordEnabledInput = document.getElementById("cfg-wake-word-enabled");
@@ -151,7 +153,7 @@ function startWakeWordRecognition() {
       if (normalizedWake && normalizedTranscript.includes(normalizedWake)) {
         handleWakeWordDetected();
       }
-    } else if (sleepWordEnabled) {
+    } else if (sleepWordEnabled && handsfreeMode !== "single_command") {
       const normalizedSleep = normalizeForWakeMatch(sleepWordPhrase);
       if (normalizedSleep && normalizedTranscript.includes(normalizedSleep)) {
         handleSleepWordDetected();
@@ -160,8 +162,9 @@ function startWakeWordRecognition() {
 
     // The "Edit overlay" phrase is checked unconditionally, independent of hands-free state
     // (unlike wake/sleep word above, which are mutually exclusive by mic state) — bypasses the
-    // LLM entirely, see handleOverlayEditPhraseDetected().
-    if (overlayEditPhraseEnabled) {
+    // LLM entirely, see handleOverlayEditPhraseDetected(). Gated off in Single Command mode (the
+    // recognizer may still be running here purely for the wake word while liveMicEnabled is false).
+    if (overlayEditPhraseEnabled && handsfreeMode !== "single_command") {
       const normalizedEdit = normalizeForWakeMatch(overlayEditPhrase);
       if (normalizedEdit && normalizedTranscript.includes(normalizedEdit)) {
         handleOverlayEditPhraseDetected();
@@ -207,13 +210,21 @@ function stopWakeWordRecognition() {
 
 function updateWakeWordListenerState() {
   const wasRunning = wakeWordShouldRun;
+  // Single Command mode has no use for the sleep word or edit-overlay phrase - both are
+  // hands-free-SESSION features (something to say while a continuous session is already running),
+  // and Single Command never runs a session longer than one utterance. Gate them off here rather
+  // than in each caller, so every consumer of these flags (recognizer state, debug status text,
+  // updateVoiceHints in core.js) automatically agrees.
+  const sleepWordActive = sleepWordEnabled && handsfreeMode !== "single_command";
+  const overlayEditPhraseActive = overlayEditPhraseEnabled && handsfreeMode !== "single_command";
+
   // The recognizer runs to catch the wake phrase (while hands-free is off) OR the sleep phrase
   // (while it's on) — so it stays alive across the on/off transition instead of stopping.
   const wantWake = wakeWordSupported && wakeWordEnabled && !liveMicEnabled;
-  const wantSleep = wakeWordSupported && sleepWordEnabled && liveMicEnabled;
+  const wantSleep = wakeWordSupported && sleepWordActive && liveMicEnabled;
   // Independent of liveMicEnabled — the edit-overlay phrase must be caught whether or not
   // hands-free is on, so the recognizer stays alive purely for it even if wake/sleep are both off.
-  const wantEditPhrase = wakeWordSupported && overlayEditPhraseEnabled;
+  const wantEditPhrase = wakeWordSupported && overlayEditPhraseActive;
   wakeWordShouldRun = wantWake || wantSleep || wantEditPhrase;
 
   if (wakeWordShouldRun) {
@@ -224,14 +235,28 @@ function updateWakeWordListenerState() {
   }
 
   wakeWordDependentEl.hidden = !wakeWordEnabled;
+  sleepWordControlsEl.hidden = handsfreeMode === "single_command";
+  overlayEditPhraseControlsEl.hidden = handsfreeMode === "single_command";
   sleepWordDependentEl.hidden = !sleepWordEnabled;
   overlayEditPhraseDependentEl.hidden = !overlayEditPhraseEnabled;
-  wakeWordDebugEl.hidden = !(wakeWordSupported && (wakeWordEnabled || sleepWordEnabled));
-  if (wakeWordSupported && (wakeWordEnabled || sleepWordEnabled)) {
+  wakeWordDebugEl.hidden = !(wakeWordSupported && (wakeWordEnabled || sleepWordActive));
+  if (wakeWordSupported && (wakeWordEnabled || sleepWordActive)) {
     wakeWordStatusEl.textContent = liveMicEnabled
-      ? (sleepWordEnabled ? "Listening for sleep phrase..." : "Hands-free is already on.")
+      ? (sleepWordActive ? "Listening for sleep phrase..." : "Hands-free is already on.")
       : (wakeWordEnabled ? "Listening for wake phrase..." : "");
-    if (liveMicEnabled && !sleepWordEnabled) wakeWordTranscriptEl.textContent = "";
+    if (liveMicEnabled && !sleepWordActive) wakeWordTranscriptEl.textContent = "";
+  }
+}
+
+// Icon-only button - "renaming" it means updating its tooltip/aria-label to whatever mode is
+// currently selected, since there's no visible label text in the chat toolbar to swap.
+function updateLiveMicToggleLabel() {
+  if (handsfreeMode === "single_command") {
+    liveMicToggle.title = "Single Command Mode: say the wake word, ask one thing, mic turns off automatically once it's sent";
+    liveMicToggle.setAttribute("aria-label", "Toggle Single Command Mode listening");
+  } else {
+    liveMicToggle.title = "Hands-free: auto-record and send when you speak";
+    liveMicToggle.setAttribute("aria-label", "Toggle hands-free listening");
   }
 }
 
@@ -246,6 +271,13 @@ wakeWordEnabledInput.addEventListener("change", () => {
   wakeWordEnabled = wakeWordEnabledInput.checked;
   updateWakeWordListenerState();
   updateVoiceHints();
+});
+
+handsfreeModeSelect.addEventListener("change", () => {
+  handsfreeMode = handsfreeModeSelect.value;
+  updateWakeWordListenerState();
+  updateVoiceHints();
+  updateLiveMicToggleLabel();
 });
 
 wakeWordPhraseInput.addEventListener("input", () => {
