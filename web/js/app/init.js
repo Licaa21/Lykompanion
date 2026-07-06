@@ -48,6 +48,21 @@ function setupDesktopTitlebar() {
     // floating rect to return to. No OS snap overlay/layouts — this is a pure JS reimplementation.
     let snapZone = null;
     let restoreBounds = null;
+    // The maximize titlebar button swaps to a "restore" icon/tooltip only for the true full-max
+    // zone — left/right half-snaps are still "not maximized" (clicking it there should maximize,
+    // not shrink further), matching toggleMax's own snapZone === 'max' check below.
+    const maxBtn = document.getElementById('win-max');
+    const maxIcon = document.getElementById('win-max-icon-maximize');
+    const restoreIcon = document.getElementById('win-max-icon-restore');
+    const setSnapZone = (zone) => {
+      snapZone = zone;
+      if (!maxBtn) return;
+      const maximized = zone === 'max';
+      maxBtn.title = maximized ? 'Restore' : 'Maximize';
+      maxBtn.setAttribute('aria-label', maximized ? 'Restore' : 'Maximize');
+      if (maxIcon) maxIcon.style.display = maximized ? 'none' : '';
+      if (restoreIcon) restoreIcon.style.display = maximized ? '' : 'none';
+    };
     const snapTarget = (zone) => {
       const a = workArea();
       const half = Math.round(a.w / 2);
@@ -56,7 +71,7 @@ function setupDesktopTitlebar() {
       return { x: a.x, y: a.y, w: a.w, h: a.h }; // max
     };
     const applySnap = (zone, restore) => {
-      restoreBounds = restore; snapZone = zone;
+      restoreBounds = restore; setSnapZone(zone);
       const b = snapTarget(zone);
       commit(b.x, b.y, b.w, b.h);
     };
@@ -93,7 +108,7 @@ function setupDesktopTitlebar() {
         const a = workArea();
         const w = Math.max(Math.round(a.w / 2), 800);
         const h = Math.max(Math.round(a.h / 2), 600);
-        snapZone = null; restoreBounds = null;
+        setSnapZone(null); restoreBounds = null;
         commit(Math.round(a.x + (a.w - w) / 2), Math.round(a.y + (a.h - h) / 2), w, h);
       };
       const toggleMax = () => {
@@ -127,7 +142,7 @@ function setupDesktopTitlebar() {
               // Un-snap: restore the floating size, cursor kept over the titlebar horizontally.
               const size = snappedRestore || curBounds();
               start = { x: Math.round(sx - (downClientX / window.innerWidth) * size.w), y: window.screenY, w: size.w, h: size.h };
-              snapZone = null; restoreBounds = null;
+              setSnapZone(null); restoreBounds = null;
             } else {
               start = curBounds();
             }
@@ -169,7 +184,7 @@ function setupDesktopTitlebar() {
       grip.addEventListener('pointerdown', (e) => {
         if (!api()?.window_set_bounds) return;
         e.preventDefault();
-        snapZone = null; restoreBounds = null;
+        setSnapZone(null); restoreBounds = null;
         const dir = grip.dataset.dir;
         const sx = e.screenX, sy = e.screenY;
         const start = curBounds();
