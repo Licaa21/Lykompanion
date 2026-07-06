@@ -404,18 +404,49 @@ window.controlYoutubePlayer = function (action, volume) {
 // real saved volume. Only affects the in-app player - a popped-out native window relays volume back
 // through YT_PIP_STATE_KEY (ytPipPoll, below) which would persist the ducked value as "saved volume",
 // so ducking is skipped entirely while popped out (documented gap, not a bug: see CLAUDE.md).
+//
+// Ducks to a fixed ABSOLUTE target (clamped to never exceed the current volume), not a percentage
+// OF the current volume - "duck to 10% of current" broke at both ends: at a quiet base volume
+// (e.g. 5) it rounded to ~0 and fully muted the music instead of just turning it down further, and
+// at max volume duck-to-10 could still read as "too loud" depending on YouTube's own internal
+// volume curve (its 0-100 scale isn't guaranteed linear amplitude, so a fixed *ratio* of it doesn't
+// correspond to a fixed, predictable loudness drop). Real ducking implementations (OBS's sidechain
+// ducking filter, Windows' communications-activity auto-duck) work the same way in spirit: a fixed
+// reduction target, independent of the source's current level - tune DUCK_TARGET_VOLUME to taste.
+const DUCK_TARGET_VOLUME = 12;
+const DUCK_FADE_MS = 220;
+const DUCK_FADE_STEPS = 8;
+
 let ytDucked = false;
 let ytPreDuckVolume = null;
+let ytDuckFadeTimer = null;
+
+// Ramps setVolume over a few steps instead of an instant jump - an abrupt volume cut/restore is
+// audibly jarring (a little "pop" in perceived loudness); OBS's own ducking filter likewise ramps
+// via attack/release rather than snapping.
+function ytFadeVolumeTo(target) {
+  if (!ytPlayer || !ytPlayer.setVolume) return;
+  clearInterval(ytDuckFadeTimer);
+  const start = ytPlayer.getVolume ? ytPlayer.getVolume() : target;
+  if (start === target) return;
+  let step = 0;
+  ytDuckFadeTimer = setInterval(() => {
+    step += 1;
+    ytPlayer.setVolume(Math.round(start + (target - start) * (step / DUCK_FADE_STEPS)));
+    if (step >= DUCK_FADE_STEPS) clearInterval(ytDuckFadeTimer);
+  }, DUCK_FADE_MS / DUCK_FADE_STEPS);
+}
+
 window.applyMusicDucking = function (active) {
   if (ytNativePopout || !ytPlayer || !ytPlayer.setVolume) return;
   if (active === ytDucked) return;
   if (active) {
     ytPreDuckVolume = ytPlayer.getVolume ? ytPlayer.getVolume() : Number(ytVolumeSlider.value);
     ytDucked = true;
-    ytPlayer.setVolume(Math.round(ytPreDuckVolume * 0.1));
+    ytFadeVolumeTo(Math.min(ytPreDuckVolume, DUCK_TARGET_VOLUME));
   } else {
     ytDucked = false;
-    if (ytPreDuckVolume !== null) ytPlayer.setVolume(ytPreDuckVolume);
+    if (ytPreDuckVolume !== null) ytFadeVolumeTo(ytPreDuckVolume);
     ytPreDuckVolume = null;
   }
 };
