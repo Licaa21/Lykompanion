@@ -551,6 +551,13 @@ function stopLiveMic() {
     liveMicStream = null;
   }
   liveRecording = false;
+  // Every caller here (manual toggle-off, agentStopListening, the sleep word) already calls
+  // disarmWakeWord()/updateMusicDucking() of its own accord, but BEFORE this function runs - if
+  // the user was still audibly mid-utterance at that moment (e.g. speaking the sleep phrase
+  // itself, so the VAD had already flagged liveRecording=true), that earlier call correctly saw
+  // liveRecording still true and left music ducked. This line flipping it to false right after,
+  // with nothing re-checking the duck state afterward, is exactly what left it stuck ducked.
+  updateMusicDucking();
   ringBuffer = null;
   micBtn.classList.remove("recording");
   setOverlayHandsFree(false);
