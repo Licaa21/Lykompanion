@@ -2688,26 +2688,35 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 RenderConfig();
             }
             return g_editMode ? HTCAPTION : HTTRANSPARENT;
+        case WM_WINDOWPOSCHANGING: {
+            // Clamp a drag BEFORE it takes effect, not after (in WM_MOVE): DefWindowProc's
+            // built-in HTCAPTION drag tracks the cursor using the offset from where the drag
+            // started, not the window's actual current position, so correcting the position
+            // post-hoc via SetWindowPos fights that tracking every subsequent mouse-move -
+            // visually a stutter/rubber-band right at the work-area edge, like repeatedly
+            // bouncing off a wall instead of just stopping at it. Rewriting the incoming
+            // WINDOWPOS here means the window itself simply never moves past the boundary in
+            // the first place, so there's nothing to fight.
+            WINDOWPOS* wp = (WINDOWPOS*)lParam;
+            if (!(wp->flags & SWP_NOMOVE)) {
+                LayeredWindow* lw = FromHwnd(hwnd);
+                if (lw && lw->width > 0 && lw->height > 0) {
+                    int x = wp->x, y = wp->y;
+                    ClampToWorkArea(x, y, lw->width, lw->height);
+                    wp->x = x;
+                    wp->y = y;
+                }
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         case WM_MOVE: {
             // Keep the stored position in sync so later re-renders (new toast,
-            // etc.) commit at the dragged spot instead of snapping back.
+            // etc.) commit at the dragged spot instead of snapping back. Already
+            // clamped by WM_WINDOWPOSCHANGING above by the time this fires.
             LayeredWindow* lw = FromHwnd(hwnd);
             if (lw) {
-                int x = (int)(short)LOWORD(lParam);
-                int y = (int)(short)HIWORD(lParam);
-                int clampedX = x, clampedY = y;
-                ClampToWorkArea(clampedX, clampedY, lw->width, lw->height);
-                if (clampedX != x || clampedY != y) {
-                    // Dragged past the work area (i.e. into the taskbar strip) — snap back in
-                    // bounds immediately. Re-enters WM_MOVE with the clamped position, which is
-                    // already in-bounds, so this doesn't recurse further.
-                    SetWindowPos(hwnd, nullptr, clampedX, clampedY, 0, 0,
-                                 SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
-                    x = clampedX;
-                    y = clampedY;
-                }
-                lw->posX = x;
-                lw->posY = y;
+                lw->posX = (int)(short)LOWORD(lParam);
+                lw->posY = (int)(short)HIWORD(lParam);
                 lw->hasPos = true;
                 if (g_editMode) g_dirty = true;
             }
