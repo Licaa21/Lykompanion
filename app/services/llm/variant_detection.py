@@ -110,6 +110,18 @@ async def _detect_and_apply(process: str) -> None:
             _switch_to_vanilla_session(process)
     except Exception:
         logger.exception("Variant detection failed for process=%r", process)
+    finally:
+        # The base-game knowledge bootstrap is triggered from HERE, not from _capture_tick
+        # alongside this function - it used to be scheduled at the same instant as this
+        # detection call, and bootstrap reads the display title synchronously the moment its own
+        # task starts (before this coroutine's title fix could ever land), so a generic host exe
+        # (javaw.exe) reliably lost the race and got bootstrapped under "Javaw" instead of the
+        # corrected "Minecraft" - a weak/wrong training document. Running it in `finally` means
+        # it always fires exactly once per process (regardless of whether detection above
+        # succeeded, found nothing, or raised), using whatever title is resolved by now.
+        from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
+
+        schedule_bootstrap(process)
 
 
 async def _maybe_fix_title(process: str, base_title: str) -> None:

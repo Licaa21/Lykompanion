@@ -164,13 +164,22 @@ def _refresh_overlay_panel(process: str) -> None:
 
 
 @router.get("/training-data/{process}", response_model=TrainingDataDocument)
-async def get_process_training_data(process: str) -> TrainingDataDocument:
-    return TrainingDataDocument(content=game_state_training_data.get_training_data(process))
+async def get_process_training_data(process: str, variant: str | None = None) -> TrainingDataDocument:
+    """`variant`, if given, returns that modpack's own document when one exists, falling back to
+    the base game's document (with `own=False`) when it doesn't yet - lets the Gaming Journal
+    show "these are inherited from the base game" instead of implying the pack has its own notes."""
+    variant = (variant or "").strip() or None
+    own = not variant or game_state_training_data.has_own_training_data(process, variant)
+    return TrainingDataDocument(content=game_state_training_data.get_training_data(process, variant), own=own)
 
 
 @router.put("/training-data/{process}", response_model=TrainingDataDocument)
-async def update_process_training_data(process: str, payload: TrainingDataDocument) -> TrainingDataDocument:
-    return TrainingDataDocument(content=game_state_training_data.set_training_data(process, payload.content))
+async def update_process_training_data(
+    process: str, payload: TrainingDataDocument, variant: str | None = None
+) -> TrainingDataDocument:
+    variant = (variant or "").strip() or None
+    content = game_state_training_data.set_training_data(process, payload.content, variant=variant)
+    return TrainingDataDocument(content=content, own=True)
 
 
 @router.get("/pending", response_model=PendingProcessResponse)

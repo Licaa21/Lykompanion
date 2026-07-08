@@ -181,6 +181,7 @@ let journalSelectedProcess = null;
 let journalSelectedTab = "universal";
 let journalShowingCreateProfileForm = false;
 let journalShowingVariantForm = false;
+let journalTrainingVariant = null;  // null = base game's training document; else a variant name
 
 gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
@@ -377,6 +378,7 @@ function openGameDetail(game) {
     // Default to the universal (game-scope) memories, not whichever profile happens to be active.
     journalSelectedTab = "universal";
     journalShowingCreateProfileForm = false;
+    journalTrainingVariant = null;
   }
   // The selected profile may have just been deleted - fall back to universal.
   if (journalSelectedTab !== "universal" && journalSelectedTab !== "training" && !game.sessions.some((s) => s.session_id === journalSelectedTab)) {
@@ -573,34 +575,72 @@ function openGameDetail(game) {
 
   if (journalSelectedTab === "training") {
     // Training data: the living reference document the Game-State Model self-maintains for
-    // this process (see app/core/game_state_training_data.py), editable directly.
+    // this process (see app/core/game_state_training_data.py), editable directly. A game with
+    // modpack-tagged profiles gets a separate document per pack (its own UI content/mechanics
+    // differ enough from vanilla that shared notes would mislead either one).
     const trainingCard = document.createElement("div");
     trainingCard.className = "journal-themed-card journal-themed-card--training";
     trainingCard.appendChild(buildSectionLabel("Training data"));
+
+    const variants = [...new Set(game.sessions.map((s) => s.variant).filter(Boolean))];
+    if (variants.length === 0) journalTrainingVariant = null;  // nothing to select - always base
+
+    if (variants.length > 0) {
+      const variantRow = document.createElement("div");
+      variantRow.className = "journal-training-variant-row";
+      const makeBtn = (label, variant) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "journal-profile-card" + (journalTrainingVariant === variant ? " journal-profile-card--selected" : "");
+        btn.textContent = label;
+        btn.addEventListener("click", () => {
+          journalTrainingVariant = variant;
+          openGameDetail(game);
+        });
+        return btn;
+      };
+      variantRow.appendChild(makeBtn("Base Game", null));
+      for (const variant of variants) variantRow.appendChild(makeBtn(variant, variant));
+      trainingCard.appendChild(variantRow);
+    }
+
+    const inheritedHint = document.createElement("div");
+    inheritedHint.className = "memory-empty-hint journal-training-inherited-hint";
+    inheritedHint.hidden = true;
+    trainingCard.appendChild(inheritedHint);
+
     const trainingTextarea = document.createElement("textarea");
     trainingTextarea.rows = 12;
     trainingTextarea.placeholder = "No training data yet - the Game-State Model writes it automatically as it learns this game's UI (requires self-training to be enabled).";
     trainingCard.appendChild(trainingTextarea);
     journalDetailContent.appendChild(trainingCard);
 
+    const variantQuery = journalTrainingVariant ? `?variant=${encodeURIComponent(journalTrainingVariant)}` : "";
+    const trainingUrl = `/api/game-state/training-data/${encodeURIComponent(game.process)}${variantQuery}`;
+
     let currentTrainingContent = "";
-    fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`)
+    fetch(trainingUrl)
       .then((r) => r.json())
       .then((data) => {
         currentTrainingContent = data.content || "";
         trainingTextarea.value = currentTrainingContent;
+        if (journalTrainingVariant && data.own === false) {
+          inheritedHint.textContent = `No notes yet for ${journalTrainingVariant} — showing the base game's notes below. Edit and save to give this modpack its own.`;
+          inheritedHint.hidden = false;
+        }
       })
       .catch(() => {});
 
     trainingTextarea.addEventListener("blur", async () => {
       const content = trainingTextarea.value;
       if (content === currentTrainingContent) return;
-      const data = await fetch(`/api/game-state/training-data/${encodeURIComponent(game.process)}`, {
+      const data = await fetch(trainingUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
       }).then((r) => r.json());
       currentTrainingContent = data.content;
+      inheritedHint.hidden = true;  // saved -> this is now the variant's own document
     });
   } else {
     const memoriesCard = document.createElement("div");

@@ -17,7 +17,6 @@ from app.core import reminders as reminders_store
 from app.core.config import settings
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
-from app.services.llm.game_knowledge_bootstrap import schedule_bootstrap
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
 from app.services.llm.variant_detection import apply_detected_variant, schedule_variant_detection
@@ -434,12 +433,13 @@ async def _capture_tick() -> None:
         # instead of waiting for the first OCR extraction pass).
         overlay_process.start()
         _push_overlay_game_state(process, prime=True)
-        # First time this game is ever tracked: fetch IGDB/web knowledge in the background to
-        # seed game-specific trackers + starting training data (no-op if already done/customized).
-        schedule_bootstrap(process)
         # Modpack/variant detection from launch signals (window title, cmdline, parent process)
         # — figures out what a generic host exe (javaw.exe) really is and whether this launch is
-        # a modpack, auto-pointing the active session at the right playthrough profile.
+        # a modpack, auto-pointing the active session at the right playthrough profile. The base
+        # game knowledge bootstrap (IGDB/web search -> trackers + starting training data) is
+        # triggered from INSIDE this call (after any title fix), not scheduled here directly - see
+        # the comment in variant_detection.py's _detect_and_apply for why (a race that gave
+        # generic host exes like javaw.exe a bootstrap seeded under the wrong/junk name).
         schedule_variant_detection(process)
         # Also review standing "user"-scope facts for anything that's actually about this game -
         # facts stated before it was ever tracked (e.g. playtime mentioned in passing) had

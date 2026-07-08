@@ -3079,6 +3079,16 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 .journal-themed-card--training textarea {
   height: 340px;
 }
+.journal-training-variant-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.journal-training-inherited-hint {
+  text-align: left;
+  padding: 0 0 8px;
+}
 
 /* The unified tab-card selector row: Universal Info and Training Data get the same tint as
    their matching content pane above, so the color ties the tab to what it shows. */

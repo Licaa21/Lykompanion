@@ -153,6 +153,10 @@ class TrackerInput(BaseModel):
 
 class TrainingDataDocument(BaseModel):
     content: str = ""
+    # False when `content` is the base game's document shown as a fallback for a variant with
+    # no notes of its own yet - lets the UI hint "these are inherited" instead of implying the
+    # modpack already has bespoke notes. Always True for a base-game (no variant) request.
+    own: bool = True
 
 
 class GameSession(BaseModel):
