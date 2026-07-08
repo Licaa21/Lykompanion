@@ -34,7 +34,13 @@ async def get_game_state() -> GameStateResponse:
     values = (state or {}).get("values", {})
     defs = game_state_trackers.get_trackers(process) if process else []
     trackers = [
-        GameStateTracker(id=t["id"], label=t["label"], description=t["description"], locked=t["locked"], value=values.get(t["id"]))
+        GameStateTracker(
+            id=t["id"], label=t["label"], description=t["description"], locked=t["locked"],
+            # Tolerates an already-persisted non-string value (a past extraction pass writing a
+            # bare JSON number/bool for a field) - self-heals the read instead of 500ing on data
+            # written before game_state_extraction.py started coercing tracker values to strings.
+            value=str(v) if (v := values.get(t["id"])) is not None else None,
+        )
         for t in defs
     ]
     session_name = game_state_store.get_session_name(process, session_id) if process and session_id else None

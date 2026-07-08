@@ -105,6 +105,17 @@ Additionally, include a **"modpack"** field: normally **null**. Set it to the mo
 """
 
 
+def _coerce_tracker_value(value) -> str | None:
+    """Tracker values are always text downstream (the REST API's `str | None` schema, the chat
+    prompt, the overlay panel) - a model that returns a bare JSON number/bool for a field despite
+    the prompt asking for short text (observed: a numeric-looking custom tracker coming back as
+    a raw int) would otherwise persist as that raw type and 500 every later /api/game-state read.
+    Coerces to a string; None/empty stays None (a real "no value," not the string "None")."""
+    if value is None or value == "":
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
 def _reset_window() -> None:
     """Resets the per-process OCR-batching buffers (frames collected this poll window, dedupe
     state). Doesn't touch persisted tracker values - those live independently in game_state.py,
@@ -294,12 +305,12 @@ async def extract_and_apply_game_state(
     for tracker in trackers:
         tid = tracker["id"]
         if tid == game_state_trackers.ACTIVITY_TRACKER_ID:
-            new_values[tid] = data.get(tid)
+            new_values[tid] = _coerce_tracker_value(data.get(tid))
         elif tid in data:
             # Key present: an explicit null/"" clears the field (the model retracting a value it
             # now believes is wrong), any other value replaces it. Without this, one bad guess
             # was sticky forever - null used to fall back to the previous value.
-            new_values[tid] = data[tid] or None
+            new_values[tid] = _coerce_tracker_value(data[tid])
         else:
             # Key omitted: not visible this window, keep what we had.
             new_values[tid] = previous_values.get(tid)
