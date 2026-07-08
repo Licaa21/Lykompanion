@@ -853,20 +853,58 @@ bool EnsureSurface(LayeredWindow& lw, int width, int height) {
     return true;
 }
 
-// The primary monitor's work area (screen minus the taskbar, whichever edge it's docked to) -
-// GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) covers the FULL screen including the taskbar strip,
-// so anchoring bottom/edge widgets off it let them land partly behind the taskbar. Every
-// anchor/clamp calculation below uses this instead.
-RECT GetWorkArea() {
-    RECT wa = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
-    SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
-    return wa;
+bool IsOverlayHwnd(HWND h) {
+    return h == g_toastWin.hwnd || h == g_memWin.hwnd || h == g_panelWin.hwnd ||
+           h == g_statsWin.hwnd || h == g_configWin.hwnd || h == g_bannerWin.hwnd ||
+           h == g_handsfreeWin.hwnd;
 }
 
-// Keeps a widget's rect fully inside the work area - applied to both freshly-anchored
+// Whether the game currently has focus and is borderless/exclusive-fullscreen (covers its whole
+// monitor, no caption) - mirrors app/services/system/processes.py's
+// is_foreground_window_fullscreen(). When it is, the taskbar is hidden behind the game (not
+// actually occupying screen space from the player's view), so widgets should be free to use the
+// FULL monitor rather than being clamped to the work area as if the taskbar were visible.
+// Cached and only recomputed when some other window has focus - the overlay's own windows
+// (config toolbar in edit mode, briefly activatable) never cover a whole monitor, so treating a
+// momentary self-focus as "the game stopped being fullscreen" would be a false signal.
+bool g_lastKnownFullscreen = false;
+
+bool RecomputeFullscreen() {
+    HWND hwnd = GetForegroundWindow();
+    if (!hwnd || IsOverlayHwnd(hwnd)) return g_lastKnownFullscreen;
+
+    RECT rect;
+    if (!GetWindowRect(hwnd, &rect)) return g_lastKnownFullscreen;
+
+    HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(MONITORINFO);
+    if (!GetMonitorInfoW(hmon, &mi)) return g_lastKnownFullscreen;
+
+    const RECT& mon = mi.rcMonitor;
+    bool coversMonitor = rect.left <= mon.left + 2 && rect.top <= mon.top + 2 &&
+                          rect.right >= mon.right - 2 && rect.bottom >= mon.bottom - 2;
+    bool noCaption = !(GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION);
+    g_lastKnownFullscreen = coversMonitor && noCaption;
+    return g_lastKnownFullscreen;
+}
+
+// The region widgets are allowed to occupy: the work area (screen minus the taskbar) normally,
+// or the full monitor while the game is borderless-fullscreen (see RecomputeFullscreen) - in
+// that case GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) is correct and SPI_GETWORKAREA would
+// wrongly reserve a taskbar-height strip nothing is actually occupying.
+RECT GetUsableArea() {
+    RECT area = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    if (!RecomputeFullscreen()) {
+        SystemParametersInfo(SPI_GETWORKAREA, 0, &area, 0);
+    }
+    return area;
+}
+
+// Keeps a widget's rect fully inside the usable area - applied to both freshly-anchored
 // positions and user-dragged ones, so a widget can never end up behind the taskbar either way.
 void ClampToWorkArea(int& x, int& y, int w, int h) {
-    RECT wa = GetWorkArea();
+    RECT wa = GetUsableArea();
     int maxX = wa.right - w, maxY = wa.bottom - h;
     if (x > maxX) x = maxX;
     if (x < wa.left) x = wa.left;
@@ -877,7 +915,7 @@ void ClampToWorkArea(int& x, int& y, int w, int h) {
 // Push the rendered DIB to screen at an anchored position. `constAlpha` scales
 // the whole window uniformly (used for banner fades) on top of per-pixel alpha.
 void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
-    RECT wa = GetWorkArea();
+    RECT wa = GetUsableArea();
     int waW = wa.right - wa.left;
     if (anchor == AnchorTopCenter) {
         // The config toolbar is always top-center; it isn't dragged or saved.
