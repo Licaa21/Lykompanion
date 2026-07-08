@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     llm_provider: str = "openrouter"
     memory_extraction_provider: str = ""
     game_state_provider: str = ""
+    game_bootstrap_provider: str = ""
 
     tts_provider: str = "kokoro"
     kokoro_base_url: str = "http://localhost:8880/v1"
@@ -174,6 +175,14 @@ class Settings(BaseSettings):
     game_state_max_consecutive_skips: int = 0
     # Dedicated model for background game-state extraction. Falls back to openrouter_model if empty.
     game_state_model: str = ""
+    # Dedicated model for the one-time game-knowledge bootstrap (base game + modpack variant) -
+    # separate from game_state_model because this one runs rarely (once per game/pack, not every
+    # poll window) but does the most quality-sensitive work: structuring IGDB/web-search results
+    # into the starting trackers + training-data document, which every future extraction pass
+    # then builds on. A stronger/pricier model here is cheap in aggregate even if game_state_model
+    # is kept small/fast for the frequent OCR pass. Falls back to game_state_model, then
+    # openrouter_model, if empty.
+    game_bootstrap_model: str = ""
     # A captured frame is dropped (not sent to the LLM) if its normalized OCR text is at least this
     # similar (0-1 SequenceMatcher ratio) to the last kept frame - filters an unchanging HUD/menu
     # across consecutive captures while still keeping frames that show a real on-screen change.

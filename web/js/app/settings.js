@@ -269,6 +269,10 @@ setupModelSearch("cfg-game-state-model-search", "cfg-game-state-model", "gameSta
   value: "",
   label: "(use main chat model)",
 });
+setupModelSearch("cfg-game-bootstrap-model-search", "cfg-game-bootstrap-model", "gameBootstrapModel", {
+  value: "",
+  label: "(use game-state model)",
+});
 setupModelSearch("cfg-transcription-model-search", "cfg-transcription-model", "transcriptionModel");
 setupModelSearch("cfg-kokoro-voice-search", "cfg-kokoro-voice", "kokoroVoice");
 setupModelSearch("cfg-chirp3-voice-search", "cfg-chirp3-voice", "chirp3Voice");
@@ -302,6 +306,15 @@ const PROVIDER_FEATURES = {
     selectId: "cfg-game-state-model",
     pinned: { value: "", label: "(use main chat model)" },
   },
+  // Text-only, not vision: the bootstrap pass structures gathered IGDB/web-search text into
+  // trackers + training data - it never sees screenshots (unlike gameState above).
+  gameBootstrap: {
+    endpoint: "/api/models/llm/text",
+    cacheKey: "gameBootstrapModel",
+    providerSelectId: "cfg-game-bootstrap-provider",
+    selectId: "cfg-game-bootstrap-model",
+    pinned: { value: "", label: "(use game-state model)" },
+  },
   // No providerSelectId - dedicated transcription (ASR) models are an OpenRouter-only catalog,
   // called through a separate transcription API rather than chat completions.
   transcription: {
@@ -316,8 +329,12 @@ const PROVIDER_FEATURES = {
 function effectiveProvider(providerSelectId) {
   if (!providerSelectId) return "openrouter";
   const value = document.getElementById(providerSelectId).value;
-  if (providerSelectId === "cfg-llm-provider") return value || "openrouter";
-  return value || document.getElementById("cfg-llm-provider").value || "openrouter";
+  if (value) return value;
+  if (providerSelectId === "cfg-llm-provider") return "openrouter";
+  // Game-bootstrap falls back to the game-state provider before main chat, matching
+  // config.py's game_bootstrap_provider or game_state_provider or llm_provider chain.
+  if (providerSelectId === "cfg-game-bootstrap-provider") return effectiveProvider("cfg-game-state-provider");
+  return document.getElementById("cfg-llm-provider").value || "openrouter";
 }
 
 async function reloadModelSelect(featureKey, selectedValue, force = false) {
@@ -350,9 +367,13 @@ for (const featureKey of Object.keys(PROVIDER_FEATURES)) {
     reloadModelSelect(featureKey);
     // Main chat provider changing also affects any feature currently inheriting it.
     if (featureKey === "llm") {
-      for (const other of ["memory", "gameState"]) {
+      for (const other of ["memory", "gameState", "gameBootstrap"]) {
         if (!document.getElementById(PROVIDER_FEATURES[other].providerSelectId).value) reloadModelSelect(other);
       }
+    }
+    // Game-bootstrap inherits the game-state provider next, before falling back to main chat.
+    if (featureKey === "gameState" && !document.getElementById(PROVIDER_FEATURES.gameBootstrap.providerSelectId).value) {
+      reloadModelSelect("gameBootstrap");
     }
   });
 }
@@ -529,6 +550,7 @@ async function loadModels(
   selectedChirp3Voice,
   selectedGameStateModel,
   selectedTranscriptionModel,
+  selectedGameBootstrapModel,
   force = false
 ) {
   const [ttsModels] = await Promise.all([
@@ -536,6 +558,7 @@ async function loadModels(
     reloadModelSelect("llm", selectedLlm, force),
     reloadModelSelect("memory", selectedMemoryModel, force),
     reloadModelSelect("gameState", selectedGameStateModel, force),
+    reloadModelSelect("gameBootstrap", selectedGameBootstrapModel, force),
     reloadModelSelect("transcription", selectedTranscriptionModel, force),
   ]);
 
@@ -855,6 +878,7 @@ function applyConfigToForm(cfg) {
   document.getElementById("cfg-llm-provider").value = cfg.llm_provider || "openrouter";
   document.getElementById("cfg-memory-provider").value = cfg.memory_extraction_provider || "";
   document.getElementById("cfg-game-state-provider").value = cfg.game_state_provider || "";
+  document.getElementById("cfg-game-bootstrap-provider").value = cfg.game_bootstrap_provider || "";
 
   narrationSpeed = cfg.narration_speed;
   narrationSpeedInput.value = cfg.narration_speed;
@@ -1075,7 +1099,8 @@ async function loadConfig() {
     cfg.memory_extraction_model,
     cfg.google_tts_voice,
     cfg.game_state_model,
-    cfg.transcription_model
+    cfg.transcription_model,
+    cfg.game_bootstrap_model
   );
   return cfg;
 }
@@ -1090,6 +1115,7 @@ document.getElementById("cfg-refresh-models").addEventListener("click", () => {
     document.getElementById("cfg-chirp3-voice").value,
     document.getElementById("cfg-game-state-model").value,
     document.getElementById("cfg-transcription-model").value,
+    document.getElementById("cfg-game-bootstrap-model").value,
     true // bypass the server-side catalog cache - that's the whole point of this button
   );
 });
@@ -1116,6 +1142,7 @@ async function saveSettings(saveButton) {
     llm_provider: document.getElementById("cfg-llm-provider").value,
     memory_extraction_provider: document.getElementById("cfg-memory-provider").value,
     game_state_provider: document.getElementById("cfg-game-state-provider").value,
+    game_bootstrap_provider: document.getElementById("cfg-game-bootstrap-provider").value,
     google_ai_studio_api_key: keyFieldValue("cfg-google-ai-studio-key"),
     custom_openai_base_url: document.getElementById("cfg-custom-openai-base-url").value.trim(),
     custom_openai_api_key: keyFieldValue("cfg-custom-openai-key"),
@@ -1159,6 +1186,7 @@ async function saveSettings(saveButton) {
     game_state_visual_diff_noise_floor_percent: parseFloat(gameStateVisualDiffNoiseFloorInput.value),
     game_state_max_consecutive_skips: parseInt(gameStateMaxSkipsInput.value, 10),
     game_state_model: document.getElementById("cfg-game-state-model").value,
+    game_bootstrap_model: document.getElementById("cfg-game-bootstrap-model").value,
     game_state_ocr_similarity_threshold: parseFloat(gameStateOcrSimilarityInput.value),
     game_state_ocr_max_width: parseInt(gameStateOcrWidthInput.value, 10),
     game_state_visual_diff_thumbnail_size: parseInt(gameStateVisualDiffThumbInput.value, 10),

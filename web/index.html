@@ -870,6 +870,23 @@
                   <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="gameState">Providers…</button>
                 </label>
               </div>
+              <div class="cfg-row">
+                <label>
+                  <span class="cfg-label">Game Bootstrap Provider <button type="button" class="cfg-help" data-tip="Which provider handles the one-time game-knowledge bootstrap (seeding trackers + starting training data for a newly-tracked game or modpack). Leave as 'use game-state provider' to reuse that.">?</button></span>
+                  <select id="cfg-game-bootstrap-provider">
+                    <option value="">(use game-state provider)</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="google_ai_studio">Google AI Studio</option>
+                    <option value="custom">Custom OpenAI-compatible</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="cfg-label">Game Bootstrap Model <button type="button" class="cfg-help" data-tip="Structures IGDB/web-search results into starting trackers + the training-data document the first time a game (or modpack) is tracked. This runs rarely - once per game/pack, not every poll window - so a stronger model here is cheap in aggregate and produces noticeably better training notes than reusing a small/fast Game-State Model. Leave blank to reuse the Game-State Model.">?</button></span>
+                  <input id="cfg-game-bootstrap-model-search" type="text" class="model-search" placeholder="Search models…" />
+                  <select id="cfg-game-bootstrap-model"></select>
+                  <button type="button" class="secondary-btn provider-picker-btn" data-provider-feature="gameBootstrap">Providers…</button>
+                </label>
+              </div>
               <details class="cfg-advanced">
                 <summary>Advanced</summary>
                 <label>

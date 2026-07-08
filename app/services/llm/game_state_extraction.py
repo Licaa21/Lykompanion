@@ -348,6 +348,12 @@ async def extract_and_apply_game_state(
     if isinstance(divergence, str) and divergence.strip():
         logger.info("Game-state poll: divergence detected for process=%r session=%r: %s", process, active_session_id, divergence.strip())
         game_state.set_pending_divergence(process, divergence.strip())
+    else:
+        # Null is the overwhelmingly common, correct result here (only an unambiguous stat
+        # regression - a crash/reverted save - should ever set this) - logged anyway so it's
+        # visible from the logs alone that this pass actually evaluated the field, rather than
+        # silence being ambiguous between "checked, nothing to report" and "never checked."
+        logger.info("Game-state poll: no divergence this pass for process=%r", process)
 
     # Self-training: the extraction model sees the screenshots, the OCR text, and the current
     # per-process notes document, so it maintains that document itself - no separate trainer
@@ -359,6 +365,15 @@ async def extract_and_apply_game_state(
             if update != game_state_training_data.get_training_data(process, active_variant).strip():
                 logger.info("Game-state poll: extraction pass revised the training notes for process=%r variant=%r", process, active_variant)
                 game_state_training_data.set_training_data(process, update, variant=active_variant)
+            else:
+                logger.info("Game-state poll: training_data_update matched existing notes for process=%r (no-op)", process)
+        else:
+            # Same rationale as the divergence branch above - most passes SHOULD be null once a
+            # document exists (see game_state_extraction.md), but this makes that visible instead
+            # of indistinguishable from the check never running.
+            logger.info("Game-state poll: no training-data update this pass for process=%r", process)
+    else:
+        logger.debug("Game-state poll: self-training disabled, skipping training_data_update for process=%r", process)
 
 
 async def _capture_tick() -> None:

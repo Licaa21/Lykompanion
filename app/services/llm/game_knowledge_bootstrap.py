@@ -96,10 +96,10 @@ async def bootstrap_game_knowledge(process: str) -> None:
                 {"role": "system", "content": load_prompt("game_knowledge_bootstrap")},
                 {"role": "user", "content": user_content},
             ],
-            model=settings.game_state_model or None,
+            model=settings.game_bootstrap_model or settings.game_state_model or None,
             response_format={"type": "json_object"},
             source="game_bootstrap",
-            provider=settings.game_state_provider or settings.llm_provider,
+            provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )
         data = json.loads(raw)
     except Exception:
@@ -177,10 +177,10 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
                 {"role": "system", "content": load_prompt("game_knowledge_bootstrap")},
                 {"role": "user", "content": user_content},
             ],
-            model=settings.game_state_model or None,
+            model=settings.game_bootstrap_model or settings.game_state_model or None,
             response_format={"type": "json_object"},
             source="game_bootstrap",
-            provider=settings.game_state_provider or settings.llm_provider,
+            provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )
         data = json.loads(raw)
     except Exception:
