@@ -853,24 +853,50 @@ bool EnsureSurface(LayeredWindow& lw, int width, int height) {
     return true;
 }
 
+// The primary monitor's work area (screen minus the taskbar, whichever edge it's docked to) -
+// GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) covers the FULL screen including the taskbar strip,
+// so anchoring bottom/edge widgets off it let them land partly behind the taskbar. Every
+// anchor/clamp calculation below uses this instead.
+RECT GetWorkArea() {
+    RECT wa = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+    return wa;
+}
+
+// Keeps a widget's rect fully inside the work area - applied to both freshly-anchored
+// positions and user-dragged ones, so a widget can never end up behind the taskbar either way.
+void ClampToWorkArea(int& x, int& y, int w, int h) {
+    RECT wa = GetWorkArea();
+    int maxX = wa.right - w, maxY = wa.bottom - h;
+    if (x > maxX) x = maxX;
+    if (x < wa.left) x = wa.left;
+    if (y > maxY) y = maxY;
+    if (y < wa.top) y = wa.top;
+}
+
 // Push the rendered DIB to screen at an anchored position. `constAlpha` scales
 // the whole window uniformly (used for banner fades) on top of per-pixel alpha.
 void CommitWindow(LayeredWindow& lw, Anchor anchor, BYTE constAlpha = 255) {
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    RECT wa = GetWorkArea();
+    int waW = wa.right - wa.left;
     if (anchor == AnchorTopCenter) {
         // The config toolbar is always top-center; it isn't dragged or saved.
-        lw.posX = (screenW - lw.width) / 2;
-        lw.posY = MARGIN;
+        lw.posX = wa.left + (waW - lw.width) / 2;
+        lw.posY = wa.top + MARGIN;
     } else if (anchor == AnchorFixed) {
         // Caller set posX/posY explicitly (banner).
     } else if (!lw.hasPos) {
         bool right  = (anchor == AnchorTopRight || anchor == AnchorBottomRight);
         bool bottom = (anchor == AnchorBottomCenter || anchor == AnchorBottomRight);
-        lw.posX = right ? screenW - MARGIN - lw.width
-                : (anchor == AnchorBottomCenter) ? (screenW - lw.width) / 2
-                : MARGIN;
-        lw.posY = bottom ? GetSystemMetrics(SM_CYSCREEN) - MARGIN - lw.height : MARGIN;
+        lw.posX = right ? wa.right - MARGIN - lw.width
+                : (anchor == AnchorBottomCenter) ? wa.left + (waW - lw.width) / 2
+                : wa.left + MARGIN;
+        lw.posY = bottom ? wa.bottom - MARGIN - lw.height : wa.top + MARGIN;
         lw.hasPos = true;
+    } else {
+        // A saved/dragged position from a previous session — re-clamp on every commit in case
+        // the work area shrank since (taskbar height/DPI change, different monitor layout).
+        ClampToWorkArea(lw.posX, lw.posY, lw.width, lw.height);
     }
     int x = lw.posX, y = lw.posY;
 
@@ -2667,8 +2693,21 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // etc.) commit at the dragged spot instead of snapping back.
             LayeredWindow* lw = FromHwnd(hwnd);
             if (lw) {
-                lw->posX = (int)(short)LOWORD(lParam);
-                lw->posY = (int)(short)HIWORD(lParam);
+                int x = (int)(short)LOWORD(lParam);
+                int y = (int)(short)HIWORD(lParam);
+                int clampedX = x, clampedY = y;
+                ClampToWorkArea(clampedX, clampedY, lw->width, lw->height);
+                if (clampedX != x || clampedY != y) {
+                    // Dragged past the work area (i.e. into the taskbar strip) — snap back in
+                    // bounds immediately. Re-enters WM_MOVE with the clamped position, which is
+                    // already in-bounds, so this doesn't recurse further.
+                    SetWindowPos(hwnd, nullptr, clampedX, clampedY, 0, 0,
+                                 SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+                    x = clampedX;
+                    y = clampedY;
+                }
+                lw->posX = x;
+                lw->posY = y;
                 lw->hasPos = true;
                 if (g_editMode) g_dirty = true;
             }
