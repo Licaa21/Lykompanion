@@ -149,9 +149,13 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
     logger.info("Variant bootstrap: gathering knowledge for %r (%s)", modpack, base_title)
     try:
         base_knowledge = "" if game_state_training_data.has_own_training_data(process) else await _gather_game_knowledge(base_title)
-        pack_results = await execute_web_search(
-            {"query": f"{modpack} {base_title} modpack overview features progression guide"}
-        )
+        # Short and modpack-name-only, not "{modpack} {base_title} modpack overview features
+        # progression guide" - that longer form (observed via data/debug_log.json) reliably lost
+        # to the base game's own SEO weight (official minecraft.net/wiki pages dominate almost
+        # any query containing "Minecraft"), so the pack bootstrap was silently searching the same
+        # generic base-game material as the base bootstrap and produced a near-duplicate document.
+        # Same "plain keyword queries" discipline as system_companion.md's Web Search guidance.
+        pack_results = await execute_web_search({"query": f"{modpack} modpack"})
     except Exception:
         logger.exception("Variant bootstrap: knowledge gathering failed for %r", modpack)
         return
