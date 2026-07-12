@@ -327,6 +327,15 @@ async def fetch_art(process: str, force: bool = False, search_term: str | None =
                     retried = await _augment_with_cover(http_client, retried, official_title)
             except httpx.HTTPError:
                 retried = None
+            # Same lookalike-substitution risk the trusted path above guards against with
+            # _titles_match - a store search for the LLM-resolved title can still fuzzy-match a
+            # different, similarly-named real game (e.g. "Minecraft" isn't on Steam, so searching
+            # it returned "Minecraft Dungeons" - a real listing, wrongly accepted here unvalidated
+            # since this retry path had no title check of its own). Reject it the same way.
+            if retried and not _titles_match(retried.get("title") or "", official_title):
+                logger.info("Game art: rejecting resolved-title match %r for official title %r (process=%r)",
+                            retried.get("title"), official_title, process)
+                retried = None
             if retried:
                 if result is None:
                     result = retried

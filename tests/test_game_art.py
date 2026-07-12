@@ -71,3 +71,32 @@ def test_augment_with_cover_is_a_noop_when_already_covered():
             return await game_art._augment_with_cover(client, existing, "some game")
 
     assert asyncio.run(run()) is existing
+
+
+def test_fetch_art_rejects_fuzzy_title_mismatch_on_official_title_retry(monkeypatch):
+    """Regression for the 2026-07-13 bug: a process name that doesn't match anything on its own
+    (e.g. javaw.exe) resolves to an official title via LLM ("Minecraft"), but a Steam search for
+    that resolved title can still fuzzy-match a different real game ("Minecraft Dungeons" - a
+    real Steam listing, since Minecraft Java itself isn't sold on Steam). That mismatch must be
+    rejected, not silently accepted as this process's art - it used to be, since this retry path
+    had no title-match validation of its own (unlike the sibling `search_term`-trusted path)."""
+    async def fake_fetch_steam(http_client, term):
+        if term == "Minecraft":
+            return {"title": "Minecraft Dungeons", "cover_url": "https://example.com/dungeons.jpg",
+                     "description": "wrong game", "source": "steam"}
+        return None
+
+    async def fake_augment(http_client, result, term):
+        return result  # no-op - isolates the test to the Steam-search mismatch path
+
+    async def fake_resolve_official_title(term):
+        return "Minecraft"
+
+    monkeypatch.setattr(game_art, "_fetch_steam", fake_fetch_steam)
+    monkeypatch.setattr(game_art, "_augment_with_cover", fake_augment)
+    monkeypatch.setattr(game_art, "_resolve_official_title", fake_resolve_official_title)
+
+    result = asyncio.run(game_art.fetch_art("javaw.exe"))
+
+    assert result["title"] == "Minecraft"
+    assert result["cover_url"] is None
