@@ -2235,6 +2235,26 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
   padding: 2px 8px;
   outline: none; cursor: text; white-space: nowrap;
 }
+/* Variant reclassify chip on game-scope memory items (buildVariantChip in memory-journal.js) -
+   same look as the plain tag above but interactive. */
+.memory-item-tag--btn {
+  font-family: inherit; cursor: pointer;
+  transition: background var(--ease), border-color var(--ease);
+}
+.memory-item-tag--btn:hover {
+  background: rgba(91,95,199,0.2);
+  border-color: rgba(91,95,199,0.4);
+}
+.memory-item-tag-input {
+  flex-shrink: 0; align-self: center;
+  width: 140px;
+  font-size: 11px; font-family: inherit; color: var(--t1);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(91,95,199,0.4);
+  border-radius: var(--pill);
+  padding: 2px 8px;
+  outline: none;
+}
 /* Tracker list items (Settings > Game Awareness > Trackers) - unlike memory items, a tracker's
    description is a free-form sentence that can run long, so label/description stack vertically
    and wrap instead of sharing a single nowrap row (which used to force the whole list to scroll

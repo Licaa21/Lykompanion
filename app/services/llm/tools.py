@@ -36,10 +36,9 @@ MEMORY_TOOLS = [
                 "typically approach it, game-wide meta-preferences. Ask yourself: would this still be true "
                 "if they wiped their save and started a new game? If yes, use this tool. "
                 "Only call this when a game is actively being tracked right now. "
-                "If a modpack is shown as active in [Currently playing] AND the fact only holds because "
-                "of that modpack (mod-added mechanics, quests, items, systems), set modpack_specific to "
-                "true so it never leaks into vanilla or other-pack playthroughs; leave it false for "
-                "base-game facts that are true regardless of mods."
+                "If a modpack is shown as active in [Currently playing], this fact is automatically scoped "
+                "to that modpack only (it will never surface in vanilla or other-pack playthroughs) — this "
+                "happens for every fact you save here while a modpack is active, nothing to set."
             ),
             "parameters": {
                 "type": "object",
@@ -47,10 +46,6 @@ MEMORY_TOOLS = [
                     "content": {
                         "type": "string",
                         "description": "The fact to remember, written as a short standalone sentence.",
-                    },
-                    "modpack_specific": {
-                        "type": "boolean",
-                        "description": "True only when the fact depends on the currently active modpack.",
                     },
                 },
                 "required": ["content"],
@@ -140,16 +135,17 @@ def _resolve_tracked_game() -> tuple[str | None, str | None, str | None]:
     return gs["process"], gs.get("session_id"), gs.get("variant")
 
 
-def _save_via_remember(content: str, scope: str, modpack_specific: bool = False) -> str:
+def _save_via_remember(content: str, scope: str) -> str:
     """Shared handler for the three save tools - all placement decisions live in
     memory.remember(), including the degradation rule when the requested scope can't be
-    honored (no tracked game / no active session)."""
+    honored (no tracked game / no active session). Every game-scope save while a modpack is
+    active is auto-scoped to it (remember() drops this on non-"game" scopes) - no per-call
+    classification, so the model never has to judge whether a fact "counts" as modpack-specific."""
     content = (content or "").strip()
     if not content:
         return "Nothing to save: content was empty."
     process, session_id, active_variant = _resolve_tracked_game()
-    variant = active_variant if (modpack_specific and scope == "game") else None
-    entry = memory.remember(content, scope, process=process, session_id=session_id, variant=variant)
+    entry = memory.remember(content, scope, process=process, session_id=session_id, variant=active_variant)
     if entry is None:
         return "Not saved: an identical fact is already in memory."
     applied = entry["scope"]
@@ -170,8 +166,7 @@ def execute_tool_call(name: str, arguments: dict) -> str:
         return _save_via_remember(arguments.get("content"), "user")
 
     if name == "save_game_memory":
-        return _save_via_remember(arguments.get("content"), "game",
-                                  modpack_specific=arguments.get("modpack_specific") is True)
+        return _save_via_remember(arguments.get("content"), "game")
 
     if name == "save_session_memory":
         return _save_via_remember(arguments.get("content"), "session")

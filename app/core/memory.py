@@ -172,7 +172,13 @@ def add_memory(content: str, process: str | None = None, session_id: str | None 
         return entry
 
 
-def update_memory(memory_id: str, content: str, process: str | None = None, session_id: str | None = None) -> dict | None:
+def update_memory(
+    memory_id: str,
+    content: str,
+    process: str | None = None,
+    session_id: str | None = None,
+    variant: str | None = None,
+) -> dict | None:
     with _lock:
         memories = load_memories()
         for m in memories:
@@ -181,6 +187,8 @@ def update_memory(memory_id: str, content: str, process: str | None = None, sess
                 m["process"] = process
                 m["session_id"] = session_id
                 m["scope"] = _derive_scope(m)
+                # variant only means anything at game scope - same normalization as remember().
+                m["variant"] = (variant or "").strip() or None if m["scope"] == "game" else None
                 # saved_at is intentionally not updated — it marks the original creation time,
                 # which is what rollback uses to find memories from a specific time window.
                 save_memories(memories)

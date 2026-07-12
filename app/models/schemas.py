@@ -234,12 +234,18 @@ class MemoryCreate(BaseModel):
     scope: Literal["user", "game", "session"] | None = None
     process: str | None = None
     session_id: str | None = None
+    # Explicit modpack to scope a "game" memory to. When omitted, the API auto-derives it from
+    # the currently tracked game's active variant (None if not currently playing this process).
+    variant: str | None = None
 
 
 class MemoryUpdate(BaseModel):
     content: str
     process: str | None = None
     session_id: str | None = None
+    # Full replace, like process/session_id above - the caller re-sends the entry's existing
+    # variant on a plain content edit, or a new one to reclassify it.
+    variant: str | None = None
 
 
 class ObservationEntry(BaseModel):

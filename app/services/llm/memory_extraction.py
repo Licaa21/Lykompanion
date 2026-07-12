@@ -97,9 +97,12 @@ async def _extract_and_apply_memory_locked(user_message: str, assistant_message:
             (fact.get("scope") or "user").lower(),
             process=tracked_process,
             session_id=tracked_session,
-            # Honored only on game scope (remember() drops it elsewhere); anchored to the
-            # tracked variant, never to a pack name the model conjured itself.
-            variant=tracked_variant if fact.get("modpack_specific") is True else None,
+            # Every game-scope fact saved while a modpack is active is auto-scoped to it
+            # (remember() drops this elsewhere) - no per-fact classification, since asking a
+            # small model to judge "is this really modpack-specific?" per fact proved unreliable
+            # and let mod content leak into vanilla/other-pack views. Anchored to the tracked
+            # variant, never to a pack name the model conjured itself.
+            variant=tracked_variant,
         )
 
     for memory_id in data.get("remove") or []:

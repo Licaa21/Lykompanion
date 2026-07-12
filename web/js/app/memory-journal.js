@@ -42,7 +42,10 @@ function renderMemoryList() {
 }
 
 // Shared editable memory row (Personal Data + Gaming Journal): contentEditable text saved on
-// blur via PUT (keeping the entry's existing placement), and a delete button.
+// blur via PUT (keeping the entry's existing placement), and a delete button. Game-scope entries
+// also get a variant chip (which modpack it's scoped to, or "Universal") doubling as a
+// reclassify control - lets a fact that got auto/mis-scoped be moved after the fact instead of
+// only being fixable by delete-and-retype.
 function buildMemoryItem(entry, onDeleted) {
   const item = document.createElement("div");
   item.className = "memory-item";
@@ -61,7 +64,7 @@ function buildMemoryItem(entry, onDeleted) {
     const response = await fetch(`/api/memory/${entry.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, process: entry.process, session_id: entry.session_id }),
+      body: JSON.stringify({ content, process: entry.process, session_id: entry.session_id, variant: entry.variant }),
     });
     if (response.ok) {
       entry.content = content;
@@ -86,8 +89,61 @@ function buildMemoryItem(entry, onDeleted) {
   });
 
   item.appendChild(text);
+  if (entry.scope === "game") item.appendChild(buildVariantChip(entry));
   item.appendChild(deleteBtn);
   return item;
+}
+
+// Clickable pill showing which modpack a game-scope memory is scoped to ("Universal" when
+// none). Click swaps it for a small text input to reclassify - saved via the same PUT the
+// content editor uses, so it's a full-replace of (content, process, session_id, variant).
+function buildVariantChip(entry) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "memory-item-tag memory-item-tag--btn";
+  chip.textContent = entry.variant || "Universal";
+  chip.title = entry.variant
+    ? `Only shown during ${entry.variant} playthroughs — click to reclassify`
+    : "Shown across all playthroughs of this game — click to scope it to one modpack";
+
+  chip.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "memory-item-tag-input";
+    input.value = entry.variant || "";
+    input.placeholder = "Modpack (empty = universal)";
+    chip.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const commit = async () => {
+      const variant = input.value.trim() || null;
+      if (variant === (entry.variant || null)) {
+        input.replaceWith(buildVariantChip(entry));
+        return;
+      }
+      const response = await fetch(`/api/memory/${entry.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: entry.content, process: entry.process, session_id: entry.session_id, variant }),
+      });
+      if (response.ok) entry.variant = variant;
+      input.replaceWith(buildVariantChip(entry));
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        input.value = entry.variant || "";
+        input.blur();
+      }
+    });
+  });
+
+  return chip;
 }
 
 async function loadMemories() {
@@ -182,6 +238,7 @@ let journalSelectedTab = "universal";
 let journalShowingCreateProfileForm = false;
 let journalShowingVariantForm = false;
 let journalTrainingVariant = null;  // null = base game's training document; else a variant name
+let journalUniversalFilter = "all";  // Universal Info tab filter: "all" | "universal" | a variant name
 
 gamingJournalBtn.addEventListener("click", () => {
   openModal(gamingJournalModal);
@@ -379,6 +436,7 @@ function openGameDetail(game) {
     journalSelectedTab = "universal";
     journalShowingCreateProfileForm = false;
     journalTrainingVariant = null;
+    journalUniversalFilter = "all";
   }
   // The selected profile may have just been deleted - fall back to universal.
   if (journalSelectedTab !== "universal" && journalSelectedTab !== "training" && !game.sessions.some((s) => s.session_id === journalSelectedTab)) {
@@ -724,9 +782,38 @@ function openGameDetail(game) {
       memoriesCard.appendChild(form);
     }
 
+    // Universal Info mixes true cross-playthrough facts with variant-scoped ones (a fact still
+    // "belongs" to the game either way, just narrower) - a filter row lets you tell them apart
+    // instead of everything reading as one undifferentiated list.
+    let activeMemories = selectedSession ? selectedSession.memories : game.memories;
+    if (!selectedSession) {
+      const variantsHere = [...new Set(game.memories.map((m) => m.variant).filter(Boolean))];
+      if (variantsHere.length > 0) {
+        const filterRow = document.createElement("div");
+        filterRow.className = "memory-filters";
+        filterRow.style.marginBottom = "8px";
+        const makeFilterPill = (label, value) => {
+          const pill = document.createElement("button");
+          pill.type = "button";
+          pill.className = "memory-filter-pill" + (journalUniversalFilter === value ? " active" : "");
+          pill.textContent = label;
+          pill.addEventListener("click", () => {
+            journalUniversalFilter = value;
+            openGameDetail(game);
+          });
+          return pill;
+        };
+        filterRow.appendChild(makeFilterPill("All", "all"));
+        filterRow.appendChild(makeFilterPill("Universal only", "universal"));
+        for (const v of variantsHere) filterRow.appendChild(makeFilterPill(v, v));
+        memoriesCard.appendChild(filterRow);
+      }
+      if (journalUniversalFilter === "universal") activeMemories = activeMemories.filter((m) => !m.variant);
+      else if (journalUniversalFilter !== "all") activeMemories = activeMemories.filter((m) => m.variant === journalUniversalFilter);
+    }
+
     const memList = document.createElement("div");
     memList.className = "memory-list";
-    const activeMemories = selectedSession ? selectedSession.memories : game.memories;
     if (activeMemories.length === 0) {
       const hint = document.createElement("div");
       hint.className = "memory-empty-hint";
