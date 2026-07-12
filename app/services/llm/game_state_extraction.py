@@ -52,6 +52,12 @@ _LARGE_WINDOW_STREAK_TICKS = 3
 _frames: list[tuple[float, str]] = []  # (time.time() captured, raw OCR text), oldest first
 _window_started_at: float | None = None
 
+# time.time() of the last tick that actually reached the capture step (i.e. the tracked process
+# was foreground) - independent of _window_started_at, which keeps counting even while focus is
+# elsewhere. Used to detect "regained focus after being alt-tabbed away for a while" so a window
+# spanning that whole absence isn't treated as one real 5s-ish poll window (see _capture_tick).
+_last_tick_at: float | None = None
+
 # Base64 JPEGs of the first and most recent *kept* frames of the current poll window, attached to
 # the extraction LLM call as actual screenshots (the middle frames travel as OCR text only). The
 # pixels carry what OCR structurally cannot - which dialogue/menu option is highlighted/selected,
@@ -397,7 +403,7 @@ async def _capture_tick() -> None:
     this function's own capture/OCR work on later ticks."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
-    global _last_logged_skip, _large_window_streak
+    global _last_logged_skip, _large_window_streak, _last_tick_at
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -477,6 +483,22 @@ async def _capture_tick() -> None:
         # nowhere more specific to land at save time and default to general scope.
         gs = game_state.get_game_state()
         schedule_retagging(process, gs["session_id"] if gs else None)
+    elif _last_tick_at is not None and time.time() - _last_tick_at > settings.game_state_poll_interval_seconds:
+        # Same process, but it's been longer than a full poll interval since the last tick that
+        # actually reached here - focus was elsewhere for a while (alt-tabbed away), not just
+        # normal capture-interval jitter, since ticks this function never even runs for an
+        # unfocused process. The buffered window spans that whole absence and would produce a
+        # meaningless diff against an ancient frame, or close instantly and chain into a second
+        # window right behind it - observed tripping a provider's own high-frequency abuse
+        # detection (2026-07-13). Start the window clean instead of closing a stale one.
+        logger.info(
+            "Game-state poll: process=%r regained focus after %.1fs away - resetting the poll "
+            "window instead of closing one that spans the whole absence",
+            process, time.time() - _last_tick_at,
+        )
+        _reset_window()
+
+    _last_tick_at = time.time()
 
     if _window_started_at is None:
         _window_started_at = time.time()
