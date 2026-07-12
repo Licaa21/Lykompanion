@@ -350,7 +350,12 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
         title = game_art.get_display_title(tracked_process)
         modpack_note = (
             f" They're running the \"{tracked_variant}\" modpack/overhaul this playthrough — expect "
-            "mod-added mechanics/content on top of the base game, and keep advice consistent with it."
+            "mod-added mechanics/content on top of the base game, and keep advice consistent with it. "
+            "Packs frequently reskin, rebalance, or fully repurpose a mod's items/blocks/mechanics under "
+            "the same name — your own knowledge of a mod item is often about a DIFFERENT pack's version "
+            "of it. When asked about a specific mod-added item/block/mechanic and you're not certain this "
+            f"exact pack works the way you recall, use web_search with \"{tracked_variant}\" in the query "
+            "instead of answering from general modded knowledge."
             if tracked_variant else ""
         )
         variable_content += (
