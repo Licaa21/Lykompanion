@@ -207,12 +207,13 @@ async def _call_extraction(
         source="game_state_extraction",
         provider=provider,
         on_usage=lambda cost: game_state.record_extraction_call(cost),
-        # Fail fast: this call is awaited directly inside the poller's tick loop (see
-        # _capture_tick), so the SDK's default retry behavior — sleeping for an upstream
-        # Retry-After value on a 429, observed up to 60s per attempt — would freeze the entire
-        # OCR capture loop (no new frames, no tracking) for minutes on a single rate limit.
-        # The poller's own next tick (seconds away) is a better-timed retry than the SDK's.
-        max_retries=0,
+        # Used to fail fast (max_retries=0) because this call was awaited directly inside the
+        # poller's own tick loop - the SDK's retry sleeps for the upstream Retry-After value on a
+        # 429 (observed up to 60s per attempt), which would have frozen capture/OCR for minutes.
+        # As of 2026-07-13 this call runs backgrounded (_run_structuring_pass), no longer blocking
+        # the tick loop, so that risk is gone - the SDK default retries (2, see get_client) apply
+        # like every other call site, giving a rate-limited window a real chance to complete
+        # instead of failing outright on the first 429 and waiting for a later window's luck.
     )
     return json.loads(raw)
 
