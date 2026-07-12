@@ -78,6 +78,14 @@ _empty_ocr_streak = 0
 # minimum interval between two of them no matter how chatty the model wants to be.
 _last_proactive_at: float | None = None
 
+# Content of the last delivered proactive message - this pass has no memory of its own past
+# output (no chat history in its prompt), so a persistent on-screen fixture (an always-there NPC,
+# a landmark) can keep looking like fresh news to it every time the cooldown allows another
+# attempt. Backstop against the "never repeat yourself" prompt instruction being unenforceable:
+# a new candidate too similar to the last one actually delivered gets suppressed here instead.
+_last_proactive_content: str | None = None
+_PROACTIVE_REPEAT_SIMILARITY_THRESHOLD = 0.6
+
 # How many consecutive poll windows in a row have been skipped (no genuine OCR/visual change) for
 # the tracked process since the last real structuring pass. See game_state_max_consecutive_skips -
 # window-to-window comparisons only ever look at diffs *within* one poll window, so a state that
@@ -357,12 +365,29 @@ async def extract_and_apply_game_state(
     # frontend already polls and injects into the active chat (and narrates) like a normal
     # unprompted assistant message. Re-check the gate at delivery time - a slow LLM call could
     # otherwise let two overlapping passes both deliver.
+    global _last_proactive_at, _last_proactive_content
     proactive = data.get("proactive_message")
-    if allow_proactive and isinstance(proactive, str) and proactive.strip() and _proactive_allowed():
-        global _last_proactive_at
-        _last_proactive_at = time.monotonic()
-        reminders_store.add_pending(proactive.strip())
-        logger.info("Game-state poll: proactive message queued for process=%r", process)
+    if isinstance(proactive, str) and proactive.strip():
+        proactive = proactive.strip()
+        if not (allow_proactive and _proactive_allowed()):
+            pass
+        elif (
+            _last_proactive_content is not None
+            and SequenceMatcher(None, proactive, _last_proactive_content).ratio() >= _PROACTIVE_REPEAT_SIMILARITY_THRESHOLD
+        ):
+            # Same underlying "news" as last time (e.g. a persistent NPC/landmark re-noticed each
+            # window it's on screen) - the model has no memory of its own past proactive messages
+            # to catch this itself, so it's enforced here instead of trusting the prompt alone.
+            logger.info(
+                "Game-state poll: suppressing proactive message for process=%r - too similar to "
+                "the last one delivered (%r)",
+                process, _last_proactive_content,
+            )
+        else:
+            _last_proactive_at = time.monotonic()
+            _last_proactive_content = proactive
+            reminders_store.add_pending(proactive)
+            logger.info("Game-state poll: proactive message queued for process=%r", process)
 
     divergence = data.get("divergence_warning")
     if isinstance(divergence, str) and divergence.strip():
