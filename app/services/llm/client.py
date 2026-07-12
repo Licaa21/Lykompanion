@@ -150,6 +150,19 @@ def _record_error(source: str, model: str, messages: list[dict], tools: list[dic
     )
 
 
+def _first_choice(response, source: str, model: str, messages: list[dict], tools: list[dict] | None, duration_ms: float):
+    """Guards the non-streaming `response.choices[0]` access every call site needs. A provider
+    under abuse/rate-limit pressure can return an HTTP 200 with `choices: null`/`[]` instead of a
+    proper error status (observed: Xiaomi's risk_control) - without this, indexing crashes with a
+    bare TypeError that bypasses _record_error entirely, since the try/except around the API call
+    itself doesn't cover this line. Raises a clear, recorded error instead."""
+    if not response.choices:
+        exc = RuntimeError(f"Provider returned no choices in the response (model={model!r})")
+        _record_error(source, model, messages, tools, exc, duration_ms)
+        raise exc
+    return response.choices[0]
+
+
 def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
     if not tool_calls:
         return None
@@ -187,7 +200,7 @@ async def chat_completion(
         _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
         raise
     duration_ms = (time.monotonic() - start) * 1000
-    content = response.choices[0].message.content or ""
+    content = _first_choice(response, source, resolved_model, messages, None, duration_ms).message.content or ""
     _track(
         source=source,
         model=resolved_model,
@@ -267,7 +280,7 @@ async def chat_completion_message(
         _record_error(source, resolved_model, messages, tools, exc, (time.monotonic() - start) * 1000)
         raise
     duration_ms = (time.monotonic() - start) * 1000
-    message = response.choices[0].message
+    message = _first_choice(response, source, resolved_model, messages, tools, duration_ms).message
     _track(
         source=source,
         model=resolved_model,
