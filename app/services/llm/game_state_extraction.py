@@ -80,6 +80,19 @@ _last_proactive_at: float | None = None
 # against itself and finds nothing new. Reset to 0 whenever a genuine change is detected.
 _consecutive_skips = 0
 
+# Lowercased process names with a structuring pass currently in flight in the background (see
+# _run_structuring_pass) - real calls have been observed taking anywhere from ~3s to 70+s
+# (data/debug_log.json), so this is what lets capture/OCR keep ticking at full cadence instead of
+# the whole poller stalling for that call's duration, while still refusing to stack a second call
+# for the SAME process on top of one already running (a slower older call finishing after a newer
+# one could otherwise overwrite fresher tracked values with stale ones). A different process is
+# free to run concurrently - independent game_state entries, no race.
+_extraction_in_progress: set[str] = set()
+
+# Strong refs to the background structuring-pass tasks (asyncio only holds weak ones) - same
+# pattern as variant_detection.py's _background_tasks.
+_background_tasks: set[asyncio.Task] = set()
+
 
 def _proactive_allowed() -> bool:
     if not settings.proactive_messages_enabled:
@@ -378,7 +391,9 @@ async def extract_and_apply_game_state(
 
 async def _capture_tick() -> None:
     """Captures+OCRs one frame locally (no LLM call) and, once a full poll window's worth of
-    frames has accumulated, batches them into a single structuring LLM call."""
+    frames has accumulated, batches them into a single structuring LLM call - dispatched as a
+    background task (see _run_structuring_pass), never awaited here, so a slow call can't stall
+    this function's own capture/OCR work on later ticks."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
     global _last_logged_skip, _large_window_streak
@@ -539,6 +554,19 @@ async def _capture_tick() -> None:
     if elapsed < settings.game_state_poll_interval_seconds:
         return
 
+    if process.lower() in _extraction_in_progress:
+        # A structuring pass for this same process is still running in the background - don't
+        # stack a second one or reset the window early. Keep accumulating into the same window;
+        # the next tick re-checks and closes it (now spanning more time, which is fine) once the
+        # in-flight call clears.
+        logger.debug(
+            "Game-state poll: structuring pass still in flight for process=%r, extending window "
+            "(elapsed=%.1fs)",
+            process,
+            elapsed,
+        )
+        return
+
     logger.info(
         "Game-state poll: poll window closed for process=%r (elapsed=%.1fs >= interval=%ds, "
         "%d OCR frame(s) buffered)",
@@ -662,8 +690,36 @@ async def _capture_tick() -> None:
         settings.game_state_model or "(default)",
         settings.game_state_provider or settings.llm_provider,
     )
-    await extract_and_apply_game_state(process, frames_to_send, first_b64, last_b64)
-    _push_overlay_game_state(process)
+    # Backgrounded rather than awaited here - this call has been observed taking anywhere from
+    # ~3s to 70+s, and awaiting it inline would freeze the capture loop (no new frames, no OCR,
+    # no overlay updates) for the whole duration. _extraction_in_progress (checked above) keeps
+    # this process from stacking a second call while this one's still running.
+    _extraction_in_progress.add(process.lower())
+    task = asyncio.create_task(_run_structuring_pass(process, frames_to_send, first_b64, last_b64))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _run_structuring_pass(
+    process: str,
+    frames: list[tuple[float, str]],
+    first_b64: str | None,
+    last_b64: str | None,
+) -> None:
+    """Runs the structuring LLM call + overlay push off the poller's own tick loop (see the
+    dispatch comment above). extract_and_apply_game_state and _push_overlay_game_state already
+    swallow their own exceptions (fire-and-forget by design); the try/finally here only exists
+    to guarantee _extraction_in_progress always clears, even on something unexpected (e.g. task
+    cancellation), so a stuck flag can't permanently block this process's future windows."""
+    try:
+        await extract_and_apply_game_state(process, frames, first_b64, last_b64)
+        # Only push if this is still the actively tracked process - the user may have switched
+        # games while this call was in flight, and pushing now would flicker the overlay with
+        # this (now stale) game's data over whatever's actually being tracked.
+        if process == _last_process:
+            _push_overlay_game_state(process)
+    finally:
+        _extraction_in_progress.discard(process.lower())
 
 
 def _push_overlay_game_state(process: str, prime: bool = False) -> None:
@@ -711,7 +767,9 @@ async def run_game_state_poller() -> None:
     """Long-lived background loop, started at app startup. Captures+OCRs a frame locally every
     capture interval (cheap, no LLM call), then once a full poll interval's worth of frames has
     built up, sends them to the LLM together in one batch instead of one screenshot at a time -
-    picks up live settings changes without a restart since both intervals are re-read each tick."""
+    picks up live settings changes without a restart since both intervals are re-read each tick.
+    The structuring LLM call itself runs as a background task (_run_structuring_pass), not
+    awaited by this loop, so this loop's own cadence never drifts with that call's latency."""
     while True:
         await asyncio.sleep(settings.game_state_capture_interval_seconds)
         try:
