@@ -54,7 +54,10 @@ def get_peak_level(process_query: str) -> float | None:
     if sys.platform != "win32":
         return None
     try:
-        from pycaw.api.audioclient import IAudioMeterInformation
+        # Moved from pycaw.api.audioclient to pycaw.api.endpointvolume at some point after this
+        # was written (observed: pycaw 20251023 no longer has it under audioclient) - same COM
+        # interface (IID C02216F6-...), just relocated.
+        from pycaw.api.endpointvolume import IAudioMeterInformation
 
         peaks = [session._ctl.QueryInterface(IAudioMeterInformation).GetPeakValue() for session in _find_sessions(process_query)]
         return max(peaks) if peaks else None
