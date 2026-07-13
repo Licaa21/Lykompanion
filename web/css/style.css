@@ -2902,6 +2902,10 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 /* My Games library grid — Steam-like poster cards, cover art fetched from Steam/IGDB. */
 .tab-panel[data-tab="journal"] { flex: 1; min-height: 0; }
 #journal-library-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* The ID selector above outranks the browser's own [hidden]{display:none} rule (higher
+   specificity), so without this override #journal-library-view stayed visible - stacked on top
+   of #journal-detail-view - even after JS set its hidden attribute to open a game's detail page. */
+#journal-library-view[hidden] { display: none; }
 .journal-library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
