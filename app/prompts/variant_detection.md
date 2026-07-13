@@ -13,7 +13,7 @@ Rules:
 
 - **base_game_title**: the real base game's exact official title (e.g. "Minecraft", "The Elder Scrolls V: Skyrim Special Edition"), or null if you can't tell.
 - **modded**: true only when the signals genuinely indicate mods/a mod loader/a mod manager, not merely because the game supports mods.
-- **modpack_name**: the specific pack/overhaul/modlist name (e.g. "FTB StoneBlock 4", "Nolvus", "Vault Hunters") exactly as its community calls it — null when the session is vanilla, when it's modded but you can't name a coherent pack (a handful of loose mods is not a pack), or when you'd be guessing. Never invent a pack name from a folder fragment you don't recognize; only name packs that actually exist.
+- **modpack_name**: the specific pack/overhaul/modlist name (e.g. "FTB StoneBlock 4", "Nolvus", "Vault Hunters") exactly as its community calls it — null when the session is vanilla, when it's modded but you can't name a coherent pack (a handful of loose mods is not a pack), or when you'd be guessing. Never invent a pack name from a folder fragment you don't recognize; only name packs that actually exist. **Never set this to the base game's own title** ("Minecraft" is not a pack of Minecraft) — that's vanilla, so it belongs in `base_game_title` with `modpack_name` left null instead.
 - **confidence**: 0 to 1 — how sure you are of the overall reading (the modpack_name if given, otherwise the modded/vanilla verdict). A pack named right in the window title or an unambiguous install path is 0.9+; inference from a parent process alone is 0.5-0.7; anything speculative is below 0.5.
 
 Respond with strict JSON only, no commentary, no markdown fences, exactly:

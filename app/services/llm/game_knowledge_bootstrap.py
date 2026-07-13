@@ -221,6 +221,23 @@ def schedule_bootstrap(process: str) -> None:
     asyncio.get_running_loop().create_task(bootstrap_game_knowledge(process))
 
 
+def force_refresh_base(process: str) -> None:
+    """Wipes this process's base training-data document, resets its trackers to the untouched
+    defaults, and clears the retry-attempt cache, then re-schedules the bootstrap under whatever
+    title is now on file - used when a user correction (see game_correction_tool.py) reveals the
+    doc/trackers were seeded under a wrong/generic name (e.g. "javaw" instead of "Minecraft").
+    Both are worse than a fresh, accurately-seeded version (same "don't invent" framing as
+    game_knowledge_bootstrap.md) - the tracker reset is what lets _trackers_are_default see them
+    as eligible again, since otherwise a first bootstrap run under the wrong name would count as
+    "already customized" and block ever replacing them. Note: this can't distinguish those from
+    trackers a user genuinely hand-edited afterward - a real tradeoff of triggering this from a
+    correction rather than only from a still-pristine process."""
+    game_state_training_data.set_training_data(process, "")
+    game_state_trackers.reset_trackers(process)
+    _attempted.discard(process.lower())
+    schedule_bootstrap(process)
+
+
 async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: str) -> None:
     """Pack-specific counterpart to the base bootstrap, run when variant detection identifies
     a modpack: web-searches the pack itself (its mechanics, progression, added content) and
@@ -310,3 +327,15 @@ def schedule_variant_bootstrap(process: str, base_title: str, modpack: str) -> N
     if f"{process.lower()}::{modpack.lower()}" in _attempted:
         return
     asyncio.get_running_loop().create_task(bootstrap_variant_knowledge(process, base_title, modpack))
+
+
+def force_refresh_variant(process: str, base_title: str, modpack: str) -> None:
+    """Same idea as force_refresh_base, scoped to one modpack's own training-data document -
+    used when a user correction (game_correction_tool.py) sets/fixes a modpack name/tag. Also
+    resets trackers (shared per-process, not per-variant - see game_state_trackers.py) since
+    trackers seeded for the wrong pack context are just as stale as ones seeded under a wrong
+    title."""
+    game_state_training_data.set_training_data(process, "", variant=modpack)
+    game_state_trackers.reset_trackers(process)
+    _attempted.discard(f"{process.lower()}::{modpack.lower()}")
+    schedule_variant_bootstrap(process, base_title, modpack)

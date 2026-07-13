@@ -20,6 +20,7 @@ import logging
 
 from app.core import game_art, game_state, memory
 from app.core.config import settings
+from app.core.game_art import _titles_match
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
 from app.services.system.processes import get_foreground_process_details
@@ -96,6 +97,26 @@ async def _detect_and_apply(process: str) -> None:
         confidence = float(confidence) if isinstance(confidence, (int, float)) else 0.0
         base_title = (result.get("base_game_title") or "").strip() or None
         modpack = (result.get("modpack_name") or "").strip() or None
+
+        # The model occasionally names the base game itself as "the pack" (e.g. modpack_name:
+        # "Minecraft" for plain Minecraft) instead of leaving it null per the prompt's own rule -
+        # never coherent, since a pack can't be the same game it overhauls. A "pack" detection is
+        # only trustworthy when it comes with its own base-game identification (naming a real,
+        # specific pack implies knowing what it's a pack OF) - so a modpack_name with no
+        # base_title alongside it is treated the same as one that's literally identical to it.
+        # Checkable in code rather than trusted from prompt wording alone (same reasoning as
+        # game_art.py's _titles_match guard against a wrong fuzzy Steam/IGDB match). Either way,
+        # the model clearly recognized *something* - salvage it for the title fix below instead
+        # of discarding it entirely.
+        if modpack and (not base_title or _titles_match(modpack, base_title)):
+            logger.info(
+                "Variant detection for process=%r: modpack_name %r had no coherent base-game "
+                "identification alongside it - treating as vanilla instead of a real pack",
+                process, modpack,
+            )
+            base_title = base_title or modpack
+            modpack = None
+
         logger.info(
             "Variant detection for process=%r: base=%r modded=%r modpack=%r confidence=%.2f",
             process, base_title, result.get("modded"), modpack, confidence,

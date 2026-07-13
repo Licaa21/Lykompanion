@@ -326,6 +326,8 @@ All endpoints are prefixed as shown; the frontend at `/` is served as static fil
 | `save_session_memory` | Persist a fact specific to the current playthrough (character level, quest progress, decisions this run). Only visible in the active session. | No |
 | `remove_memory` | Forget a saved fact by id. | No |
 | `rollback_session_memories` | Remove session-scoped memories saved within a recent time window — called after the player confirms a crash or loaded an older save, so lost progress doesn't contradict actual game state. | No |
+| `correct_game_title` | Fix the currently tracked game's title when it's wrong (e.g. showing a raw process name like "javaw" instead of "Minecraft") — used when the user corrects it in conversation, instead of only saving it as a memory. Forces a training-data + tracker refresh under the corrected name (both are worse than none when seeded under the wrong one). | No |
+| `correct_game_modpack` | Fix the currently tracked game's modpack/variant tag when it's wrong or missing (e.g. self-referentially tagged with the base game's own name, or missing a real pack like "FTB StoneBlock 4"), or clear it back to vanilla. Forces a training-data + tracker refresh for the corrected pack. | No |
 | `take_screenshot` | Capture a monitor (defaults to the active one). | No |
 | `set_narration_volume` | Adjust its own TTS volume. | No |
 | `stop_listening` | Disable hands-free mic indefinitely — on a sign-off, an explicit request, or unwanted overheard audio. Re-enable via the wake word or the mic toggle. | No |

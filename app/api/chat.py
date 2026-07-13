@@ -26,6 +26,11 @@ from app.services.llm.client import (
     stream_chat_completion_deltas,
 )
 from app.services.llm.app_volume_tool import APP_VOLUME_TOOLS, execute_set_application_volume
+from app.services.llm.game_correction_tool import (
+    GAME_CORRECTION_TOOLS,
+    execute_correct_game_modpack,
+    execute_correct_game_title,
+)
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
 from app.services.llm.media_tool import (
@@ -73,6 +78,7 @@ ALL_TOOLS = (
     + APP_VOLUME_TOOLS
     + MEDIA_TOOLS
     + YOUTUBE_PLAYLIST_TOOLS
+    + GAME_CORRECTION_TOOLS
 )
 
 REMINDER_TOOL_NAMES = {"add_reminder", "remove_reminder", "add_alarm", "cancel_alarm"}
@@ -518,6 +524,10 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return message, None, side_effect
     if name in REMINDER_TOOL_NAMES:
         return execute_reminder_tool(name, arguments), None, None
+    if name == "correct_game_title":
+        return await execute_correct_game_title(arguments), None, None
+    if name == "correct_game_modpack":
+        return await execute_correct_game_modpack(arguments), None, None
     return execute_tool_call(name, arguments), None, None
 
 
