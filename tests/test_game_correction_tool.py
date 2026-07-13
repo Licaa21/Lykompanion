@@ -78,6 +78,36 @@ def test_correct_game_modpack_empty_clears_variant(isolated):
     assert isolated == []  # clearing to vanilla needs no training-data/tracker refresh
 
 
+def test_correct_game_modpack_empty_reverts_a_stale_name_matching_the_cleared_variant(isolated):
+    # Regression test (2026-07-13): apply_detected_variant renames a freshly-tagged session to
+    # match the modpack (variant_detection.py's "tag pristine session in place" path), but
+    # clearing the tag back to vanilla never reverted that name - leaving a "vanilla" session
+    # stuck displaying the old modpack's name forever.
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.set_session_variant("javaw.exe", session_id, "FTB StoneBlock 4")
+    game_state.rename_session("javaw.exe", session_id, "FTB StoneBlock 4")
+
+    result = asyncio.run(game_correction_tool.execute_correct_game_modpack({"modpack": ""}))
+
+    assert "vanilla" in result.lower()
+    assert game_state.get_game_state()["variant"] is None
+    assert game_state.get_session_name("javaw.exe", session_id) == "Default"
+
+
+def test_correct_game_modpack_empty_leaves_a_custom_name_alone(isolated):
+    # A session the player named themselves (not auto-named after the pack) shouldn't be
+    # renamed just because its modpack tag gets cleared.
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.set_session_variant("javaw.exe", session_id, "FTB StoneBlock 4")
+    game_state.rename_session("javaw.exe", session_id, "NG+ run")
+
+    asyncio.run(game_correction_tool.execute_correct_game_modpack({"modpack": ""}))
+
+    assert game_state.get_session_name("javaw.exe", session_id) == "NG+ run"
+
+
 def test_correct_game_title_with_active_variant_only_resets_trackers_once(isolated, monkeypatch):
     # Regression test (2026-07-13): correcting the title while a variant is already active used to
     # reset trackers via BOTH force_refresh_base and force_refresh_variant, racing two independent

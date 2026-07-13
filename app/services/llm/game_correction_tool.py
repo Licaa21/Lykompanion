@@ -106,6 +106,12 @@ async def execute_correct_game_modpack(arguments: dict) -> str:
         session_id = gs.get("session_id")
         if session_id:
             game_state.set_session_variant(process, session_id, None)
+            # The session was likely auto-named after the pack when it was first tagged
+            # (variant_detection.py's apply_detected_variant) - clearing the tag without also
+            # reverting a name that still literally matches it would leave a "vanilla" session
+            # stuck displaying the old modpack's name.
+            if (game_state.get_session_name(process, session_id) or "").strip().lower() == current_variant.lower():
+                game_state.rename_session(process, session_id, "Default")
         return "Cleared the modpack tag - this session is now tracked as vanilla."
 
     # Same reasoning as the title's no-op guard above - a repeat correction to the same modpack
