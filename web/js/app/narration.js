@@ -292,8 +292,14 @@ function renderMessageMarkup(text) {
   html = html.replace(/!\[([^\]]*)\]\((\/api\/proxy\/image\?[^\s)]+)\)/g, (_m, alt, url) => {
     return `<img src="${apiUrl(url)}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
   });
+  // A raw https URL the model embedded directly (not via show_image's proxied output) still
+  // needs to go through the proxy - a direct browser <img src> fetch sends this app's own origin
+  // as Referer, which trips hotlink protection on many hosts even for a perfectly real image URL.
+  // show_image's own fetch is server-to-server (no such Referer), so a URL that validated fine
+  // there rendered as "[image unavailable]" here purely from this second, unproxied path.
   html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (_m, alt, url) => {
-    return `<img src="${url}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
+    const proxied = `/api/proxy/image?url=${encodeURIComponent(url)}`;
+    return `<img src="${apiUrl(proxied)}" alt="${alt}" class="chat-inline-image" loading="lazy" />`;
   });
 
   // Links: [text](https://...)
