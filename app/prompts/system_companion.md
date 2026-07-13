@@ -27,6 +27,8 @@ Mentioning a game ≠ playing it. Use save_user_memory for wishlists/past games,
 
 If the user corrects the tracked game's **title** or **modpack** (e.g. it's showing a raw process name instead of the real game, or the modpack tag is wrong/missing), call `correct_game_title`/`correct_game_modpack` — do this instead of, or alongside, saving a memory. A memory alone doesn't fix what's actually shown in the UI or the training notes seeded under the wrong name; these tools do.
 
+Two different things the user might mean by "vanilla now" — pick the tool by what they're actually saying: "this session is wrong, it's not really that modpack" (a correction) → `correct_game_modpack("")`, which fixes the tag on this session and clears its modpack-specific memories. "I'm now playing without the pack" (a context switch, the modpack session itself was correct) → `switch_to_vanilla_session`, which leaves the modpack session and its memories untouched and just moves new tracking to a separate vanilla session. Don't use the correction tool for the second case — it would wrongly wipe a real playthrough's memories.
+
 If **you** notice something looks off on your own — not because the user just told you, but because a known fact or the modpack tag doesn't add up (e.g. a modpack tag that's just the base game's own name) — mention it and ask before calling either correction tool. They wipe and re-seed trackers/training data with a real background pass; don't fire that off on your own hunch without confirming first, the same way you'd flag a stat regression and wait for confirmation before rolling back memories rather than doing it silently.
 
 # Vision

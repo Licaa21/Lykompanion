@@ -5,7 +5,7 @@ seeded under the wrong name). Both tools force a training-data + tracker refresh
 corrected name/pack, since notes and trackers seeded under a wrong name are worse than none (see
 game_knowledge_bootstrap.md)."""
 
-from app.core import game_art, game_state
+from app.core import game_art, game_state, memory
 from app.services.llm import game_knowledge_bootstrap, variant_detection
 
 GAME_CORRECTION_TOOLS = [
@@ -36,14 +36,18 @@ GAME_CORRECTION_TOOLS = [
         "function": {
             "name": "correct_game_modpack",
             "description": (
-                "Correct the currently tracked game's modpack/variant tag when it's wrong or "
-                "missing - e.g. wrongly showing the base game's own name as if it were a pack, or "
-                "missing a real pack (like 'FTB StoneBlock 4') entirely. Use this INSTEAD of (or "
-                "in addition to) saving the correction as a memory whenever the user tells you "
-                "the real modpack: saving a memory alone does not fix the tag shown in the UI, "
-                "retarget the training-data notes, or regenerate trackers for the pack - this "
-                "tool does all of that. Pass an empty string to clear the tag entirely (mark this "
-                "session as vanilla, no modpack)."
+                "Fix the CURRENT session's modpack/variant tag in place when it's wrong - e.g. "
+                "wrongly showing the base game's own name as if it were a pack, missing a real "
+                "pack (like 'FTB StoneBlock 4') entirely, or the user says this specific session "
+                "is actually vanilla/a different pack and wants it corrected. Use this INSTEAD of "
+                "(or in addition to) saving the correction as a memory: saving a memory alone does "
+                "not fix the tag shown in the UI, retarget the training-data notes, or regenerate "
+                "trackers for the pack - this tool does all of that. Pass an empty string to clear "
+                "the tag on this session and also delete its modpack-specific playthrough memories "
+                "(since they no longer apply once this session isn't tagged as that pack). Do NOT "
+                "use this when the player just says they're now playing without the pack in "
+                "general (not correcting THIS session's tag) - use switch_to_vanilla_session for "
+                "that instead, since it leaves the modpack session and its memories untouched."
             ),
             "parameters": {
                 "type": "object",
@@ -55,6 +59,22 @@ GAME_CORRECTION_TOOLS = [
                 },
                 "required": ["modpack"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_to_vanilla_session",
+            "description": (
+                "Switch the active playthrough to a vanilla (no modpack) session, WITHOUT "
+                "touching the current modpack session's tag or memories - use this when the "
+                "player says they're now playing without the pack (a plain launch, a break from "
+                "the modpack) rather than correcting this session's tag. Reuses an existing "
+                "vanilla session for this game if one exists, otherwise creates a fresh one. The "
+                "modpack session is left exactly as it was and can be returned to later - this "
+                "just changes which session new facts/trackers go to."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
@@ -112,7 +132,12 @@ async def execute_correct_game_modpack(arguments: dict) -> str:
             # stuck displaying the old modpack's name.
             if (game_state.get_session_name(process, session_id) or "").strip().lower() == current_variant.lower():
                 game_state.rename_session(process, session_id, "Default")
-        return "Cleared the modpack tag - this session is now tracked as vanilla."
+            # This is an explicit "this session is wrong/no longer that pack" correction, not a
+            # switch to a separate playthrough - its own modpack-specific memories no longer
+            # apply once it isn't tagged as that pack, unlike switch_to_vanilla_session which
+            # leaves everything about the modpack session alone.
+            memory.clear_memories_for_session(process, session_id)
+        return f"Cleared the modpack tag on this session and removed its \"{current_variant}\"-specific memories - it's now tracked as vanilla."
 
     # Same reasoning as the title's no-op guard above - a repeat correction to the same modpack
     # already active shouldn't re-trigger a reset/refresh race against whatever's in flight.
@@ -127,3 +152,16 @@ async def execute_correct_game_modpack(arguments: dict) -> str:
     variant_detection.apply_detected_variant(process, modpack, source="user correction")
 
     return f"Set the modpack to \"{modpack}\" and queued a training-data + tracker refresh for it."
+
+
+async def execute_switch_to_vanilla_session(arguments: dict) -> str:
+    gs = game_state.get_game_state()
+    if not gs:
+        return "No game is currently being tracked - nothing to switch."
+    process = gs["process"]
+    current_variant = (gs.get("variant") or "").strip()
+    if not current_variant:
+        return "This session is already vanilla (no modpack tag) - nothing to switch."
+
+    variant_detection.switch_to_vanilla_session(process)
+    return f"Switched to a vanilla session - the \"{current_variant}\" playthrough is untouched and can be returned to later."

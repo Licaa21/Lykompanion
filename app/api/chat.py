@@ -30,6 +30,7 @@ from app.services.llm.game_correction_tool import (
     GAME_CORRECTION_TOOLS,
     execute_correct_game_modpack,
     execute_correct_game_title,
+    execute_switch_to_vanilla_session,
 )
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
@@ -528,6 +529,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return await execute_correct_game_title(arguments), None, None
     if name == "correct_game_modpack":
         return await execute_correct_game_modpack(arguments), None, None
+    if name == "switch_to_vanilla_session":
+        return await execute_switch_to_vanilla_session(arguments), None, None
     return execute_tool_call(name, arguments), None, None
 
 

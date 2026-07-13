@@ -146,7 +146,7 @@ async def _detect_and_apply(process: str) -> None:
         if modpack and confidence >= _MODPACK_CONFIDENCE_MIN:
             apply_detected_variant(process, modpack, source="launch signals")
         elif result.get("modded") is False and confidence >= _VANILLA_CONFIDENCE_MIN:
-            _switch_to_vanilla_session(process)
+            switch_to_vanilla_session(process)
     except Exception:
         logger.exception("Variant detection failed for process=%r", process)
     finally:
@@ -231,11 +231,13 @@ def apply_detected_variant(process: str, modpack: str, source: str) -> None:
     schedule_variant_bootstrap(process, game_art.get_display_title(process), modpack)
 
 
-def _switch_to_vanilla_session(process: str) -> None:
+def switch_to_vanilla_session(process: str) -> None:
     """A confidently-vanilla launch while a variant session is active means the user launched
     the base game without the pack (e.g. plain Skyrim after a Nolvus stretch) — move to the
     newest variant-less session, or a fresh Default. Non-destructive: the variant session and
-    everything in it stays put."""
+    everything in it stays put. Also reused by game_correction_tool's explicit "clear modpack"
+    correction, for the same reason: an active variant session's accumulated memories/identity
+    shouldn't be mutated in place just because the player says they're on vanilla now."""
     gs = game_state.get_game_state()
     if not gs or gs["process"].lower() != process.lower() or not (gs.get("variant") or "").strip():
         return
