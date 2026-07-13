@@ -91,3 +91,62 @@ def test_forget_tracked_process_ignores_a_different_process(monkeypatch, isolate
     game_state_extraction.forget_tracked_process("javaw.exe")
 
     assert game_state_extraction._last_process == "eldenring.exe"
+
+
+class TestNormalizeTrainingDataUpdate:
+    """Regression coverage for the 2026-07-13 bug: training_data_update came back in inconsistent
+    shapes (all observed live in data/debug_log.json for the same FTB StoneBlock 4 session), but
+    the old code only ever accepted a plain string - every dict-shaped revision was silently
+    dropped and logged as "no update this pass" instead of being applied."""
+
+    def test_plain_string_passes_through(self):
+        assert game_state_extraction._normalize_training_data_update("## UI/UX\nsome notes") == "## UI/UX\nsome notes"
+
+    def test_blank_string_is_none(self):
+        assert game_state_extraction._normalize_training_data_update("   ") is None
+
+    def test_dict_with_list_bodies(self):
+        update = {"## UI/UX": ["First bullet.", "Second bullet."]}
+        assert game_state_extraction._normalize_training_data_update(update) == (
+            "## UI/UX\n- First bullet.\n- Second bullet."
+        )
+
+    def test_dict_with_string_bodies_and_multiple_sections(self):
+        update = {"## Lore": "Some lore text.", "## UI/UX": "Some UI text."}
+        assert game_state_extraction._normalize_training_data_update(update) == (
+            "## Lore\nSome lore text.\n\n## UI/UX\nSome UI text."
+        )
+
+    def test_dict_header_without_hash_prefix_gets_normalized(self):
+        # Observed live: the model sometimes omits the leading "##" entirely.
+        update = {" Lore": "Some lore text.", "UI/UX": "Some UI text."}
+        assert game_state_extraction._normalize_training_data_update(update) == (
+            "## Lore\nSome lore text.\n\n## UI/UX\nSome UI text."
+        )
+
+    def test_dict_with_empty_list_section_is_skipped(self):
+        # Observed live: {"## UI/UX": [...], "## Lore": []} - an empty section contributes nothing.
+        update = {"## UI/UX": ["A real bullet."], "## Lore": []}
+        assert game_state_extraction._normalize_training_data_update(update) == "## UI/UX\n- A real bullet."
+
+    def test_none_and_other_types_are_none(self):
+        assert game_state_extraction._normalize_training_data_update(None) is None
+        assert game_state_extraction._normalize_training_data_update(123) is None
+        assert game_state_extraction._normalize_training_data_update([]) is None
+
+
+class TestTrainingUpdateWouldDropLore:
+    def test_true_when_current_has_lore_and_update_does_not(self):
+        current = "## Lore\nRich backstory.\n\n## UI/UX\nOld notes."
+        update = "## UI/UX\nA villager's profession is indicated by its clothing."
+        assert game_state_extraction._training_update_would_drop_lore(current, update) is True
+
+    def test_false_when_update_preserves_lore(self):
+        current = "## Lore\nRich backstory.\n\n## UI/UX\nOld notes."
+        update = "## Lore\nRich backstory.\n\n## UI/UX\nOld notes plus something new."
+        assert game_state_extraction._training_update_would_drop_lore(current, update) is False
+
+    def test_false_when_current_never_had_lore(self):
+        current = "## UI/UX\nOld notes."
+        update = "## UI/UX\nOld notes plus something new."
+        assert game_state_extraction._training_update_would_drop_lore(current, update) is False

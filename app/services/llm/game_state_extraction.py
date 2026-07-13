@@ -252,6 +252,45 @@ def _image_part(b64: str) -> dict:
     return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
 
 
+def _normalize_training_data_update(update) -> str | None:
+    """`training_data_update` comes back in inconsistent shapes despite the prompt asking for one
+    markdown string - sometimes a dict keyed by header (with or without the leading "##", value a
+    string or a list of bullet lines), sometimes a plain string with "## Header" lines embedded.
+    Observed live (2026-07-13): the dict shape was the *common* case, but the code only ever
+    accepted a plain string - every dict-shaped revision (often the richer one, extending an
+    existing document) was silently dropped and logged as "no update this pass," while the rare
+    plain-string reply instead wholesale replaced the document, since nothing here ever merged
+    partial updates in. Normalizing the shape at least stops genuinely-shaped revisions from being
+    thrown away outright."""
+    if isinstance(update, str):
+        return update.strip() or None
+    if isinstance(update, dict):
+        lines = []
+        for header, body in update.items():
+            header = header.strip()
+            if header and not header.startswith("#"):
+                header = f"## {header}"
+            if isinstance(body, list):
+                body_text = "\n".join(f"- {item.strip()}" for item in body if isinstance(item, str) and item.strip())
+            elif isinstance(body, str):
+                body_text = body.strip()
+            else:
+                continue
+            if header and body_text:
+                lines.append(f"{header}\n{body_text}")
+        return "\n\n".join(lines) if lines else None
+    return None
+
+
+def _training_update_would_drop_lore(current: str, update: str) -> bool:
+    """True when `current` has a "## Lore" section but `update` doesn't - the prompt tells the
+    model to keep an existing Lore section untouched, so a revision that drops it entirely almost
+    certainly means the model replaced the whole document with just this window's observations
+    instead of actually revising it (observed live: a rich bootstrap-seeded Lore+UI/UX doc for FTB
+    StoneBlock 4 reduced to three generic sentences in one pass)."""
+    return "## lore" in current.lower() and "## lore" not in update.lower()
+
+
 async def extract_and_apply_game_state(
     process: str,
     frames: list[tuple[float, str]],
@@ -420,14 +459,22 @@ async def extract_and_apply_game_state(
     # per-process notes document, so it maintains that document itself - no separate trainer
     # model/pass anymore. Persist its revision only when enabled and actually changed.
     if settings.game_state_training_enabled:
-        update = data.get("training_data_update")
-        if isinstance(update, str) and update.strip():
-            update = update.strip()
-            if update != game_state_training_data.get_training_data(process, active_variant).strip():
+        update = _normalize_training_data_update(data.get("training_data_update"))
+        if update:
+            current = game_state_training_data.get_training_data(process, active_variant).strip()
+            if update == current:
+                logger.info("Game-state poll: training_data_update matched existing notes for process=%r (no-op)", process)
+            elif _training_update_would_drop_lore(current, update):
+                # Refuse it rather than silently destroying everything earlier passes (and the
+                # bootstrap) built up.
+                logger.warning(
+                    "Game-state poll: discarding training_data_update for process=%r variant=%r - "
+                    "it drops the existing '## Lore' section instead of preserving it",
+                    process, active_variant,
+                )
+            else:
                 logger.info("Game-state poll: extraction pass revised the training notes for process=%r variant=%r", process, active_variant)
                 game_state_training_data.set_training_data(process, update, variant=active_variant)
-            else:
-                logger.info("Game-state poll: training_data_update matched existing notes for process=%r (no-op)", process)
         else:
             # Same rationale as the divergence branch above - most passes SHOULD be null once a
             # document exists (see game_state_extraction.md), but this makes that visible instead
