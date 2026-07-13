@@ -2900,11 +2900,22 @@ body.yt-fullscreen-active .chat-panel { z-index: 10001; }
 }
 
 /* My Games library grid — Steam-like poster cards, cover art fetched from Steam/IGDB. */
+.tab-panel[data-tab="journal"] { flex: 1; min-height: 0; }
+#journal-library-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .journal-library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 14px;
 }
+/* Empty state: the grid's auto-fill columns would otherwise squeeze the lone hint into the
+   first (narrow) column - span it across the row and center it in the panel's full height. */
+.journal-library-grid:has(.memory-empty-hint) {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+.journal-library-grid .memory-empty-hint { max-width: 380px; line-height: 1.6; }
 .journal-game-card {
   position: relative;
   aspect-ratio: 2 / 3;
