@@ -192,6 +192,30 @@ def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
     ]
 
 
+_FALLBACK_MAX_TOKENS = 8192
+
+
+async def _resolve_max_tokens(model: str, provider: str) -> int:
+    """The model's own real max output tokens when the catalog exposes it (OpenRouter's /models
+    endpoint reports this per model, e.g. 65535 for google/gemini-2.5-flash-lite, 16384 for
+    meta-llama/llama-4-maverick - see list_models()), so a shared default doesn't needlessly cap
+    a model that can actually output far more. Falls back to a safe generous constant for a
+    non-OpenRouter provider (Google AI Studio/custom endpoints don't report this), a model not
+    found in the catalog (a typo, or one too new for the cached fetch), or if the lookup itself
+    fails for any reason - this must never be the reason a real completion call fails."""
+    if provider == "openrouter":
+        try:
+            for entry in await list_models(provider):
+                if entry["id"] == model:
+                    cap = entry.get("max_completion_tokens")
+                    if cap:
+                        return cap
+                    break
+        except Exception:
+            pass
+    return _FALLBACK_MAX_TOKENS
+
+
 async def chat_completion(
     messages: list[dict],
     model: str | None = None,
@@ -200,23 +224,22 @@ async def chat_completion(
     provider: str = "openrouter",
     on_usage: Callable[[float], None] | None = None,
     max_retries: int | None = None,
-    max_tokens: int | None = 8192,
+    max_tokens: int | None = None,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log.
-    `max_retries` - see get_client(). `max_tokens` defaults generously rather than omitted -
-    every caller of this function is a background/structured-JSON pass (bootstrap, game-state
-    extraction, memory/observation passes, chat title generation), several of which combine
-    multiple fields plus a document into one response; some providers otherwise fall back to a
-    much smaller default, silently truncating mid-JSON (observed live: a game_bootstrap reply
-    combining trackers + a training-data document cut off mid-sentence, and the whole result -
-    including trackers that would have worked fine alone - got discarded when it failed to parse).
-    8192 rather than higher: some models used here (e.g. meta-llama/llama-4-maverick) cap out at
-    16,384 output tokens - a shared default has to stay safely under the *lowest* ceiling any
-    caller might use, not the highest (google/gemini-2.5-flash-lite alone allows 65,535). A
-    ceiling this generous still costs nothing when unused; pass a smaller value only to
-    deliberately force a short reply."""
+    `max_retries` - see get_client(). `max_tokens` left as None (every caller here does) resolves
+    to the model's own real output-token ceiling via _resolve_max_tokens, rather than a fixed
+    number - every caller of this function is a background/structured-JSON pass (bootstrap,
+    game-state extraction, memory/observation passes, chat title generation), several of which
+    combine multiple fields plus a document into one response; some providers otherwise fall back
+    to a much smaller default, silently truncating mid-JSON (observed live: a game_bootstrap
+    reply combining trackers + a training-data document cut off mid-sentence, and the whole
+    result - including trackers that would have worked fine alone - got discarded when it failed
+    to parse). Pass an explicit value to deliberately force a smaller cap instead of resolving
+    the model's real one."""
     resolved_model = model or settings.openrouter_model
+    resolved_max_tokens = max_tokens if max_tokens is not None else await _resolve_max_tokens(resolved_model, provider)
     client = get_client(provider, max_retries=max_retries)
     extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
@@ -225,7 +248,7 @@ async def chat_completion(
             model=resolved_model,
             messages=messages,
             response_format=response_format,
-            max_tokens=max_tokens,
+            max_tokens=resolved_max_tokens,
             extra_body=extra_body,
         )
     except Exception as exc:
@@ -479,6 +502,11 @@ async def list_models(provider: str = "openrouter", force: bool = False) -> list
                 "output_modalities": architecture.get("output_modalities", []),
                 "supported_voices": model.get("supported_voices") or [],
                 "supported_parameters": model.get("supported_parameters") or [],
+                # The model's own real output-token ceiling (e.g. 65535 for gemini-2.5-flash-lite,
+                # 16384 for llama-4-maverick) - used by chat_completion()'s max_tokens
+                # auto-detection so a shared conservative default doesn't needlessly cap a model
+                # that can actually output far more. None when OpenRouter doesn't report one.
+                "max_completion_tokens": (model.get("top_provider") or {}).get("max_completion_tokens"),
             }
         )
     _models_cache[provider] = (time.monotonic(), models)

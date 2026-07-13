@@ -15,27 +15,30 @@ from app.services.llm import client
 
 
 class _FakeCompletions:
-    def __init__(self, response):
+    def __init__(self, response, calls):
         self._response = response
+        self._calls = calls
 
     async def create(self, **kwargs):
+        self._calls.append(kwargs)
         return self._response
 
 
 class _FakeClient:
-    def __init__(self, response):
-        self.chat = SimpleNamespace(completions=_FakeCompletions(response))
+    def __init__(self, response, calls):
+        self.chat = SimpleNamespace(completions=_FakeCompletions(response, calls))
 
 
 def _patch_client(monkeypatch, response):
-    monkeypatch.setattr(client, "get_client", lambda provider, max_retries=None: _FakeClient(response))
+    calls: list[dict] = []
+    monkeypatch.setattr(client, "get_client", lambda provider, max_retries=None: _FakeClient(response, calls))
     recorded = []
     monkeypatch.setattr(client, "_record_error", lambda *args, **kwargs: recorded.append(args))
-    return recorded
+    return recorded, calls
 
 
 def test_chat_completion_raises_clear_error_on_empty_choices(monkeypatch):
-    recorded = _patch_client(monkeypatch, SimpleNamespace(choices=None, usage=None))
+    recorded, _calls = _patch_client(monkeypatch, SimpleNamespace(choices=None, usage=None))
 
     async def run():
         with pytest.raises(RuntimeError, match="no choices"):
@@ -46,7 +49,7 @@ def test_chat_completion_raises_clear_error_on_empty_choices(monkeypatch):
 
 
 def test_chat_completion_message_raises_clear_error_on_empty_choices(monkeypatch):
-    recorded = _patch_client(monkeypatch, SimpleNamespace(choices=[], usage=None))
+    recorded, _calls = _patch_client(monkeypatch, SimpleNamespace(choices=[], usage=None))
 
     async def run():
         with pytest.raises(RuntimeError, match="no choices"):
@@ -65,6 +68,103 @@ def test_chat_completion_returns_content_when_choices_present(monkeypatch):
         return await client.chat_completion([{"role": "user", "content": "hi"}], source="test")
 
     assert asyncio.run(run()) == "hello there"
+
+
+class TestResolveMaxTokens:
+    """Regression coverage for the 2026-07-13 max_tokens fix: chat_completion() now resolves
+    max_tokens to the actual configured model's own real output-token ceiling (via OpenRouter's
+    /models catalog, cached by list_models()) instead of one hardcoded number shared by every
+    model. Verified against the real, live-checked values: 65535 for
+    google/gemini-2.5-flash-lite, 16384 for meta-llama/llama-4-maverick."""
+
+    def test_uses_the_models_own_cap(self, monkeypatch):
+        async def fake_list_models(provider):
+            return [
+                {"id": "google/gemini-2.5-flash-lite", "max_completion_tokens": 65535},
+                {"id": "meta-llama/llama-4-maverick", "max_completion_tokens": 16384},
+            ]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            gemini = await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter")
+            llama = await client._resolve_max_tokens("meta-llama/llama-4-maverick", "openrouter")
+            return gemini, llama
+
+        assert asyncio.run(run()) == (65535, 16384)
+
+    def test_falls_back_when_model_not_in_catalog(self, monkeypatch):
+        async def fake_list_models(provider):
+            return [{"id": "some/other-model", "max_completion_tokens": 4096}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client._resolve_max_tokens("unknown/model", "openrouter")
+
+        assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
+
+    def test_falls_back_for_non_openrouter_provider_without_calling_list_models(self, monkeypatch):
+        async def fake_list_models(provider):
+            raise AssertionError("list_models should not be called for a non-openrouter provider")
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client._resolve_max_tokens("gemini-2.5-flash", "google_ai_studio")
+
+        assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
+
+    def test_falls_back_if_catalog_lookup_raises(self, monkeypatch):
+        async def fake_list_models(provider):
+            raise RuntimeError("network error")
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter")
+
+        assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
+
+    def test_chat_completion_passes_the_resolved_cap_to_the_real_call(self, monkeypatch):
+        # Guards against the exact mistake made while wiring this up: the resolved value was
+        # computed but the actual create() call kept passing the original (always-None) argument.
+        message = SimpleNamespace(content="ok")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            return [{"id": "google/gemini-2.5-flash-lite", "max_completion_tokens": 65535}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}],
+                model="google/gemini-2.5-flash-lite",
+                source="test",
+            )
+
+        asyncio.run(run())
+        assert calls[0]["max_tokens"] == 65535
+
+    def test_chat_completion_respects_an_explicit_override(self, monkeypatch):
+        message = SimpleNamespace(content="ok")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            raise AssertionError("an explicit max_tokens must skip catalog auto-detection entirely")
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}], source="test", max_tokens=256,
+            )
+
+        asyncio.run(run())
+        assert calls[0]["max_tokens"] == 256
 
 
 class TestParseJsonReply:
