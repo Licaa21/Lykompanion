@@ -26,6 +26,25 @@ from app.services.system.processes import get_foreground_process_details
 
 logger = logging.getLogger(__name__)
 
+# Fixed response shape, safe for strict schema enforcement (see game_knowledge_bootstrap.py's
+# _BOOTSTRAP_JSON_SCHEMA for why this differs from the per-tick extraction pass). Falls back to
+# json_object mode automatically when the resolved model doesn't support structured_outputs.
+_VARIANT_DETECTION_JSON_SCHEMA = {
+    "name": "variant_detection",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "base_game_title": {"type": ["string", "null"]},
+            "modded": {"type": "boolean"},
+            "modpack_name": {"type": ["string", "null"]},
+            "confidence": {"type": "number"},
+        },
+        "required": ["base_game_title", "modded", "modpack_name", "confidence"],
+        "additionalProperties": False,
+    },
+}
+
 # Below this, a modpack_name is treated as a guess and ignored (the OCR fallback can still
 # name the pack later from actual on-screen branding).
 _MODPACK_CONFIDENCE_MIN = 0.6
@@ -85,7 +104,7 @@ async def _detect_and_apply(process: str) -> None:
                     {"role": "user", "content": signals},
                 ],
                 model=settings.game_state_model or None,
-                response_format={"type": "json_object"},
+                json_schema=_VARIANT_DETECTION_JSON_SCHEMA,
                 source="variant_detection",
                 provider=settings.game_state_provider or settings.llm_provider,
             )

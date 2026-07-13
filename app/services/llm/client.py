@@ -216,6 +216,24 @@ async def _resolve_max_tokens(model: str, provider: str) -> int:
     return _FALLBACK_MAX_TOKENS
 
 
+async def _model_supports_structured_outputs(model: str, provider: str) -> bool:
+    """Whether this model+provider combo can accept response_format: json_schema (OpenRouter
+    reports this per model in /models's supported_parameters - see list_models()). Only OpenRouter
+    exposes this; a non-OpenRouter provider (Google AI Studio/custom endpoint) or a model not in
+    the catalog conservatively returns False, since forcing json_schema mode on a model that
+    doesn't support it fails the request outright - worse than the plain json_object mode this is
+    meant to upgrade from, not just unhelpful."""
+    if provider != "openrouter":
+        return False
+    try:
+        for entry in await list_models(provider):
+            if entry["id"] == model:
+                return "structured_outputs" in (entry.get("supported_parameters") or [])
+    except Exception:
+        pass
+    return False
+
+
 async def chat_completion(
     messages: list[dict],
     model: str | None = None,
@@ -225,6 +243,7 @@ async def chat_completion(
     on_usage: Callable[[float], None] | None = None,
     max_retries: int | None = None,
     max_tokens: int | None = None,
+    json_schema: dict | None = None,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log.
@@ -237,9 +256,23 @@ async def chat_completion(
     reply combining trackers + a training-data document cut off mid-sentence, and the whole
     result - including trackers that would have worked fine alone - got discarded when it failed
     to parse). Pass an explicit value to deliberately force a smaller cap instead of resolving
-    the model's real one."""
+    the model's real one.
+
+    `json_schema`: pass a `{"name": ..., "strict": True, "schema": {...}}` object (not a
+    `response_format` dict) to request strict schema-constrained output - used for a response with
+    a genuinely *fixed* shape (e.g. game_knowledge_bootstrap's `{"trackers": [...], "training_data":
+    "..."}`). Only actually applied when the resolved model reports `structured_outputs` support
+    (see _model_supports_structured_outputs) - otherwise silently falls back to `response_format`
+    (or plain json_object mode) so an unsupported model/provider never fails outright over this.
+    Don't use this for a response whose shape depends on omitting keys to mean something (the
+    game-state extraction pass's per-tracker fields rely on "key absent = carry forward the
+    previous value" - a strict schema requires every key present every time, which would break
+    that convention entirely)."""
     resolved_model = model or settings.openrouter_model
     resolved_max_tokens = max_tokens if max_tokens is not None else await _resolve_max_tokens(resolved_model, provider)
+    resolved_response_format = response_format
+    if json_schema is not None and await _model_supports_structured_outputs(resolved_model, provider):
+        resolved_response_format = {"type": "json_schema", "json_schema": json_schema}
     client = get_client(provider, max_retries=max_retries)
     extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
     start = time.monotonic()
@@ -247,7 +280,7 @@ async def chat_completion(
         response = await client.chat.completions.create(
             model=resolved_model,
             messages=messages,
-            response_format=response_format,
+            response_format=resolved_response_format,
             max_tokens=resolved_max_tokens,
             extra_body=extra_body,
         )

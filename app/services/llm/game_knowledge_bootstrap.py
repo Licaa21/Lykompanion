@@ -21,6 +21,36 @@ from app.services.llm.web_search_tool import execute_web_search
 
 logger = logging.getLogger(__name__)
 
+# Fixed, non-dynamic response shape (unlike game_state_extraction's per-tracker fields, which rely
+# on omitting a key to mean "carry forward" - incompatible with strict schema's "every key present
+# every time") - a good candidate for response_format: json_schema instead of the looser
+# json_object mode. Falls back to json_object automatically when the resolved model doesn't
+# support it (see client.py's _model_supports_structured_outputs) - never used unconditionally.
+_BOOTSTRAP_JSON_SCHEMA = {
+    "name": "game_knowledge_bootstrap",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "trackers": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["label", "description"],
+                    "additionalProperties": False,
+                },
+            },
+            "training_data": {"type": ["string", "null"]},
+        },
+        "required": ["trackers", "training_data"],
+        "additionalProperties": False,
+    },
+}
+
 # Processes a bootstrap has already been attempted for this app run - avoids re-running the
 # whole gather+LLM pass every time the same game regains focus after a failed/empty attempt.
 # Deliberately in-memory only: a restart gets one fresh retry, which is what you want when the
@@ -186,7 +216,7 @@ async def bootstrap_game_knowledge(process: str) -> None:
                 {"role": "user", "content": user_content},
             ],
             model=settings.game_bootstrap_model or settings.game_state_model or None,
-            response_format={"type": "json_object"},
+            json_schema=_BOOTSTRAP_JSON_SCHEMA,
             source="game_bootstrap",
             provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )
@@ -305,7 +335,7 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
                 {"role": "user", "content": user_content},
             ],
             model=settings.game_bootstrap_model or settings.game_state_model or None,
-            response_format={"type": "json_object"},
+            json_schema=_BOOTSTRAP_JSON_SCHEMA,
             source="game_bootstrap",
             provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )

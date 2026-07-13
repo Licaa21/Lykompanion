@@ -167,6 +167,97 @@ class TestResolveMaxTokens:
         assert calls[0]["max_tokens"] == 256
 
 
+class TestStructuredOutputs:
+    """Coverage for the 2026-07-13 structured-outputs support: chat_completion(json_schema=...)
+    should only actually request response_format: json_schema when the resolved model reports
+    "structured_outputs" in its supported_parameters - forcing it on an unsupported model/provider
+    would fail the request outright, which is worse than the plain json_object mode this upgrades."""
+
+    _SCHEMA = {"name": "test_schema", "strict": True, "schema": {"type": "object", "properties": {}}}
+
+    def test_uses_json_schema_when_model_supports_it(self, monkeypatch):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            return [{"id": "google/gemini-2.5-flash-lite", "supported_parameters": ["structured_outputs", "max_tokens"]}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}],
+                model="google/gemini-2.5-flash-lite",
+                source="test",
+                json_schema=self._SCHEMA,
+            )
+
+        asyncio.run(run())
+        assert calls[0]["response_format"] == {"type": "json_schema", "json_schema": self._SCHEMA}
+
+    def test_falls_back_to_json_object_when_model_lacks_support(self, monkeypatch):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            return [{"id": "some/older-model", "supported_parameters": ["max_tokens"]}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}],
+                model="some/older-model",
+                source="test",
+                response_format={"type": "json_object"},
+                json_schema=self._SCHEMA,
+            )
+
+        asyncio.run(run())
+        assert calls[0]["response_format"] == {"type": "json_object"}
+
+    def test_falls_back_for_non_openrouter_provider_without_calling_list_models(self, monkeypatch):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            raise AssertionError("list_models should not be called for a non-openrouter provider")
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}],
+                source="test",
+                provider="google_ai_studio",
+                json_schema=self._SCHEMA,
+            )
+
+        asyncio.run(run())
+        assert calls[0]["response_format"] is None
+
+    def test_no_json_schema_argument_leaves_response_format_untouched(self, monkeypatch):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        _recorded, calls = _patch_client(monkeypatch, response)
+
+        async def fake_list_models(provider):
+            raise AssertionError("no capability lookup should happen when json_schema isn't used")
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client.chat_completion(
+                [{"role": "user", "content": "hi"}], source="test", response_format={"type": "json_object"},
+            )
+
+        asyncio.run(run())
+        assert calls[0]["response_format"] == {"type": "json_object"}
+
+
 class TestParseJsonReply:
     """Regression for the 2026-07-13 bug: google/gemini-2.5-flash-lite occasionally wrote an
     invalid JSON escape (e.g. "\\[item]" meaning the literal text "[item]", not an escape
