@@ -162,8 +162,17 @@ async def bootstrap_game_knowledge(process: str) -> None:
         return
 
     if not knowledge:
-        logger.info("Game bootstrap: no IGDB/web results for %r, keeping defaults", game_name)
-        return
+        # No external source found anything - still worth calling the model: it may recognize
+        # the game by name alone (genre, lore) and produce real trackers instead of this process
+        # being stuck on generic RPG-flavored defaults forever. The prompt's own rule ("if you
+        # can't identify the game, return empty trackers/null training_data") is the actual
+        # safety net here, not bailing out before ever asking.
+        logger.info("Game bootstrap: no IGDB/Steam/web results for %r - asking the model anyway, from its own knowledge", game_name)
+        knowledge = (
+            "(Nothing found via IGDB/Steam/web search. Rely only on your own existing knowledge "
+            "of this exact game if you genuinely recognize it by name; otherwise follow the "
+            "empty-trackers/null-training_data rule above rather than guessing.)"
+        )
 
     user_content = (
         f"Foreground process: {process}\n"
@@ -244,8 +253,15 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
     if pack_results and not pack_results.startswith(("No web search results", "Web search failed")):
         pack_knowledge = f"## Web search results about the modpack \"{modpack}\"\n{pack_results}"
     if not pack_knowledge and not base_knowledge:
-        logger.info("Variant bootstrap: nothing found for %r, skipping", modpack)
-        return
+        # Same reasoning as the base bootstrap: don't give up just because search came up empty -
+        # a modpack the model already recognizes by name can still get real trackers/lore from
+        # its own knowledge instead of the base game's generic defaults.
+        logger.info("Variant bootstrap: nothing found for %r - asking the model anyway, from its own knowledge", modpack)
+        pack_knowledge = (
+            f"(No web search results found for the \"{modpack}\" modpack. Rely only on your own "
+            "existing knowledge of it if you genuinely recognize it by name; otherwise follow the "
+            "empty-trackers/null-training_data rule above rather than guessing.)"
+        )
 
     user_content = (
         f"Foreground process: {process}\n"

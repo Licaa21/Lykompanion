@@ -15,6 +15,7 @@
 - [ ] "Image unavailable" fix (2026-07-13, `narration.js`'s `renderMessageMarkup`, see CLAUDE.md) needs live testing: get the model to embed a raw `https://` image URL directly (not via `show_image`) and confirm it now renders through `/api/proxy/image` instead of a bare `<img src>` that hotlink protection could reject.
 - [x] Gaming Journal empty-state centering fix (2026-07-13, `style.css`'s `.journal-library-grid:has(.memory-empty-hint)`) — confirmed live, renders centered. Caused a regression, since fixed (see next item).
 - [ ] Regression from the above fix (2026-07-13): `#journal-library-view { display: flex; ... }`'s ID selector outranked the browser's own `[hidden]{display:none}` rule, so opening a game's detail view (which sets that element's `hidden` attribute) left the My Games grid still rendered, overlapping the detail view. Fixed via an explicit `#journal-library-view[hidden] { display: none; }` override. Needs live confirmation: open a tracked game (e.g. CloverPit) from My Games and confirm the library grid actually disappears instead of showing through behind the detail view.
+- [ ] Bootstrap now forces the tracker/training LLM call even when IGDB+Steam+web search all come up empty (2026-07-13, `game_knowledge_bootstrap.py`) instead of silently keeping generic RPG defaults — the model may still recognize an obscure game by name alone. Needs live testing: re-add a game with genuinely no search footprint and confirm it gets tailored trackers now instead of staying stuck on Location/Quest/Character/etc.
 
 
 
