@@ -1,16 +1,20 @@
 """One-time game knowledge bootstrap - runs in the background the first time a game is
-tracked. Fetches IGDB info + a web search for the game, then one LLM pass turns that into
-(a) game-appropriate trackers (replacing the generic RPG-flavored defaults, but only if the
-user hasn't customized them) and (b) starting training data notes, so the extraction pass
-doesn't face a blank document it never bothers to fill in."""
+tracked. Fetches IGDB info + Steam store info + a web search for the game, then one LLM pass
+turns that into (a) game-appropriate trackers (replacing the generic RPG-flavored defaults, but
+only if the user hasn't customized them) and (b) starting training data notes, so the extraction
+pass doesn't face a blank document it never bothers to fill in."""
 
 import asyncio
 import json
 import logging
+import re
+
+import httpx
 
 from app.core import game_state_trackers
 from app.core import game_state_training_data
 from app.core.config import settings
+from app.core.game_art import APP_DETAILS_URL, STORE_SEARCH_URL, _titles_match
 from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion
 from app.services.llm.igdb_tool import execute_lookup_game_info
@@ -42,12 +46,56 @@ def _trackers_are_default(trackers: list[dict]) -> bool:
     return [t["id"] for t in trackers] == default_ids
 
 
+async def _fetch_steam_knowledge(game_name: str) -> str | None:
+    """Steam's public store-search + appdetails - no API key needed, and covers small/indie
+    titles that IGDB's own database often has no populated (or no) entry for. Guards against
+    Steam's fuzzy search substituting a different, similarly-named real game (same risk/fix as
+    game_art.py's fetch_art - see its _titles_match usage) since a wrong match here would feed
+    the LLM pass a confidently wrong game's description."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as http_client:
+            search_response = await http_client.get(STORE_SEARCH_URL, params={"term": game_name, "cc": "us", "l": "en"})
+            search_response.raise_for_status()
+            items = search_response.json().get("items") or []
+            if not items or not _titles_match(items[0].get("name") or "", game_name):
+                return None
+            appid = items[0]["id"]
+
+            details_response = await http_client.get(APP_DETAILS_URL, params={"appids": appid, "l": "en"})
+            details_response.raise_for_status()
+            app_data = details_response.json().get(str(appid), {})
+    except httpx.HTTPError:
+        return None
+
+    if not app_data.get("success"):
+        return None
+    info = app_data["data"]
+
+    parts = []
+    genres = ", ".join(g["description"] for g in info.get("genres") or [] if g.get("description"))
+    if genres:
+        parts.append(f"Genres: {genres}")
+    categories = ", ".join(c["description"] for c in info.get("categories") or [] if c.get("description"))
+    if categories:
+        parts.append(f"Categories: {categories}")
+    description = info.get("detailed_description") or info.get("short_description")
+    if description:
+        # Steam's description fields are raw marketing HTML - strip tags before handing to the LLM.
+        description = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", description)).strip()[:1500]
+        parts.append(f"Store description: {description}")
+    return "\n".join(parts) if parts else None
+
+
 async def _gather_game_knowledge(game_name: str) -> str:
     parts = []
 
     igdb_info = await execute_lookup_game_info({"game_name": game_name})
     if igdb_info and not igdb_info.startswith(("No IGDB results", "IGDB isn't configured", "IGDB authentication failed", "IGDB lookup failed")):
         parts.append(f"## IGDB database results\n{igdb_info}")
+
+    steam_info = await _fetch_steam_knowledge(game_name)
+    if steam_info:
+        parts.append(f"## Steam store results\n{steam_info}")
 
     web_results = await execute_web_search({"query": f"{game_name} game HUD UI elements explained stats screen"})
     if web_results and not web_results.startswith(("No web search results", "Web search failed")):
