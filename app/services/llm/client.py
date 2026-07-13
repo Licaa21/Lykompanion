@@ -200,7 +200,7 @@ async def chat_completion(
     provider: str = "openrouter",
     on_usage: Callable[[float], None] | None = None,
     max_retries: int | None = None,
-    max_tokens: int | None = 4096,
+    max_tokens: int | None = 8192,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log.
@@ -211,8 +211,11 @@ async def chat_completion(
     much smaller default, silently truncating mid-JSON (observed live: a game_bootstrap reply
     combining trackers + a training-data document cut off mid-sentence, and the whole result -
     including trackers that would have worked fine alone - got discarded when it failed to parse).
-    A ceiling this generous costs nothing when unused; pass a smaller value only to deliberately
-    force a short reply."""
+    8192 rather than higher: some models used here (e.g. meta-llama/llama-4-maverick) cap out at
+    16,384 output tokens - a shared default has to stay safely under the *lowest* ceiling any
+    caller might use, not the highest (google/gemini-2.5-flash-lite alone allows 65,535). A
+    ceiling this generous still costs nothing when unused; pass a smaller value only to
+    deliberately force a short reply."""
     resolved_model = model or settings.openrouter_model
     client = get_client(provider, max_retries=max_retries)
     extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
