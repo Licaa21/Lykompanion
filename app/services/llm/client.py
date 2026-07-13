@@ -181,10 +181,19 @@ async def chat_completion(
     provider: str = "openrouter",
     on_usage: Callable[[float], None] | None = None,
     max_retries: int | None = None,
+    max_tokens: int | None = 4096,
 ) -> str:
     """`on_usage`, if given, is called with the call's cost in USD once usage is known - lets
     callers that care about cost (e.g. session stats) avoid re-deriving it from the debug log.
-    `max_retries` - see get_client()."""
+    `max_retries` - see get_client(). `max_tokens` defaults generously rather than omitted -
+    every caller of this function is a background/structured-JSON pass (bootstrap, game-state
+    extraction, memory/observation passes, chat title generation), several of which combine
+    multiple fields plus a document into one response; some providers otherwise fall back to a
+    much smaller default, silently truncating mid-JSON (observed live: a game_bootstrap reply
+    combining trackers + a training-data document cut off mid-sentence, and the whole result -
+    including trackers that would have worked fine alone - got discarded when it failed to parse).
+    A ceiling this generous costs nothing when unused; pass a smaller value only to deliberately
+    force a short reply."""
     resolved_model = model or settings.openrouter_model
     client = get_client(provider, max_retries=max_retries)
     extra_body = _openrouter_extra_body(resolved_model) if provider == "openrouter" else None
@@ -194,6 +203,7 @@ async def chat_completion(
             model=resolved_model,
             messages=messages,
             response_format=response_format,
+            max_tokens=max_tokens,
             extra_body=extra_body,
         )
     except Exception as exc:
