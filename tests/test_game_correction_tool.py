@@ -78,6 +78,52 @@ def test_correct_game_modpack_empty_clears_variant(isolated):
     assert isolated == []  # clearing to vanilla needs no training-data/tracker refresh
 
 
+def test_correct_game_title_with_active_variant_only_resets_trackers_once(isolated, monkeypatch):
+    # Regression test (2026-07-13): correcting the title while a variant is already active used to
+    # reset trackers via BOTH force_refresh_base and force_refresh_variant, racing two independent
+    # bootstrap calls over the same per-process tracker list. Only the variant path should reset
+    # them now - verified here by making reset_trackers itself raise if called more than once.
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.set_session_variant("javaw.exe", session_id, "FTB StoneBlock 4")
+
+    calls = []
+    original_reset = game_state_trackers.reset_trackers
+
+    def counting_reset(process):
+        calls.append(process)
+        return original_reset(process)
+
+    monkeypatch.setattr(game_state_trackers, "reset_trackers", counting_reset)
+
+    asyncio.run(game_correction_tool.execute_correct_game_title({"title": "Minecraft"}))
+
+    assert calls == ["javaw.exe"]  # reset exactly once, not once per refresh call
+    assert ("base", "javaw.exe") in isolated
+    assert ("variant", "javaw.exe", "Minecraft", "FTB StoneBlock 4") in isolated
+
+
+def test_correct_game_title_repeat_correction_is_a_noop(isolated):
+    game_state.start_tracking("javaw.exe")
+    game_art.set_title_override("javaw.exe", "Minecraft")
+
+    result = asyncio.run(game_correction_tool.execute_correct_game_title({"title": "Minecraft"}))
+
+    assert "nothing to correct" in result.lower()
+    assert isolated == []
+
+
+def test_correct_game_modpack_repeat_correction_is_a_noop(isolated):
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.set_session_variant("javaw.exe", session_id, "FTB StoneBlock 4")
+
+    result = asyncio.run(game_correction_tool.execute_correct_game_modpack({"modpack": "FTB StoneBlock 4"}))
+
+    assert "nothing to correct" in result.lower()
+    assert isolated == []
+
+
 def test_correct_game_title_no_active_game():
     result = asyncio.run(game_correction_tool.execute_correct_game_title({"title": "Minecraft"}))
     assert "no game" in result.lower()

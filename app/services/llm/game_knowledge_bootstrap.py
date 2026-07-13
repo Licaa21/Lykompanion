@@ -221,7 +221,7 @@ def schedule_bootstrap(process: str) -> None:
     asyncio.get_running_loop().create_task(bootstrap_game_knowledge(process))
 
 
-def force_refresh_base(process: str) -> None:
+def force_refresh_base(process: str, *, reset_trackers: bool = True) -> None:
     """Wipes this process's base training-data document, resets its trackers to the untouched
     defaults, and clears the retry-attempt cache, then re-schedules the bootstrap under whatever
     title is now on file - used when a user correction (see game_correction_tool.py) reveals the
@@ -231,9 +231,17 @@ def force_refresh_base(process: str) -> None:
     as eligible again, since otherwise a first bootstrap run under the wrong name would count as
     "already customized" and block ever replacing them. Note: this can't distinguish those from
     trackers a user genuinely hand-edited afterward - a real tradeoff of triggering this from a
-    correction rather than only from a still-pristine process."""
+    correction rather than only from a still-pristine process.
+
+    `reset_trackers=False` when a variant is (or is about to be) active and its own
+    force_refresh_variant call will own the tracker reset instead - trackers are shared per-process
+    (not per-variant), so letting both the base and variant bootstrap independently reset+regenerate
+    the same list races them against each other. Observed live: two bootstrap calls landed 2 seconds
+    apart, one producing excellent modpack-specific trackers, the other generic ones - whichever
+    finished last silently won, and the trackers ended up neither, stuck back at plain defaults."""
     game_state_training_data.set_training_data(process, "")
-    game_state_trackers.reset_trackers(process)
+    if reset_trackers:
+        game_state_trackers.reset_trackers(process)
     _attempted.discard(process.lower())
     schedule_bootstrap(process)
 

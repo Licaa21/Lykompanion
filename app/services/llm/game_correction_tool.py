@@ -69,9 +69,18 @@ async def execute_correct_game_title(arguments: dict) -> str:
         return "No game is currently being tracked - nothing to correct."
     process = gs["process"]
 
+    # A repeat correction to the same title that's already on file is a no-op, not a fresh
+    # trigger - resetting trackers/training-data again here would just race whatever an earlier
+    # call already has in flight, for no actual change.
+    if game_art.get_display_title(process).strip().lower() == title.lower():
+        return f"The title is already \"{title}\" - nothing to correct."
+
     game_art.set_title_override(process, title)
-    game_knowledge_bootstrap.force_refresh_base(process)
     variant = (gs.get("variant") or "").strip() or None
+    # Trackers are shared per-process, not per-variant - when a variant is active, let its own
+    # refresh below own the tracker reset/regeneration instead of also resetting it here, or the
+    # two bootstrap calls race over the same tracker list (observed live: 2026-07-13).
+    game_knowledge_bootstrap.force_refresh_base(process, reset_trackers=not variant)
     if variant:
         game_knowledge_bootstrap.force_refresh_variant(process, title, variant)
 
@@ -90,11 +99,19 @@ async def execute_correct_game_modpack(arguments: dict) -> str:
         return "No game is currently being tracked - nothing to correct."
     process = gs["process"]
 
+    current_variant = (gs.get("variant") or "").strip()
     if not modpack:
+        if not current_variant:
+            return "This session is already vanilla (no modpack tag) - nothing to correct."
         session_id = gs.get("session_id")
         if session_id:
             game_state.set_session_variant(process, session_id, None)
         return "Cleared the modpack tag - this session is now tracked as vanilla."
+
+    # Same reasoning as the title's no-op guard above - a repeat correction to the same modpack
+    # already active shouldn't re-trigger a reset/refresh race against whatever's in flight.
+    if current_variant.lower() == modpack.lower():
+        return f"The modpack is already set to \"{modpack}\" - nothing to correct."
 
     base_title = game_art.get_display_title(process)
     # Clear the (possibly wrong/stale) variant doc + retry-attempt cache BEFORE switching the
