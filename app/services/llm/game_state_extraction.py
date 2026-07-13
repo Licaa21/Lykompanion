@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 
 from PIL import Image, ImageChops, ImageStat
 
+from app.core import game_art
 from app.core import game_state
 from app.core import game_state_processes
 from app.core import game_state_trackers
@@ -778,6 +779,22 @@ def _push_overlay_game_state(process: str, prime: bool = False) -> None:
         trackers = game_state_trackers.get_trackers(process)
         values = game_state.get_values(process)
         rows: list[list[str]] = []
+
+        # Modpack/session identity, shown as a plain row above the trackers (same smaller row
+        # styling the overlay already uses - no native rendering changes needed). Only shown when
+        # there's something non-obvious to say: a modpack, or a non-default named profile - the
+        # common single vanilla "Default" session would just be clutter every single game.
+        gs = game_state.get_game_state()
+        if gs and gs.get("process", "").lower() == process.lower():
+            variant = gs.get("variant")
+            if variant:
+                rows.append(["Modpack", variant])
+            else:
+                session_id = gs.get("session_id")
+                session_name = session_id and game_state.get_session_name(process, session_id)
+                if session_name and session_name != "Default":
+                    rows.append(["Session", session_name])
+
         for tracker in trackers:
             if not tracker.get("overlay", True):  # per-tracker "show in overlay" toggle
                 continue
@@ -785,7 +802,10 @@ def _push_overlay_game_state(process: str, prime: bool = False) -> None:
             # Mirror the web panel: show every overlay-enabled tracker, empty ones
             # included (the overlay renders "(not seen yet)" for a blank value).
             rows.append([tracker["label"], str(value) if value else ""])
-        title = process.rsplit(".", 1)[0].replace("_", " ").title()
+        # The resolved/corrected display title (Steam/IGDB match or a user correction via
+        # correct_game_title), not a naive cleanup of the raw process name - this used to show
+        # "Javaw" forever regardless of what the Gaming Journal/My Games title actually resolved to.
+        title = game_art.get_display_title(process)
         command = {"type": "game_state", "title": title, "rows": rows}
         if prime:
             overlay_process.push_retry(command)
