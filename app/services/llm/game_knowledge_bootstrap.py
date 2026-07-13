@@ -5,7 +5,6 @@ only if the user hasn't customized them) and (b) starting training data notes, s
 pass doesn't face a blank document it never bothers to fill in."""
 
 import asyncio
-import json
 import logging
 import re
 
@@ -16,7 +15,7 @@ from app.core import game_state_training_data
 from app.core.config import settings
 from app.core.game_art import APP_DETAILS_URL, STORE_SEARCH_URL, _titles_match
 from app.core.prompts import load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 from app.services.llm.igdb_tool import execute_lookup_game_info
 from app.services.llm.web_search_tool import execute_web_search
 
@@ -191,7 +190,7 @@ async def bootstrap_game_knowledge(process: str) -> None:
             source="game_bootstrap",
             provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )
-        data = json.loads(raw)
+        data = parse_json_reply(raw)
     except Exception:
         logger.exception("Game bootstrap: LLM pass failed for process=%r", process)
         return
@@ -310,7 +309,7 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
             source="game_bootstrap",
             provider=settings.game_bootstrap_provider or settings.game_state_provider or settings.llm_provider,
         )
-        data = json.loads(raw)
+        data = parse_json_reply(raw)
     except Exception:
         logger.exception("Variant bootstrap: LLM pass failed for %r", modpack)
         return

@@ -1,4 +1,6 @@
 import asyncio
+import json
+import re
 import time
 from collections.abc import AsyncIterator, Callable
 
@@ -161,6 +163,23 @@ def _first_choice(response, source: str, model: str, messages: list[dict], tools
         _record_error(source, model, messages, tools, exc, duration_ms)
         raise exc
     return response.choices[0]
+
+
+_INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
+
+
+def parse_json_reply(raw: str) -> dict:
+    """Parses a JSON-mode model reply, tolerating one specific, observed LLM slip: a backslash
+    that isn't a legal JSON escape (e.g. a model writing "\\[item]" meaning the literal text
+    "[item]", not an escape sequence - "\\[" isn't valid JSON, so a strict parser rejects the
+    whole response even though everything else about it is fine). Falls back to stripping exactly
+    those invalid backslashes and re-parsing once; a genuinely incomplete/truncated response still
+    raises after that - correctly, since there's nothing to salvage from one that just stops
+    mid-string, and callers already handle that failure (retry, log-and-skip, etc.)."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return json.loads(_INVALID_JSON_ESCAPE_RE.sub("", raw))
 
 
 def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:

@@ -17,7 +17,7 @@ from app.core import observations as observations_store
 from app.core import reminders as reminders_store
 from app.core.config import settings
 from app.core.prompts import load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
 from app.services.llm.variant_detection import apply_detected_variant, schedule_variant_detection
@@ -245,7 +245,7 @@ async def _call_extraction(
         # like every other call site, giving a rate-limited window a real chance to complete
         # instead of failing outright on the first 429 and waiting for a later window's luck.
     )
-    return json.loads(raw)
+    return parse_json_reply(raw)
 
 
 def _image_part(b64: str) -> dict:

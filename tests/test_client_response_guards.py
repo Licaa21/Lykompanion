@@ -65,3 +65,24 @@ def test_chat_completion_returns_content_when_choices_present(monkeypatch):
         return await client.chat_completion([{"role": "user", "content": "hi"}], source="test")
 
     assert asyncio.run(run()) == "hello there"
+
+
+class TestParseJsonReply:
+    """Regression for the 2026-07-13 bug: google/gemini-2.5-flash-lite occasionally wrote an
+    invalid JSON escape (e.g. "\\[item]" meaning the literal text "[item]", not an escape
+    sequence) inside an otherwise well-formed response, and Python's strict json.loads rejected
+    the entire reply - even though only that one backslash was actually wrong. Observed live in
+    data/debug_log.json for a game_state_extraction call."""
+
+    def test_parses_normal_json_unchanged(self):
+        assert client.parse_json_reply('{"a": 1}') == {"a": 1}
+
+    def test_recovers_from_invalid_escape_sequence(self):
+        raw = r'{"note": "The text \[item] refers to a diamond variant."}'
+        assert client.parse_json_reply(raw) == {"note": "The text [item] refers to a diamond variant."}
+
+    def test_still_raises_on_genuine_truncation(self):
+        # A response that just stops mid-string has nothing to salvage - must keep raising so
+        # callers' existing retry/failure handling still runs, not silently return garbage.
+        with pytest.raises(ValueError):
+            client.parse_json_reply('{"activity": "Exploring a cave", "training_data_update": {"## UI/UX": ["The game')

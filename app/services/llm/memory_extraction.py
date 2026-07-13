@@ -1,11 +1,10 @@
 import asyncio
-import json
 import logging
 
 from app.core import game_state, memory, observations
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +79,7 @@ async def _extract_and_apply_memory_locked(user_message: str, assistant_message:
             source="memory_extraction",
             provider=provider,
         )
-        data = json.loads(raw)
+        data = parse_json_reply(raw)
     except Exception:
         logger.exception("Memory extraction failed")
         return

@@ -7,13 +7,12 @@ accumulated enough pending observations, reviews the whole journal for that sess
 the known facts, and sorts the keepers into the right scope (user / game / session)."""
 
 import asyncio
-import json
 import logging
 
 from app.core import game_state, game_state_training_data, memory, observations
 from app.core.config import settings
 from app.core.prompts import current_datetime_context, load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 from app.services.llm.web_search_tool import execute_web_search
 
 logger = logging.getLogger(__name__)
@@ -80,7 +79,7 @@ async def confirm_observations(process: str, session_id: str | None) -> None:
                 source="observation_confirmation",
                 provider=provider,
             )
-            data = json.loads(raw)
+            data = parse_json_reply(raw)
         except Exception:
             logger.exception("Observation confirmation pass failed for process=%r", process)
             return
@@ -125,7 +124,7 @@ async def confirm_observations(process: str, session_id: str | None) -> None:
                     source="observation_confirmation",
                     provider=provider,
                 )
-                data = json.loads(raw)
+                data = parse_json_reply(raw)
             except Exception:
                 logger.exception("Observation confirmation pass failed for process=%r on search round %d", process, round_num)
                 break

@@ -6,13 +6,12 @@ this reviews standing "user" facts and moves any that turn out to be specificall
 game (or session) scope, so they surface only while it's relevant instead of forever."""
 
 import asyncio
-import json
 import logging
 
 from app.core import memory
 from app.core.config import settings
 from app.core.prompts import load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ async def retag_memories_for_process(process: str, session_id: str | None) -> No
             source="memory_retagging",
             provider=settings.memory_extraction_provider or settings.llm_provider,
         )
-        data = json.loads(raw)
+        data = parse_json_reply(raw)
     except Exception:
         logger.exception("Memory retagging pass failed for process=%r", process)
         return

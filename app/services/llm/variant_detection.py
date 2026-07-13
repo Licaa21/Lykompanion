@@ -15,14 +15,13 @@ pack name spotted on screen through apply_detected_variant() when launch signals
 enough (see game_state_extraction.py)."""
 
 import asyncio
-import json
 import logging
 
 from app.core import game_art, game_state, memory
 from app.core.config import settings
 from app.core.game_art import _titles_match
 from app.core.prompts import load_prompt
-from app.services.llm.client import chat_completion
+from app.services.llm.client import chat_completion, parse_json_reply
 from app.services.system.processes import get_foreground_process_details
 
 logger = logging.getLogger(__name__)
@@ -90,7 +89,7 @@ async def _detect_and_apply(process: str) -> None:
                 source="variant_detection",
                 provider=settings.game_state_provider or settings.llm_provider,
             )
-            result = json.loads(raw)
+            result = parse_json_reply(raw)
             _cached_results[signals] = result
 
         confidence = result.get("confidence")
