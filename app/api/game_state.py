@@ -128,6 +128,13 @@ async def delete_game(process: str) -> dict:
     observations.clear_process(process)
     game_state_processes.remove_from_whitelist(process)
     game_state_processes.clear_pending_process(process)
+    # If this process is still the focused/running one, the poller's own "what am I tracking"
+    # state (game_state_extraction.py's _last_process) never otherwise changes - without this,
+    # re-approving it while it's never lost focus would silently poll under stale state forever,
+    # never re-triggering start_tracking/variant detection/bootstrap for the now-wiped process.
+    from app.services.llm.game_state_extraction import forget_tracked_process
+
+    forget_tracked_process(process)
     return {"ok": True}
 
 

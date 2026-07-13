@@ -160,6 +160,21 @@ def _reset_window() -> None:
     _consecutive_skips = 0
 
 
+def forget_tracked_process(process: str) -> None:
+    """Resets the poller's own in-memory "what am I currently tracking" state for one process -
+    call this when a tracked game is deleted via the API (DELETE /api/game-state/games/{process})
+    while it's still the focused/running process. Without this, _capture_tick's `process !=
+    _last_process` check - the only thing that triggers game_state.start_tracking(),
+    schedule_variant_detection(), and schedule_bootstrap() - never fires again, since the
+    foreground process name is identical before and after the delete. The freshly-wiped process
+    would otherwise keep polling under stale state forever, never re-seeding trackers/training
+    data or re-detecting a modpack, even though its underlying data was just cleared."""
+    global _last_process
+    if _last_process and _last_process.lower() == process.lower():
+        _last_process = None
+        _reset_window()
+
+
 def _frames_similar(a: str, b: str) -> tuple[bool, float]:
     ratio = SequenceMatcher(None, a, b).ratio()
     return ratio >= settings.game_state_ocr_similarity_threshold, ratio

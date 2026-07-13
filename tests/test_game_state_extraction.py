@@ -20,6 +20,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(game_state, "_cached_variant_loaded", False)
     monkeypatch.setattr(game_art, "GAME_ART_PATH", tmp_path / "game_art.json")
     monkeypatch.setattr(game_state_trackers, "TRACKERS_PATH", tmp_path / "trackers.json")
+    monkeypatch.setattr(game_state_extraction, "_last_process", None)
 
     pushed = []
     monkeypatch.setattr(game_state_extraction.overlay_process, "push", lambda command: pushed.append(command))
@@ -62,3 +63,31 @@ def test_overlay_omits_identity_row_for_plain_default_session(isolated):
     row_labels = [r[0] for r in isolated[0]["rows"]]
     assert "Modpack" not in row_labels
     assert "Session" not in row_labels
+
+
+def test_forget_tracked_process_resets_matching_process(monkeypatch, isolated):
+    # Regression test (2026-07-13): deleting a tracked game via the API while it's still the
+    # focused/running process never changed _last_process (the foreground process name is
+    # identical before and after), so _capture_tick's "process != _last_process" check - the only
+    # thing that triggers a fresh start_tracking/variant-detection/bootstrap - never fired again.
+    monkeypatch.setattr(game_state_extraction, "_last_process", "javaw.exe")
+
+    game_state_extraction.forget_tracked_process("javaw.exe")
+
+    assert game_state_extraction._last_process is None
+
+
+def test_forget_tracked_process_is_case_insensitive(monkeypatch, isolated):
+    monkeypatch.setattr(game_state_extraction, "_last_process", "JavaW.exe")
+
+    game_state_extraction.forget_tracked_process("javaw.exe")
+
+    assert game_state_extraction._last_process is None
+
+
+def test_forget_tracked_process_ignores_a_different_process(monkeypatch, isolated):
+    monkeypatch.setattr(game_state_extraction, "_last_process", "eldenring.exe")
+
+    game_state_extraction.forget_tracked_process("javaw.exe")
+
+    assert game_state_extraction._last_process == "eldenring.exe"
