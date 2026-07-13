@@ -62,6 +62,7 @@ def record_request(
     completion_tokens: int,
     cost_usd: float,
     duration_ms: float | None,
+    finish_reason: str | None = None,
 ) -> None:
     if not settings.debug_mode_enabled:
         return
@@ -78,6 +79,11 @@ def record_request(
         "completion_tokens": completion_tokens,
         "cost_usd": cost_usd,
         "duration_ms": duration_ms,
+        # Why the provider stopped generating - "stop" (normal), "length" (hit max_tokens),
+        # "content_filter", or a provider-specific reason. Never inspected before 2026-07-13;
+        # added specifically to distinguish a real token-limit truncation from whatever else was
+        # causing the game-state extraction pass's occasional malformed-JSON replies.
+        "finish_reason": finish_reason,
     }
     _entries.appendleft(entry)
     _save_to_disk()

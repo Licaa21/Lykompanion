@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable
@@ -12,6 +13,8 @@ from app.core import debug_log
 from app.core import provider_routing
 from app.core.config import settings
 from app.core.usage import record_usage
+
+logger = logging.getLogger(__name__)
 
 # Google AI Studio's OpenAI-compatibility endpoint - a Gemini API key + this base_url is all
 # that's needed to reuse the same OpenAI SDK request path as OpenRouter/custom endpoints.
@@ -126,6 +129,7 @@ def _track(
     reply: str | None,
     tool_calls: list[dict] | None,
     duration_ms: float,
+    finish_reason: str | None = None,
 ) -> None:
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
@@ -143,6 +147,7 @@ def _track(
         completion_tokens=completion_tokens,
         cost_usd=cost_usd,
         duration_ms=duration_ms,
+        finish_reason=finish_reason,
     )
 
 
@@ -169,17 +174,35 @@ _INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 def parse_json_reply(raw: str) -> dict:
-    """Parses a JSON-mode model reply, tolerating one specific, observed LLM slip: a backslash
-    that isn't a legal JSON escape (e.g. a model writing "\\[item]" meaning the literal text
-    "[item]", not an escape sequence - "\\[" isn't valid JSON, so a strict parser rejects the
-    whole response even though everything else about it is fine). Falls back to stripping exactly
-    those invalid backslashes and re-parsing once; a genuinely incomplete/truncated response still
-    raises after that - correctly, since there's nothing to salvage from one that just stops
-    mid-string, and callers already handle that failure (retry, log-and-skip, etc.)."""
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return json.loads(_INVALID_JSON_ESCAPE_RE.sub("", raw))
+    """Parses a JSON-mode model reply, tolerating two specific, observed LLM slips - neither
+    invents anything, both just recover a genuinely complete answer from around some noise:
+
+    1. A backslash that isn't a legal JSON escape (e.g. a model writing "\\[item]" meaning the
+       literal text "[item]", not an escape sequence - "\\[" isn't valid JSON, so a strict parser
+       rejects the whole response even though everything else about it is fine). Recovered by
+       stripping exactly those invalid backslashes and re-parsing.
+    2. Trailing "Extra data" after a complete JSON value (a model that keeps talking after a
+       valid answer - repeating itself, adding commentary despite being told not to). Recovered
+       by keeping only the first complete JSON value via json.JSONDecoder.raw_decode and
+       discarding whatever follows it.
+
+    A genuinely incomplete/truncated response (stops mid-string, before any complete value forms)
+    still raises after both are tried - correctly, since there's nothing to salvage from one that
+    just stops, and callers already handle that failure (retry, log-and-skip, etc.)."""
+    original_exc: json.JSONDecodeError | None = None
+    for attempt in (raw, _INVALID_JSON_ESCAPE_RE.sub("", raw)):
+        try:
+            return json.loads(attempt)
+        except json.JSONDecodeError as exc:
+            if original_exc is None:
+                original_exc = exc
+            if exc.msg == "Extra data":
+                try:
+                    obj, _end = json.JSONDecoder().raw_decode(attempt)
+                    return obj
+                except json.JSONDecodeError:
+                    pass
+    raise original_exc
 
 
 def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
@@ -288,7 +311,20 @@ async def chat_completion(
         _record_error(source, resolved_model, messages, None, exc, (time.monotonic() - start) * 1000)
         raise
     duration_ms = (time.monotonic() - start) * 1000
-    content = _first_choice(response, source, resolved_model, messages, None, duration_ms).message.content or ""
+    choice = _first_choice(response, source, resolved_model, messages, None, duration_ms)
+    content = choice.message.content or ""
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason and finish_reason != "stop":
+        # Distinguishes a real token-limit cutoff ("length") from a content-safety intervention
+        # ("content_filter") or anything else a provider-specific reason might mean - previously
+        # invisible, so a genuinely truncated/malformed reply looked identical to any other parse
+        # failure regardless of why the provider actually stopped generating.
+        logger.warning(
+            "chat_completion: non-stop finish_reason=%r for source=%r model=%r "
+            "(completion_tokens=%r of requested max_tokens=%r) - reply may be truncated/incomplete",
+            finish_reason, source, resolved_model,
+            getattr(response.usage, "completion_tokens", None), resolved_max_tokens,
+        )
     _track(
         source=source,
         model=resolved_model,
@@ -298,6 +334,7 @@ async def chat_completion(
         reply=content,
         tool_calls=None,
         duration_ms=duration_ms,
+        finish_reason=finish_reason,
     )
     if on_usage:
         on_usage(getattr(response.usage, "cost", 0) or 0)

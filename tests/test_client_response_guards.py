@@ -258,6 +258,65 @@ class TestStructuredOutputs:
         assert calls[0]["response_format"] == {"type": "json_object"}
 
 
+class TestFinishReasonDiagnostics:
+    """Coverage for the 2026-07-13 diagnostic addition: finish_reason was never inspected
+    anywhere, so a genuine token-limit cutoff ("length") looked identical to a content-safety
+    intervention ("content_filter") or anything else a provider might mean by "not stop" - all
+    indistinguishable from the outside as just "the JSON failed to parse". Now logged and stored
+    in debug_log.json so a future incident can tell which one actually happened."""
+
+    def test_warns_on_non_stop_finish_reason(self, monkeypatch, caplog):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="length")],
+            usage=SimpleNamespace(completion_tokens=42, prompt_tokens=10, cost=0),
+        )
+        _patch_client(monkeypatch, response)
+
+        async def run():
+            return await client.chat_completion([{"role": "user", "content": "hi"}], source="test")
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(run())
+
+        assert any("length" in r.message for r in caplog.records)
+
+    def test_no_warning_on_normal_stop(self, monkeypatch, caplog):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="stop")],
+            usage=SimpleNamespace(completion_tokens=42, prompt_tokens=10, cost=0),
+        )
+        _patch_client(monkeypatch, response)
+
+        async def run():
+            return await client.chat_completion([{"role": "user", "content": "hi"}], source="test")
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(run())
+
+        assert caplog.records == []
+
+    def test_finish_reason_reaches_debug_log(self, monkeypatch):
+        message = SimpleNamespace(content="{}")
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="content_filter")],
+            usage=SimpleNamespace(completion_tokens=5, prompt_tokens=10, cost=0),
+        )
+        _patch_client(monkeypatch, response)
+        recorded_calls = []
+        monkeypatch.setattr(
+            client.debug_log, "record_request",
+            lambda **kwargs: recorded_calls.append(kwargs),
+        )
+
+        async def run():
+            return await client.chat_completion([{"role": "user", "content": "hi"}], source="test")
+
+        asyncio.run(run())
+        assert recorded_calls[0]["finish_reason"] == "content_filter"
+
+
 class TestParseJsonReply:
     """Regression for the 2026-07-13 bug: google/gemini-2.5-flash-lite occasionally wrote an
     invalid JSON escape (e.g. "\\[item]" meaning the literal text "[item]", not an escape
@@ -277,3 +336,15 @@ class TestParseJsonReply:
         # callers' existing retry/failure handling still runs, not silently return garbage.
         with pytest.raises(ValueError):
             client.parse_json_reply('{"activity": "Exploring a cave", "training_data_update": {"## UI/UX": ["The game')
+
+    def test_recovers_from_trailing_extra_data(self):
+        # Regression for the 2026-07-13 "Extra data" bug (observation_confirmation.py): the model
+        # produced a complete, valid JSON value and then kept talking past it (repeating itself /
+        # adding commentary despite being told not to). Recover the first complete value and
+        # discard the trailing noise, rather than failing on an otherwise-good answer.
+        raw = '{"activity": "mining"}\nSorry, I should also mention the player found a diamond.'
+        assert client.parse_json_reply(raw) == {"activity": "mining"}
+
+    def test_recovers_when_both_invalid_escape_and_extra_data_are_present(self):
+        raw = r'{"note": "The text \[item] variant."}' + "\nextra trailing commentary"
+        assert client.parse_json_reply(raw) == {"note": "The text [item] variant."}
