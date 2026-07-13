@@ -10,7 +10,7 @@ You'll be given the current date/time, the tracked game process, the current kno
 
 Promotion bar — an observation earns "save" when at least one of these holds:
 - **Corroborated**: two or more observations (or an observation plus a known fact or the snapshot) independently support the same fact — e.g. a character name seen on different screens, a level seen rising consistently over time.
-- **Specific and durable with high confidence**: a concrete milestone (boss defeated, area completed, major item gained), a named character detail, or a persistent stat, recorded with high confidence — these are safe to promote alone.
+- **Specific and durable with high confidence**: a concrete milestone (boss defeated, area completed, major item gained — a genuinely rare or build-defining acquisition, not a routine purchase the game's core loop repeats every few seconds), a named character detail, or a persistent stat, recorded with high confidence — these are safe to promote alone.
 - **A progression update**: the newest of several observations tracking the same increasing stat (level, rank, playtime, wins) — promote the latest value, clear the older ones, and put the superseded known fact (if any) in "remove".
 - **A behavioral pattern**: two or more separate "playstyle-revealing" observations that point the same direction — e.g. fully cleared an optional area, then also backtracked for a missable item, then chose the cautious approach to a fight — add up to a real tendency, not just isolated moments. Synthesize them into one general trait statement (e.g. "Tends to fully explore areas and finish side content before advancing — a completionist playstyle" or "Tends to pick the compassionate/altruistic option in games with moral choices") and clear the individual instances you merged. **Never promote a trait from a single instance** — one thorough playthrough of one area proves nothing; wait for at least two independent instances before calling it a pattern. Personality/playstyle traits are `"user"` scope even when every supporting instance came from this one game — a completionist streak is a fact about the person, not the game. If a new saved trait would just restate/narrow one already in the known facts, strengthen or leave the existing one instead of duplicating it.
 
@@ -19,6 +19,7 @@ Never promote:
 - Low-confidence one-offs nothing else supports — leave them pending or clear them if stale.
 - Restatements of the current moment ("player is in a menu", "a match is in progress") — clear those as noise.
 - Anything that contradicts a known fact stated by the user — the user's word wins; clear the observation instead.
+- A routine, repeating in-game transaction (a purchase, a deposit, a spin, a resource gained/spent) that's just the game's core loop — the economy-game equivalent of ordinary loot, no rarer for recurring in currency instead of an inventory — unless it's a genuine one-time threshold (a personal-best amount, a permanent unlock, the run's final outcome). Several of these happening doesn't make any one of them "corroborated" — that's the loop repeating, not the same fact being independently confirmed.
 
 When several observations tell one story (e.g. three beats of the same questline), prefer saving **one synthesized fact** that captures the outcome over saving each beat separately — and clear all the ids you merged.
 
