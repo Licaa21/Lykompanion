@@ -170,7 +170,9 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
         f"Foreground process: {process}\n"
         f"Base game: {base_title}\n"
         f"The player is running the \"{modpack}\" modpack/overhaul of it — the notes you produce are for "
-        f"THAT modded experience, so pack-specific mechanics/content matter as much as base-game basics.\n\n"
+        f"THAT modded experience. This is a modpack/variant request: always include the \"## Lore\" section "
+        f"(scoped strictly to what \"{modpack}\" itself adds, never general facts about {base_title}) and scope "
+        f"\"## UI/UX\" to what the pack adds or changes only, even if you already know {base_title} well.\n\n"
         f"Gathered information:\n\n"
         + "\n\n".join(part for part in (base_knowledge, pack_knowledge) if part)
     )
