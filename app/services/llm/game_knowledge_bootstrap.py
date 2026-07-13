@@ -46,12 +46,23 @@ def _trackers_are_default(trackers: list[dict]) -> bool:
     return [t["id"] for t in trackers] == default_ids
 
 
+STEAM_ACHIEVEMENTS_URL = "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/"
+# Some AAA games ship 100+ achievements - capped to keep one game's knowledge from dominating
+# the gathered text (and the doc's ongoing per-pass token cost).
+_MAX_ACHIEVEMENTS = 40
+
+
 async def _fetch_steam_knowledge(game_name: str) -> str | None:
     """Steam's public store-search + appdetails - no API key needed, and covers small/indie
     titles that IGDB's own database often has no populated (or no) entry for. Guards against
     Steam's fuzzy search substituting a different, similarly-named real game (same risk/fix as
     game_art.py's fetch_art - see its _titles_match usage) since a wrong match here would feed
-    the LLM pass a confidently wrong game's description."""
+    the LLM pass a confidently wrong game's description.
+
+    Also pulls the game's achievement schema (name + description) when a Steam Web API key is
+    configured (settings.steam_api_key - the same one used by steam_tool.py's owned-games tool;
+    this call needs no SteamID, just the key) - achievement text routinely spells out an obscure
+    mechanic in plain language better than a generic web search does."""
     try:
         async with httpx.AsyncClient(timeout=10) as http_client:
             search_response = await http_client.get(STORE_SEARCH_URL, params={"term": game_name, "cc": "us", "l": "en"})
@@ -64,12 +75,32 @@ async def _fetch_steam_knowledge(game_name: str) -> str | None:
             details_response = await http_client.get(APP_DETAILS_URL, params={"appids": appid, "l": "en"})
             details_response.raise_for_status()
             app_data = details_response.json().get(str(appid), {})
+
+            achievements_text = None
+            if settings.steam_api_key:
+                try:
+                    ach_response = await http_client.get(
+                        STEAM_ACHIEVEMENTS_URL, params={"key": settings.steam_api_key, "appid": appid},
+                    )
+                    ach_response.raise_for_status()
+                    achievements = (
+                        (ach_response.json().get("game") or {}).get("availableGameStats", {}).get("achievements") or []
+                    )
+                    lines = [
+                        f"{a['displayName']}: {a['description']}"
+                        for a in achievements
+                        if a.get("displayName") and a.get("description")
+                    ]
+                    if lines:
+                        achievements_text = "\n".join(lines[:_MAX_ACHIEVEMENTS])
+                except httpx.HTTPError:
+                    pass  # Bad/missing key, or Steam has no achievement schema for this game.
     except httpx.HTTPError:
         return None
 
-    if not app_data.get("success"):
-        return None
-    info = app_data["data"]
+    # appdetails failing doesn't necessarily mean achievements did too - keep whichever succeeded
+    # rather than discarding both.
+    info = app_data["data"] if app_data.get("success") else {}
 
     parts = []
     genres = ", ".join(g["description"] for g in info.get("genres") or [] if g.get("description"))
@@ -83,6 +114,8 @@ async def _fetch_steam_knowledge(game_name: str) -> str | None:
         # Steam's description fields are raw marketing HTML - strip tags before handing to the LLM.
         description = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", description)).strip()[:1500]
         parts.append(f"Store description: {description}")
+    if achievements_text:
+        parts.append(f"Achievements (often explain an obscure mechanic in plain language):\n{achievements_text}")
     return "\n".join(parts) if parts else None
 
 
