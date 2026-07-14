@@ -143,7 +143,13 @@ Leave it null on every ordinary window.
 # on-screen content changed, so it can flag a mismatch even when nothing at the process level ever
 # signaled one.
 _MODPACK_MISMATCH_PROMPT_ADDON = """
-Additionally, include a **"modpack_mismatch"** field: normally **null**. This session is currently tagged as the modpack "{modpack}". Set this field to a short plain description when the screen shows this is no longer accurate - either of two kinds of evidence: (1) unmistakable branding (a vanilla main menu with zero pack markers, or a different pack's own branding/quest book/splash screen), or (2) gameplay/environment content that structurally contradicts a defining trait of "{modpack}" you're actually confident of (from its training notes above, or your own knowledge) - e.g. a wide-open overworld with sky/grass/trees when the pack is a skyblock/void-start pack, or plain unmodified terrain/UI when the pack is known to overhaul it heavily. Never flag this from a single item/block/creature NAME alone (that's a different mod bundled inside the pack, not the pack itself) or from mere absence of branding (most windows won't show any) - only when what's actually shown contradicts something you're genuinely confident is true of "{modpack}".
+Additionally, include a **"modpack_mismatch"** field: normally **null**. This session is currently tagged as the modpack "{modpack}". Set this field to a short plain description when there's real evidence this is no longer accurate. Weigh evidence in this order:
+
+1. **The "Current window title" line, if given above, is the strongest signal** - a real modded launch's title routinely names the pack (set by the launcher/mod loader). If it clearly does NOT mention/support "{modpack}" and looks like a plain, unmodded launch instead, that alone is enough - don't wait for anything else.
+2. Unmistakable on-screen branding contradicting it (a vanilla main menu with zero pack markers, or a different pack's own branding/quest book/splash screen).
+3. Gameplay/environment content that structurally contradicts a defining trait of "{modpack}" you're genuinely confident of (from its training notes above, or your own knowledge) - but treat this cautiously: a pack's own progression can legitimately unlock things that look contradictory later on (e.g. a skyblock/void-start pack's own late-game mechanics might generate real terrain), so lean on this only when you're confident it's not just later-game progression.
+
+Never flag this from a single item/block/creature NAME alone (that's a different mod bundled inside the pack, not the pack itself), or from mere absence of evidence (most windows won't show anything either way) - only when what's actually shown/titled contradicts "{modpack}".
 
 Leave it null on every ordinary window.
 """
@@ -311,11 +317,14 @@ def _training_update_would_drop_lore(current: str, update: str) -> bool:
 
 
 async def _modpack_corroboration_line(process: str) -> str:
-    """A corroborating signal for the extraction pass's "modpack" field: a stray on-screen
-    item/block/mob name from a single bundled mod (e.g. "FTB Unearthed" inside "FTB StoneBlock 4")
-    used to get accepted as the pack's own identity with nothing to cross-check it against - the
-    window title routinely already names the real pack (a modded launcher sets it), so surfacing
-    it lets the model catch a mismatch instead of trusting in-world content alone."""
+    """A corroborating signal for both modpack-related fields ("modpack" when none is active yet,
+    "modpack_mismatch" when one already is): a stray on-screen item/block/mob name from a single
+    bundled mod (e.g. "FTB Unearthed" inside "FTB StoneBlock 4") used to get accepted as the pack's
+    own identity with nothing to cross-check it against, and gameplay/environment content alone
+    can be ambiguous for catching a mismatch too (e.g. a skyblock pack's own progression can
+    legitimately unlock real terrain later on) - the window title routinely already names the real
+    pack (a modded launcher sets it), so surfacing it gives the model a much more reliable signal
+    than trusting in-world content alone, in both directions."""
     details = await asyncio.to_thread(get_foreground_process_details)
     if details and (details.get("process") or "").lower() == process.lower():
         window_title = (details.get("window_title") or "").strip()
@@ -370,7 +379,13 @@ async def extract_and_apply_game_state(
             "decode this game's UI/HUD/terms - don't wait for a complete picture."
         )
     variant_line = f"\nActive modpack for this playthrough: {active_variant}" if active_variant else ""
-    window_title_line = await _modpack_corroboration_line(process) if allow_modpack else ""
+    # Always fetched now, not just while allow_modpack (no variant yet) - a real modded launch's
+    # window title routinely names the pack (set by the launcher/mod loader), which is a far more
+    # reliable signal than inferring from gameplay/environment content for BOTH directions: naming
+    # a new pack, and flagging that an already-active one no longer matches (see
+    # _MODPACK_MISMATCH_PROMPT_ADDON) - environment content alone can be ambiguous (e.g. a
+    # skyblock pack's own progression can legitimately unlock real terrain later on).
+    window_title_line = await _modpack_corroboration_line(process)
     text_content = (
         f"Foreground process: {process}{variant_line}{window_title_line}\n\n{known_facts}\n\n"
         + (f"{training_data}\n\n" if training_data else "")
