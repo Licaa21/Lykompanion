@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from app.core import game_state, game_state_trackers
-from app.services.llm import game_tracker_tool
+from app.core import game_art, game_state, game_state_trackers
+from app.services.llm import game_knowledge_bootstrap, game_tracker_tool
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +20,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(game_state, "_cached_variant", None)
     monkeypatch.setattr(game_state, "_cached_variant_loaded", False)
     monkeypatch.setattr(game_state_trackers, "TRACKERS_PATH", tmp_path / "trackers.json")
+    monkeypatch.setattr(game_art, "GAME_ART_PATH", tmp_path / "game_art.json")
+    game_knowledge_bootstrap._attempted.clear()
 
 
 def test_add_game_tracker(isolated):
@@ -138,3 +140,42 @@ def test_update_game_tracker_cannot_edit_activity(isolated):
         game_tracker_tool.execute_update_game_tracker({"label": "Current Activity", "new_label": "Whatever"})
     )
     assert "built-in" in result.lower()
+
+
+def test_regenerate_game_trackers_for_the_active_variant(isolated, monkeypatch):
+    game_state.start_tracking("javaw.exe")
+    game_art.set_title_override("javaw.exe", "Minecraft")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.set_session_variant("javaw.exe", session_id, "FTB StoneBlock 4")
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Custom"}], variant="FTB StoneBlock 4")
+
+    scheduled = []
+    monkeypatch.setattr(
+        game_knowledge_bootstrap, "schedule_variant_bootstrap",
+        lambda process, base_title, modpack: scheduled.append((process, base_title, modpack)),
+    )
+
+    result = asyncio.run(game_tracker_tool.execute_regenerate_game_trackers({}))
+
+    assert "FTB StoneBlock 4" in result
+    assert game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4") == game_state_trackers.DEFAULT_TRACKERS
+    assert scheduled == [("javaw.exe", "Minecraft", "FTB StoneBlock 4")]
+
+
+def test_regenerate_game_trackers_for_the_base_game(isolated, monkeypatch):
+    game_state.start_tracking("javaw.exe")
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Custom"}])
+
+    scheduled = []
+    monkeypatch.setattr(game_knowledge_bootstrap, "schedule_bootstrap", lambda process: scheduled.append(process))
+
+    result = asyncio.run(game_tracker_tool.execute_regenerate_game_trackers({}))
+
+    assert "this game" in result.lower()
+    assert game_state_trackers.get_trackers("javaw.exe") == game_state_trackers.DEFAULT_TRACKERS
+    assert scheduled == ["javaw.exe"]
+
+
+def test_regenerate_game_trackers_no_active_game():
+    result = asyncio.run(game_tracker_tool.execute_regenerate_game_trackers({}))
+    assert "no game" in result.lower()

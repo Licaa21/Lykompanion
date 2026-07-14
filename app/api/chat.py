@@ -36,6 +36,7 @@ from app.services.llm.game_correction_tool import (
 from app.services.llm.game_tracker_tool import (
     GAME_TRACKER_TOOLS,
     execute_add_game_tracker,
+    execute_regenerate_game_trackers,
     execute_remove_game_tracker,
     execute_update_game_tracker,
 )
@@ -547,6 +548,8 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return await execute_remove_game_tracker(arguments), None, None
     if name == "update_game_tracker":
         return await execute_update_game_tracker(arguments), None, None
+    if name == "regenerate_game_trackers":
+        return await execute_regenerate_game_trackers(arguments), None, None
     return execute_tool_call(name, arguments), None, None
 
 

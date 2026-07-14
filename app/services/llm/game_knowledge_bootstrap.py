@@ -277,6 +277,25 @@ def force_refresh_base(process: str, *, reset_trackers: bool = True) -> None:
     schedule_bootstrap(process)
 
 
+def force_refresh_trackers(process: str, base_title: str, variant: str | None = None) -> None:
+    """Regenerates ONLY this scope's trackers via a fresh bootstrap pass, leaving its training-data
+    document completely untouched - unlike force_refresh_base/force_refresh_variant, which reset
+    both together. For when the trackers themselves went stale/generic (reverted to defaults, or
+    the player just wants a re-roll) but the training notes are still good and don't need
+    regenerating too. Resets to the untouched defaults so _trackers_are_default sees them as
+    eligible again, clears the retry-attempt cache for this exact scope, and re-schedules the
+    matching bootstrap - since want_training in bootstrap_game_knowledge/bootstrap_variant_knowledge
+    is independently gated on whether a training document already exists, a non-empty one is simply
+    left alone."""
+    game_state_trackers.reset_trackers(process, variant=variant)
+    if variant:
+        _attempted.discard(f"{process.lower()}::{variant.lower()}")
+        schedule_variant_bootstrap(process, base_title, variant)
+    else:
+        _attempted.discard(process.lower())
+        schedule_bootstrap(process)
+
+
 async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: str) -> None:
     """Pack-specific counterpart to the base bootstrap, run when variant detection identifies
     a modpack: web-searches the pack itself (its mechanics, progression, added content) and

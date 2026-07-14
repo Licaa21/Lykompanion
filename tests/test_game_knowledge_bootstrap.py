@@ -106,3 +106,43 @@ def test_variant_bootstrap_seeds_trackers_scoped_to_the_variant_only(monkeypatch
     assert [t["label"] for t in base_trackers if t["id"] != "activity"] == ["Custom Base Tracker"]
     variant_trackers = game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4")
     assert [t["label"] for t in variant_trackers if t["id"] != "activity"] == ["Vaults Cleared"]
+
+
+def test_force_refresh_trackers_regenerates_only_the_trackers_for_a_variant(monkeypatch):
+    # force_refresh_trackers is the "just regenerate my trackers" action (2026-07-14) - unlike
+    # force_refresh_variant, it must NOT touch the training-data document, since the user's
+    # complaint was specifically that trackers reverted to generic defaults, not that the notes
+    # were wrong.
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Stale Tracker"}], variant="FTB StoneBlock 4")
+    game_state_training_data.set_training_data("javaw.exe", "## Lore\nGood existing lore.", variant="FTB StoneBlock 4")
+    bootstrap._attempted.add("javaw.exe::ftb stoneblock 4")
+
+    scheduled = []
+    monkeypatch.setattr(
+        bootstrap, "schedule_variant_bootstrap",
+        lambda process, base_title, modpack: scheduled.append((process, base_title, modpack)),
+    )
+
+    bootstrap.force_refresh_trackers("javaw.exe", "Minecraft", "FTB StoneBlock 4")
+
+    variant_trackers = game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4")
+    assert variant_trackers == game_state_trackers.DEFAULT_TRACKERS
+    assert game_state_training_data.get_training_data("javaw.exe", "FTB StoneBlock 4") == "## Lore\nGood existing lore."
+    assert "javaw.exe::ftb stoneblock 4" not in bootstrap._attempted
+    assert scheduled == [("javaw.exe", "Minecraft", "FTB StoneBlock 4")]
+
+
+def test_force_refresh_trackers_regenerates_the_base_scope_when_no_variant(monkeypatch):
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Stale Tracker"}])
+    game_state_training_data.set_training_data("javaw.exe", "existing base notes")
+    bootstrap._attempted.add("javaw.exe")
+
+    scheduled = []
+    monkeypatch.setattr(bootstrap, "schedule_bootstrap", lambda process: scheduled.append(process))
+
+    bootstrap.force_refresh_trackers("javaw.exe", "Minecraft")
+
+    assert game_state_trackers.get_trackers("javaw.exe") == game_state_trackers.DEFAULT_TRACKERS
+    assert game_state_training_data.get_training_data("javaw.exe") == "existing base notes"
+    assert "javaw.exe" not in bootstrap._attempted
+    assert scheduled == ["javaw.exe"]

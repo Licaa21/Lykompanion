@@ -6,7 +6,8 @@ across every profile of that same scope (see 2026-07-14's per-variant tracker fi
 here applies to every playthrough of this pack (or every vanilla playthrough, if none is active),
 not just the one currently open."""
 
-from app.core import game_state, game_state_trackers
+from app.core import game_art, game_state, game_state_trackers
+from app.services.llm import game_knowledge_bootstrap
 
 GAME_TRACKER_TOOLS = [
     {
@@ -72,6 +73,21 @@ GAME_TRACKER_TOOLS = [
                 },
                 "required": ["label"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "regenerate_game_trackers",
+            "description": (
+                "Regenerate the tracked fields for the currently tracked game (or its active "
+                "modpack) from scratch via a fresh knowledge lookup - use when the player says "
+                "the trackers look wrong/generic/reverted to defaults and asks you to regenerate/"
+                "fix/reroll them. Actually call this - don't just reply that you've done it. "
+                "Leaves the training-data notes untouched, only the tracked fields are reset and "
+                "reseeded. Runs in the background, so the new trackers won't appear instantly."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
@@ -163,3 +179,15 @@ async def execute_update_game_tracker(arguments: dict) -> str:
     ]
     game_state_trackers.set_trackers(process, updated, variant=variant)
     return f"Renamed \"{label}\" to \"{new_label}\"." if new_label.lower() != label.lower() else f"Updated the \"{label}\" tracker."
+
+
+async def execute_regenerate_game_trackers(arguments: dict) -> str:
+    scope = _current_scope()
+    if not scope:
+        return "No game is currently being tracked - nothing to regenerate."
+    process, variant = scope
+    base_title = game_art.get_display_title(process)
+
+    game_knowledge_bootstrap.force_refresh_trackers(process, base_title, variant)
+    target = f"\"{variant}\"" if variant else "this game"
+    return f"Regenerating the tracked fields for {target} from scratch - give it a moment to finish in the background."
