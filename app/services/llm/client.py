@@ -216,27 +216,65 @@ def _tool_calls_to_dicts(tool_calls) -> list[dict] | None:
 
 
 _FALLBACK_MAX_TOKENS = 8192
+_MIN_MAX_TOKENS = 1024  # floor so an imprecise prompt-size estimate never zeroes out the response
+# Cushion subtracted on top of the prompt-size estimate below - covers estimation error (a rough
+# chars/4 heuristic, not a real tokenizer) and the tokens system/tool-schema overhead adds that
+# the estimate doesn't see.
+_CONTEXT_SAFETY_MARGIN = 1000
 
 
-async def _resolve_max_tokens(model: str, provider: str) -> int:
+def _estimate_prompt_tokens(messages: list[dict]) -> int:
+    """Rough token estimate for a prompt - ~4 characters per token for English text (a common,
+    good-enough-for-a-safety-margin heuristic, not a real tokenizer), plus a flat conservative
+    per-image estimate (vision token cost varies by provider/resolution and isn't worth modeling
+    precisely here - this only needs to stay safely conservative, not exact)."""
+    total_chars = 0
+    image_count = 0
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    total_chars += len(part.get("text") or "")
+                elif part.get("type") == "image_url":
+                    image_count += 1
+    return total_chars // 4 + image_count * 1000
+
+
+async def _resolve_max_tokens(model: str, provider: str, messages: list[dict]) -> int:
     """The model's own real max output tokens when the catalog exposes it (OpenRouter's /models
     endpoint reports this per model, e.g. 65535 for google/gemini-2.5-flash-lite, 16384 for
     meta-llama/llama-4-maverick - see list_models()), so a shared default doesn't needlessly cap
     a model that can actually output far more. Falls back to a safe generous constant for a
     non-OpenRouter provider (Google AI Studio/custom endpoints don't report this), a model not
     found in the catalog (a typo, or one too new for the cached fetch), or if the lookup itself
-    fails for any reason - this must never be the reason a real completion call fails."""
+    fails for any reason - this must never be the reason a real completion call fails.
+
+    Also caps against the model's own context_length minus this prompt's estimated size: some
+    models report max_completion_tokens equal to (or very close to) their FULL context window
+    rather than a budget reserved separately from input, so requesting that much output alongside
+    any real prompt overflows the provider's actual limit (observed live: a 400 "maximum context
+    length is 131072... requested about 133865" - 2793 tokens of input plus the full 131072-token
+    completion cap - on a memory-extraction call with a perfectly ordinary prompt)."""
+    cap = _FALLBACK_MAX_TOKENS
+    context_length = None
     if provider == "openrouter":
         try:
             for entry in await list_models(provider):
                 if entry["id"] == model:
-                    cap = entry.get("max_completion_tokens")
-                    if cap:
-                        return cap
+                    cap = entry.get("max_completion_tokens") or _FALLBACK_MAX_TOKENS
+                    context_length = entry.get("context_length")
                     break
         except Exception:
             pass
-    return _FALLBACK_MAX_TOKENS
+    if context_length:
+        available = context_length - _estimate_prompt_tokens(messages) - _CONTEXT_SAFETY_MARGIN
+        cap = max(_MIN_MAX_TOKENS, min(cap, available))
+    return cap
 
 
 async def _model_supports_structured_outputs(model: str, provider: str) -> bool:
@@ -292,7 +330,7 @@ async def chat_completion(
     previous value" - a strict schema requires every key present every time, which would break
     that convention entirely)."""
     resolved_model = model or settings.openrouter_model
-    resolved_max_tokens = max_tokens if max_tokens is not None else await _resolve_max_tokens(resolved_model, provider)
+    resolved_max_tokens = max_tokens if max_tokens is not None else await _resolve_max_tokens(resolved_model, provider, messages)
     resolved_response_format = response_format
     if json_schema is not None and await _model_supports_structured_outputs(resolved_model, provider):
         resolved_response_format = {"type": "json_schema", "json_schema": json_schema}

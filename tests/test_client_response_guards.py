@@ -87,8 +87,9 @@ class TestResolveMaxTokens:
         monkeypatch.setattr(client, "list_models", fake_list_models)
 
         async def run():
-            gemini = await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter")
-            llama = await client._resolve_max_tokens("meta-llama/llama-4-maverick", "openrouter")
+            msgs = [{"role": "user", "content": "hi"}]
+            gemini = await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter", msgs)
+            llama = await client._resolve_max_tokens("meta-llama/llama-4-maverick", "openrouter", msgs)
             return gemini, llama
 
         assert asyncio.run(run()) == (65535, 16384)
@@ -100,7 +101,7 @@ class TestResolveMaxTokens:
         monkeypatch.setattr(client, "list_models", fake_list_models)
 
         async def run():
-            return await client._resolve_max_tokens("unknown/model", "openrouter")
+            return await client._resolve_max_tokens("unknown/model", "openrouter", [{"role": "user", "content": "hi"}])
 
         assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
 
@@ -111,7 +112,7 @@ class TestResolveMaxTokens:
         monkeypatch.setattr(client, "list_models", fake_list_models)
 
         async def run():
-            return await client._resolve_max_tokens("gemini-2.5-flash", "google_ai_studio")
+            return await client._resolve_max_tokens("gemini-2.5-flash", "google_ai_studio", [{"role": "user", "content": "hi"}])
 
         assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
 
@@ -122,9 +123,54 @@ class TestResolveMaxTokens:
         monkeypatch.setattr(client, "list_models", fake_list_models)
 
         async def run():
-            return await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter")
+            return await client._resolve_max_tokens("google/gemini-2.5-flash-lite", "openrouter", [{"role": "user", "content": "hi"}])
 
         assert asyncio.run(run()) == client._FALLBACK_MAX_TOKENS
+
+    def test_caps_below_context_length_when_the_reported_cap_would_overflow_it(self, monkeypatch):
+        # Regression test (2026-07-14): a real 400 from OpenRouter - "maximum context length is
+        # 131072... requested about 133865" (2793 input tokens + a 131072 max_tokens request) - on
+        # a model whose reported max_completion_tokens equals its full context_length rather than
+        # a budget reserved separately from input. The resolved cap must leave room for the prompt.
+        async def fake_list_models(provider):
+            return [{"id": "some/model", "max_completion_tokens": 131072, "context_length": 131072}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            # ~4000 characters -> ~1000 estimated tokens.
+            return await client._resolve_max_tokens(
+                "some/model", "openrouter", [{"role": "user", "content": "x" * 4000}],
+            )
+
+        result = asyncio.run(run())
+        assert result < 131072
+        assert result >= client._MIN_MAX_TOKENS
+
+    def test_context_length_cap_ignored_when_catalog_omits_it(self, monkeypatch):
+        async def fake_list_models(provider):
+            return [{"id": "some/model", "max_completion_tokens": 8000}]  # no context_length key
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            return await client._resolve_max_tokens("some/model", "openrouter", [{"role": "user", "content": "hi"}])
+
+        assert asyncio.run(run()) == 8000
+
+    def test_context_length_cap_never_goes_below_the_floor(self, monkeypatch):
+        async def fake_list_models(provider):
+            return [{"id": "some/model", "max_completion_tokens": 4096, "context_length": 4096}]
+
+        monkeypatch.setattr(client, "list_models", fake_list_models)
+
+        async def run():
+            # A huge prompt that would drive "available" deeply negative.
+            return await client._resolve_max_tokens(
+                "some/model", "openrouter", [{"role": "user", "content": "x" * 100_000}],
+            )
+
+        assert asyncio.run(run()) == client._MIN_MAX_TOKENS
 
     def test_chat_completion_passes_the_resolved_cap_to_the_real_call(self, monkeypatch):
         # Guards against the exact mistake made while wiring this up: the resolved value was
