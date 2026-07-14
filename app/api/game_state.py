@@ -32,7 +32,7 @@ async def get_game_state() -> GameStateResponse:
     process = (state or {}).get("process")
     session_id = (state or {}).get("session_id")
     values = (state or {}).get("values", {})
-    defs = game_state_trackers.get_trackers(process) if process else []
+    defs = game_state_trackers.get_trackers(process, variant=(state or {}).get("variant")) if process else []
     trackers = [
         GameStateTracker(
             id=t["id"], label=t["label"], description=t["description"], locked=t["locked"],

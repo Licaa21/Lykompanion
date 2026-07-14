@@ -3,6 +3,8 @@ panel's title used to be a naive cleanup of the raw process name ("javaw.exe" ->
 regardless of what the Gaming Journal actually resolved the game's title to, and there was no
 indication of the active modpack/session in the overlay at all."""
 
+import asyncio
+
 import pytest
 
 from app.core import game_art, game_state, game_state_trackers
@@ -150,3 +152,49 @@ class TestTrainingUpdateWouldDropLore:
         current = "## UI/UX\nOld notes."
         update = "## UI/UX\nOld notes plus something new."
         assert game_state_extraction._training_update_would_drop_lore(current, update) is False
+
+
+class TestModpackCorroborationLine:
+    """Regression coverage for the 2026-07-14 bug: the on-screen modpack field (see
+    _MODPACK_PROMPT_ADDON) had nothing to cross-check an on-screen guess against, and set a live
+    vanilla session's modpack to "FTB Unearthed" - a single mod bundled inside the actual pack,
+    "FTB StoneBlock 4" - almost certainly read off an in-world item/block name. The window title
+    routinely already names the real pack (a modded launcher sets it), so it's now surfaced to the
+    model as a corroborating signal."""
+
+    def test_includes_window_title_for_the_matching_process(self, monkeypatch):
+        monkeypatch.setattr(
+            game_state_extraction, "get_foreground_process_details",
+            lambda: {"process": "javaw.exe", "window_title": "Minecraft* 1.20.1 - FTB StoneBlock 4"},
+        )
+        result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
+        assert result == "\nCurrent window title: Minecraft* 1.20.1 - FTB StoneBlock 4"
+
+    def test_case_insensitive_process_match(self, monkeypatch):
+        monkeypatch.setattr(
+            game_state_extraction, "get_foreground_process_details",
+            lambda: {"process": "JavaW.exe", "window_title": "Minecraft"},
+        )
+        result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
+        assert result == "\nCurrent window title: Minecraft"
+
+    def test_empty_when_focus_moved_to_a_different_process(self, monkeypatch):
+        monkeypatch.setattr(
+            game_state_extraction, "get_foreground_process_details",
+            lambda: {"process": "discord.exe", "window_title": "Discord"},
+        )
+        result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
+        assert result == ""
+
+    def test_empty_when_no_window_title(self, monkeypatch):
+        monkeypatch.setattr(
+            game_state_extraction, "get_foreground_process_details",
+            lambda: {"process": "javaw.exe", "window_title": None},
+        )
+        result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
+        assert result == ""
+
+    def test_empty_when_details_unavailable(self, monkeypatch):
+        monkeypatch.setattr(game_state_extraction, "get_foreground_process_details", lambda: None)
+        result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
+        assert result == ""

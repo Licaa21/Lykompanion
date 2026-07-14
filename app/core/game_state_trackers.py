@@ -1,12 +1,17 @@
-"""Per-process, user-configurable list of fields ("trackers") the game-state extraction LLM pass
-fills in for a given foreground process - e.g. Rocket League might track "1v1 Rank" and "Goals
-scored this session" instead of the generic RPG-flavored defaults. Persisted to disk (data/
-game_state_trackers.json) so customizations survive restarts.
+"""Per-process (and per-modpack-variant), user-configurable list of fields ("trackers") the
+game-state extraction LLM pass fills in for a given foreground process - e.g. Rocket League might
+track "1v1 Rank" and "Goals scored this session" instead of the generic RPG-flavored defaults.
+Persisted to disk (data/game_state_trackers.json) so customizations survive restarts.
 
-Every process gets a copy of DEFAULT_TRACKERS the first time it's looked up, and the user can
-add/remove/edit trackers per process from there - except "activity", which always stays present
-and unmodified, since the extraction pass depends on it being refreshed every pass and the user
-asked for it to never be removable/editable."""
+Keyed like game_state_training_data.py: a plain process key for the base game, "process::variant"
+for a modpack's own list (a pack's own bootstrap seeds pack-specific trackers - e.g. FTB
+StoneBlock 4's Vaults/Echoes/World Engine progress - that would be meaningless noise while a
+*vanilla* session of the same process is active, and vice versa). Every key gets a fresh copy of
+DEFAULT_TRACKERS the first time it's looked up (a new variant never inherits the base process's
+own customized/bootstrapped list - it starts exactly like a brand new process would, then its own
+bootstrap is free to replace them), and the user can add/remove/edit trackers per key from there -
+except "activity", which always stays present and unmodified, since the extraction pass depends on
+it being refreshed every pass and the user asked for it to never be removable/editable."""
 
 import json
 import re
@@ -84,6 +89,15 @@ def _slugify(label: str) -> str:
     return slug or "tracker"
 
 
+def _key(process: str, variant: str | None) -> str:
+    """Plain process key for the base game; "process::variant" for a modpack's own list. Process
+    keys never contain "::", so the namespaces can't collide (same scheme as
+    game_state_training_data.py's _key)."""
+    if variant and variant.strip():
+        return f"{process.lower()}::{variant.strip().lower()}"
+    return process.lower()
+
+
 def _load_all() -> dict[str, list[dict]]:
     if not TRACKERS_PATH.exists():
         return {}
@@ -95,21 +109,22 @@ def _save_all(data: dict[str, list[dict]]) -> None:
     TRACKERS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def get_trackers(process: str) -> list[dict]:
-    """Returns the tracker list for a process, seeding it with a copy of the defaults (persisted)
-    the first time this process is looked up."""
+def get_trackers(process: str, variant: str | None = None) -> list[dict]:
+    """Returns the tracker list for a process (or one modpack variant of it), seeding it with a
+    copy of the defaults (persisted) the first time this key is looked up."""
     data = _load_all()
-    key = process.lower()
+    key = _key(process, variant)
     if key not in data:
         data[key] = [dict(t) for t in DEFAULT_TRACKERS]
         _save_all(data)
     return data[key]
 
 
-def set_trackers(process: str, trackers: list[dict]) -> list[dict]:
-    """Replaces the non-locked trackers for a process. Missing/blank ids are slugified from the
-    label and de-duplicated. The locked "activity" tracker is always restored as-is and placed
-    first, regardless of what the caller sent - it can't be removed or edited."""
+def set_trackers(process: str, trackers: list[dict], variant: str | None = None) -> list[dict]:
+    """Replaces the non-locked trackers for a process (or one modpack variant of it). Missing/
+    blank ids are slugified from the label and de-duplicated. The locked "activity" tracker is
+    always restored as-is and placed first, regardless of what the caller sent - it can't be
+    removed or edited."""
     activity = dict(DEFAULT_TRACKERS[0])
     cleaned: list[dict] = []
     # The extraction response uses tracker ids as top-level JSON keys alongside these reserved
@@ -142,21 +157,28 @@ def set_trackers(process: str, trackers: list[dict]) -> list[dict]:
         )
 
     data = _load_all()
-    data[process.lower()] = [activity] + cleaned
+    key = _key(process, variant)
+    data[key] = [activity] + cleaned
     _save_all(data)
-    return data[process.lower()]
+    return data[key]
 
 
-def reset_trackers(process: str) -> list[dict]:
+def reset_trackers(process: str, variant: str | None = None) -> list[dict]:
     data = _load_all()
-    data[process.lower()] = [dict(t) for t in DEFAULT_TRACKERS]
+    key = _key(process, variant)
+    data[key] = [dict(t) for t in DEFAULT_TRACKERS]
     _save_all(data)
-    return data[process.lower()]
+    return data[key]
 
 
 def delete_process(process: str) -> None:
-    """Drop a process's tracker list entirely (used when a tracked game is deleted). Next lookup
-    re-seeds the defaults, so this is a full reset that also forgets any customizations."""
+    """Drop every tracker list for a process - the base one and every modpack variant's own -
+    entirely (used when a tracked game is deleted). Next lookup re-seeds the defaults, so this is
+    a full reset that also forgets any customizations."""
     data = _load_all()
-    if data.pop(process.lower(), None) is not None:
+    prefix = process.lower()
+    keys = [k for k in data if k == prefix or k.startswith(f"{prefix}::")]
+    if keys:
+        for k in keys:
+            data.pop(k, None)
         _save_all(data)

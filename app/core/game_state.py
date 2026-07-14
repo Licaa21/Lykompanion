@@ -417,7 +417,7 @@ def format_game_state_for_prompt() -> str:
     values = state["values"]
     lines = [
         f"- {t['label']}: {values[t['id']]}"
-        for t in game_state_trackers.get_trackers(state["process"])
+        for t in game_state_trackers.get_trackers(state["process"], variant=state.get("variant"))
         if values.get(t["id"])
     ]
     if not lines:

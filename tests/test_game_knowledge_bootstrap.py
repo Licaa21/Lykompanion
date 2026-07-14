@@ -79,3 +79,30 @@ def test_base_bootstrap_still_asks_model_when_nothing_gathered(monkeypatch):
 
     trackers = game_state_trackers.get_trackers("cloverpit.exe")
     assert [t["label"] for t in trackers if t["id"] != "activity"] == ["Spins Left"]
+
+
+def test_variant_bootstrap_seeds_trackers_scoped_to_the_variant_only(monkeypatch):
+    # Regression test (2026-07-14): trackers used to be keyed by process only, so a modpack's own
+    # pack-specific trackers overwrote (and stayed active for) the base/vanilla process too - a
+    # vanilla session of the same process kept showing modpack-specific fields. The base process
+    # already has its own customized trackers here; seeding the variant must not touch them.
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Custom Base Tracker"}])
+
+    async def fake_web_search(_arguments):
+        return "No web search results for that query."
+
+    async def fake_chat_completion(*args, **kwargs):
+        return json.dumps({
+            "trackers": [{"label": "Vaults Cleared", "description": "Vaults completed this run."}],
+            "training_data": "## Lore\nSome pack lore.\n\n## UI/UX\nSome pack UI notes.",
+        })
+
+    monkeypatch.setattr(bootstrap, "execute_web_search", fake_web_search)
+    monkeypatch.setattr(bootstrap, "chat_completion", fake_chat_completion)
+
+    asyncio.run(bootstrap.bootstrap_variant_knowledge("javaw.exe", "Minecraft", "FTB StoneBlock 4"))
+
+    base_trackers = game_state_trackers.get_trackers("javaw.exe")
+    assert [t["label"] for t in base_trackers if t["id"] != "activity"] == ["Custom Base Tracker"]
+    variant_trackers = game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4")
+    assert [t["label"] for t in variant_trackers if t["id"] != "activity"] == ["Vaults Cleared"]

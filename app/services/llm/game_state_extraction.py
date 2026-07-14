@@ -26,6 +26,7 @@ from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
 from app.services.screenshot.wgc_capture import capture_monitor_frame
 from app.services.system.processes import (
+    get_foreground_process_details,
     get_foreground_process_name,
     get_foreground_window_if_windowed,
     is_foreground_window_fullscreen,
@@ -128,7 +129,11 @@ Lean on whatever real context you have about this exact situation - training dat
 # Appended only while the tracked session has no known modpack/variant yet — once one is set,
 # offering the field would just invite churn.
 _MODPACK_PROMPT_ADDON = """
-Additionally, include a **"modpack"** field: normally **null**. Set it to the modpack/overhaul/modlist's name ONLY when the screen itself names one unmistakably — a pack name in the main menu or window chrome ("FTB StoneBlock 4"), a branded splash/loading screen (e.g. Nolvus), a pack-specific quest book title. It must be a real pack identity read off the screen, never an inference from modded-looking content, and never a guess. Leave it null on every ordinary window.
+Additionally, include a **"modpack"** field: normally **null**. Set it to the modpack/overhaul/modlist's name ONLY when the screen itself names one unmistakably — a pack name in the main menu or window chrome ("FTB StoneBlock 4"), a branded splash/loading screen (e.g. Nolvus), a pack-specific quest book title. It must be a real pack identity read off the screen, never an inference from modded-looking content, and never a guess.
+
+A single mod's item, block, creature, or feature name is NOT the modpack's own identity - a modpack bundles dozens of individual mods together, and one of them having a distinctive, pack-sounding name (e.g. "FTB Unearthed" is a mod bundled inside the actual pack "FTB StoneBlock 4") is not the pack itself. Only the pack's own branding counts - never name a modpack after something you merely saw in the game world (an item tooltip, a block name, a creature). If a "Current window title" line is given above, a real pack name should be consistent with it - if what you're about to name doesn't match that title, leave this null instead of guessing.
+
+Leave it null on every ordinary window.
 """
 
 
@@ -291,6 +296,20 @@ def _training_update_would_drop_lore(current: str, update: str) -> bool:
     return "## lore" in current.lower() and "## lore" not in update.lower()
 
 
+async def _modpack_corroboration_line(process: str) -> str:
+    """A corroborating signal for the extraction pass's "modpack" field: a stray on-screen
+    item/block/mob name from a single bundled mod (e.g. "FTB Unearthed" inside "FTB StoneBlock 4")
+    used to get accepted as the pack's own identity with nothing to cross-check it against - the
+    window title routinely already names the real pack (a modded launcher sets it), so surfacing
+    it lets the model catch a mismatch instead of trusting in-world content alone."""
+    details = await asyncio.to_thread(get_foreground_process_details)
+    if details and (details.get("process") or "").lower() == process.lower():
+        window_title = (details.get("window_title") or "").strip()
+        if window_title:
+            return f"\nCurrent window title: {window_title}"
+    return ""
+
+
 async def extract_and_apply_game_state(
     process: str,
     frames: list[tuple[float, str]],
@@ -310,7 +329,8 @@ async def extract_and_apply_game_state(
     previous_values = (previous or {}).get("values", {})
     active_session_id = (previous or {}).get("session_id")
     active_variant = (previous or {}).get("variant") or None
-    trackers = game_state_trackers.get_trackers(process)
+    allow_modpack = not active_variant  # launch signals didn't name one — the screen might
+    trackers = game_state_trackers.get_trackers(process, variant=active_variant)
     known_facts = memory_store.format_memories_for_prompt(
         active_process=process, active_session_id=active_session_id, active_variant=active_variant
     ) or "Known facts about the user: none yet."
@@ -324,8 +344,9 @@ async def extract_and_apply_game_state(
             "decode this game's UI/HUD/terms - don't wait for a complete picture."
         )
     variant_line = f"\nActive modpack for this playthrough: {active_variant}" if active_variant else ""
+    window_title_line = await _modpack_corroboration_line(process) if allow_modpack else ""
     text_content = (
-        f"Foreground process: {process}{variant_line}\n\n{known_facts}\n\n"
+        f"Foreground process: {process}{variant_line}{window_title_line}\n\n{known_facts}\n\n"
         + (f"{training_data}\n\n" if training_data else "")
         + f"{_format_tracker_fields(trackers, previous_values)}\n\n{_format_frames(frames)}"
     )
@@ -351,7 +372,6 @@ async def extract_and_apply_game_state(
     model = settings.game_state_model or None
     provider = settings.game_state_provider or settings.llm_provider
     allow_proactive = _proactive_allowed()
-    allow_modpack = not active_variant  # launch signals didn't name one — the screen might
     try:
         data = await _call_extraction(content, model, provider, allow_proactive, allow_modpack)
     except Exception:
@@ -838,15 +858,16 @@ def _push_overlay_game_state(process: str, prime: bool = False) -> None:
     `prime=True` retries across the overlay's boot window (first push on start).
     Best-effort — never let an overlay hiccup disturb the poll loop."""
     try:
-        trackers = game_state_trackers.get_trackers(process)
-        values = game_state.get_values(process)
-        rows: list[list[str]] = []
-
         # Modpack/session identity, shown as a plain row above the trackers (same smaller row
         # styling the overlay already uses - no native rendering changes needed). Only shown when
         # there's something non-obvious to say: a modpack, or a non-default named profile - the
         # common single vanilla "Default" session would just be clutter every single game.
         gs = game_state.get_game_state()
+        active_variant = gs.get("variant") if gs and gs.get("process", "").lower() == process.lower() else None
+        trackers = game_state_trackers.get_trackers(process, variant=active_variant)
+        values = game_state.get_values(process)
+        rows: list[list[str]] = []
+
         if gs and gs.get("process", "").lower() == process.lower():
             variant = gs.get("variant")
             if variant:

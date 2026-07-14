@@ -63,8 +63,11 @@ def test_correct_game_modpack_switches_variant_and_schedules_refresh(isolated):
 
     assert "FTB StoneBlock 4" in result
     assert game_state.get_game_state()["variant"] == "FTB StoneBlock 4"
-    ids = [t["id"] for t in game_state_trackers.get_trackers("javaw.exe")]
-    assert ids == [t["id"] for t in game_state_trackers.DEFAULT_TRACKERS]
+    # The variant gets its own fresh tracker list (reset to defaults, eligible for its own
+    # bootstrap to replace) - the base process's own customized trackers are untouched.
+    variant_ids = [t["id"] for t in game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4")]
+    assert variant_ids == [t["id"] for t in game_state_trackers.DEFAULT_TRACKERS]
+    assert [t["label"] for t in game_state_trackers.get_trackers("javaw.exe")[1:]] == ["Custom Field"]
     assert ("variant", "javaw.exe", "javaw", "FTB StoneBlock 4") in isolated
 
 
@@ -166,15 +169,15 @@ def test_correct_game_title_with_active_variant_only_resets_trackers_once(isolat
     calls = []
     original_reset = game_state_trackers.reset_trackers
 
-    def counting_reset(process):
-        calls.append(process)
-        return original_reset(process)
+    def counting_reset(process, variant=None):
+        calls.append((process, variant))
+        return original_reset(process, variant=variant)
 
     monkeypatch.setattr(game_state_trackers, "reset_trackers", counting_reset)
 
     asyncio.run(game_correction_tool.execute_correct_game_title({"title": "Minecraft"}))
 
-    assert calls == ["javaw.exe"]  # reset exactly once, not once per refresh call
+    assert calls == [("javaw.exe", "FTB StoneBlock 4")]  # reset exactly once, scoped to the variant
     assert ("base", "javaw.exe") in isolated
     assert ("variant", "javaw.exe", "Minecraft", "FTB StoneBlock 4") in isolated
 

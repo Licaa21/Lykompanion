@@ -263,11 +263,13 @@ def force_refresh_base(process: str, *, reset_trackers: bool = True) -> None:
     correction rather than only from a still-pristine process.
 
     `reset_trackers=False` when a variant is (or is about to be) active and its own
-    force_refresh_variant call will own the tracker reset instead - trackers are shared per-process
-    (not per-variant), so letting both the base and variant bootstrap independently reset+regenerate
-    the same list races them against each other. Observed live: two bootstrap calls landed 2 seconds
-    apart, one producing excellent modpack-specific trackers, the other generic ones - whichever
-    finished last silently won, and the trackers ended up neither, stuck back at plain defaults."""
+    force_refresh_variant call will own that variant's own tracker reset instead - correcting the
+    title doesn't need to also touch the base (vanilla) tracker list nobody asked to change.
+    (Historical note: trackers used to be keyed by process only, not process+variant, so the base
+    and variant bootstraps raced over the exact same stored list - two calls landed 2 seconds apart
+    live, one producing excellent modpack-specific trackers, the other generic ones, and whichever
+    finished last silently won. Fixed by scoping trackers per-variant like training data already
+    was; this flag is now just about not resetting a scope nothing actually changed in.)"""
     game_state_training_data.set_training_data(process, "")
     if reset_trackers:
         game_state_trackers.reset_trackers(process)
@@ -344,14 +346,14 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
         logger.exception("Variant bootstrap: LLM pass failed for %r", modpack)
         return
 
-    if _trackers_are_default(game_state_trackers.get_trackers(process)):
+    if _trackers_are_default(game_state_trackers.get_trackers(process, variant=modpack)):
         new_trackers = [
             {"label": t.get("label", ""), "description": t.get("description", "")}
             for t in data.get("trackers") or []
             if isinstance(t, dict) and (t.get("label") or "").strip()
         ]
         if new_trackers:
-            game_state_trackers.set_trackers(process, new_trackers)
+            game_state_trackers.set_trackers(process, new_trackers, variant=modpack)
             logger.info("Variant bootstrap: seeded %d tracker(s) for process=%r (%s)", len(new_trackers), process, modpack)
 
     training = data.get("training_data")
@@ -367,12 +369,11 @@ def schedule_variant_bootstrap(process: str, base_title: str, modpack: str) -> N
 
 
 def force_refresh_variant(process: str, base_title: str, modpack: str) -> None:
-    """Same idea as force_refresh_base, scoped to one modpack's own training-data document -
-    used when a user correction (game_correction_tool.py) sets/fixes a modpack name/tag. Also
-    resets trackers (shared per-process, not per-variant - see game_state_trackers.py) since
-    trackers seeded for the wrong pack context are just as stale as ones seeded under a wrong
-    title."""
+    """Same idea as force_refresh_base, scoped to one modpack's own training-data document and its
+    own tracker list (see game_state_trackers.py) - used when a user correction
+    (game_correction_tool.py) sets/fixes a modpack name/tag. Trackers seeded for the wrong pack
+    context are just as stale as ones seeded under a wrong title."""
     game_state_training_data.set_training_data(process, "", variant=modpack)
-    game_state_trackers.reset_trackers(process)
+    game_state_trackers.reset_trackers(process, variant=modpack)
     _attempted.discard(f"{process.lower()}::{modpack.lower()}")
     schedule_variant_bootstrap(process, base_title, modpack)
