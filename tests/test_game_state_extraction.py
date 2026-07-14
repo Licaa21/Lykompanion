@@ -198,3 +198,94 @@ class TestModpackCorroborationLine:
         monkeypatch.setattr(game_state_extraction, "get_foreground_process_details", lambda: None)
         result = asyncio.run(game_state_extraction._modpack_corroboration_line("javaw.exe"))
         assert result == ""
+
+
+class TestBuildModpackMismatchMessage:
+    """Regression coverage (2026-07-14): a session tagged with a modpack had no way to flag that
+    the screen no longer looked consistent with it - the "modpack" field is only ever offered
+    while NO variant is active (allow_modpack), so once one is set there was no mechanism at all
+    to notice e.g. alt-tabbing to a separate vanilla javaw.exe window (invisible to the poller's
+    own process-name-based "did the tracked process change" check). The mirror-image field,
+    "modpack_mismatch", is offered instead once a variant is active, and surfaces through the same
+    pending-divergence mechanism as a stat rollback."""
+
+    def test_builds_message_when_variant_active_and_mismatch_reported(self):
+        data = {"modpack_mismatch": "the main menu shows plain vanilla Minecraft branding"}
+        result = game_state_extraction._build_modpack_mismatch_message(data, allow_modpack=False, active_variant="FTB StoneBlock 4")
+        assert result == (
+            "The session is tagged as the \"FTB StoneBlock 4\" modpack, but the main menu shows "
+            "plain vanilla Minecraft branding"
+        )
+
+    def test_none_when_field_absent_or_blank(self):
+        assert game_state_extraction._build_modpack_mismatch_message({}, allow_modpack=False, active_variant="FTB StoneBlock 4") is None
+        assert game_state_extraction._build_modpack_mismatch_message(
+            {"modpack_mismatch": "   "}, allow_modpack=False, active_variant="FTB StoneBlock 4"
+        ) is None
+        assert game_state_extraction._build_modpack_mismatch_message(
+            {"modpack_mismatch": None}, allow_modpack=False, active_variant="FTB StoneBlock 4"
+        ) is None
+
+    def test_none_when_allow_modpack_true(self):
+        # The field is never offered in this state (no variant active yet) - a stray value here
+        # would just be the model hallucinating an unrequested key.
+        data = {"modpack_mismatch": "looks vanilla"}
+        assert game_state_extraction._build_modpack_mismatch_message(data, allow_modpack=True, active_variant=None) is None
+
+    def test_none_when_no_active_variant(self):
+        data = {"modpack_mismatch": "looks vanilla"}
+        assert game_state_extraction._build_modpack_mismatch_message(data, allow_modpack=False, active_variant=None) is None
+
+
+class TestCallExtractionModpackAddons:
+    """Confirms the two modpack-related prompt addons are mutually exclusive and correctly
+    selected: the "offer to identify a pack" addon while none is active, the "offer to flag a
+    mismatch" addon (with the active pack's name substituted in) once one is."""
+
+    def test_offers_identification_addon_when_no_variant_active(self, monkeypatch):
+        captured = {}
+
+        async def fake_chat_completion(messages, **kwargs):
+            captured["system"] = messages[0]["content"]
+            return "{}"
+
+        monkeypatch.setattr(game_state_extraction, "chat_completion", fake_chat_completion)
+
+        asyncio.run(game_state_extraction._call_extraction(
+            [{"type": "text", "text": "hi"}], None, "openrouter", allow_modpack=True, active_variant=None,
+        ))
+
+        assert "\"modpack\"" in captured["system"]
+        assert "modpack_mismatch" not in captured["system"]
+
+    def test_offers_mismatch_addon_with_variant_name_when_variant_active(self, monkeypatch):
+        captured = {}
+
+        async def fake_chat_completion(messages, **kwargs):
+            captured["system"] = messages[0]["content"]
+            return "{}"
+
+        monkeypatch.setattr(game_state_extraction, "chat_completion", fake_chat_completion)
+
+        asyncio.run(game_state_extraction._call_extraction(
+            [{"type": "text", "text": "hi"}], None, "openrouter", allow_modpack=False, active_variant="FTB StoneBlock 4",
+        ))
+
+        assert "modpack_mismatch" in captured["system"]
+        assert "FTB StoneBlock 4" in captured["system"]
+
+    def test_offers_neither_addon_without_a_variant_or_allow_modpack(self, monkeypatch):
+        captured = {}
+
+        async def fake_chat_completion(messages, **kwargs):
+            captured["system"] = messages[0]["content"]
+            return "{}"
+
+        monkeypatch.setattr(game_state_extraction, "chat_completion", fake_chat_completion)
+
+        asyncio.run(game_state_extraction._call_extraction(
+            [{"type": "text", "text": "hi"}], None, "openrouter", allow_modpack=False, active_variant=None,
+        ))
+
+        assert "modpack_mismatch" not in captured["system"]
+        assert "\"modpack\"" not in captured["system"]

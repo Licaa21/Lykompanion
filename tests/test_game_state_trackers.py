@@ -54,6 +54,13 @@ def test_set_trackers_guards_reserved_response_keys():
     assert ids == ["confidence_2", "save_memories_2"]
 
 
+def test_set_trackers_guards_modpack_mismatch_reserved_key():
+    result = trackers.set_trackers("game.exe", [{"label": "Modpack Mismatch"}])
+    ids = [t["id"] for t in result[1:]]
+    assert "modpack_mismatch" not in ids
+    assert ids == ["modpack_mismatch_2"]
+
+
 def test_reset_trackers_restores_defaults():
     trackers.set_trackers("game.exe", [{"label": "Custom"}])
     result = trackers.reset_trackers("game.exe")

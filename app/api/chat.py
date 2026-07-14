@@ -403,7 +403,11 @@ def _build_base_messages(history: list[dict] | None = None) -> list[dict]:
         if observations_text:
             variable_content += "\n\n" + observations_text
     if divergence_warning:
-        variable_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what happened (crash? loaded an older save? switched character?). Don't be alarmist, keep it conversational."
+        # Covers two different sources (see game_state_extraction.py): a stat rollback (crash?
+        # loaded an older save?) and a modpack-tag mismatch (alt-tabbed to a different session?
+        # not playing that pack anymore?) - kept generic here since the warning text itself
+        # already says which one it is.
+        variable_content += f"\n\n[Game state divergence detected] {divergence_warning} — mention this naturally in your next response and ask the player what's going on. Don't be alarmist, keep it conversational."
 
     # Kept as the LAST line of the system prompt: small models (Gemini Flash) mirror the user's
     # language and ignore an English-only rule buried mid-prompt — recency is what makes it stick.

@@ -132,7 +132,7 @@ def set_trackers(process: str, trackers: list[dict], variant: str | None = None)
     # suffixing below renames it to confidence_2 instead).
     seen_ids = {
         activity["id"], "confidence", "save_memories", "remove_memory_ids", "divergence_warning",
-        "observations", "training_data_update", "proactive_message",
+        "observations", "training_data_update", "proactive_message", "modpack", "modpack_mismatch",
     }
     for t in trackers:
         label = (t.get("label") or "").strip()

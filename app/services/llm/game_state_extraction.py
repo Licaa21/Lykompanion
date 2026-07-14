@@ -136,6 +136,18 @@ A single mod's item, block, creature, or feature name is NOT the modpack's own i
 Leave it null on every ordinary window.
 """
 
+# Appended only while the tracked session ALREADY has a known modpack/variant - the mirror image
+# of the addon above. Catches the case the poller's own "did the tracked process change" check
+# can't (it compares only the exe name, so alt-tabbing between two separate javaw.exe windows -
+# one vanilla, one modded - is invisible to it): this pass runs on a timer regardless of *why* the
+# on-screen content changed, so it can flag a mismatch even when nothing at the process level ever
+# signaled one.
+_MODPACK_MISMATCH_PROMPT_ADDON = """
+Additionally, include a **"modpack_mismatch"** field: normally **null**. This session is currently tagged as the modpack "{modpack}". Set this field to a short plain description ONLY when the screen unmistakably shows this is no longer accurate - a vanilla main menu/branding with zero pack markers, or a different pack's own branding/quest book/splash screen. Same standard as a real pack identity: actual branding, never an inference from generic/modded-looking or plain-looking content, and never a guess. An ordinary window that simply doesn't happen to show pack branding right now (most windows won't) is NOT a mismatch - only set this when what's actually shown contradicts "{modpack}", not merely when confirmation is absent.
+
+Leave it null on every ordinary window.
+"""
+
 
 def _coerce_tracker_value(value) -> str | None:
     """Tracker values are always text downstream (the REST API's `str | None` schema, the chat
@@ -225,13 +237,15 @@ def _format_tracker_fields(trackers: list[dict], previous_values: dict[str, str]
 
 async def _call_extraction(
     user_content, model: str | None, provider: str,
-    allow_proactive: bool = False, allow_modpack: bool = False,
+    allow_proactive: bool = False, allow_modpack: bool = False, active_variant: str | None = None,
 ) -> dict:
     system = load_prompt("game_state_extraction")
     if allow_proactive:
         system += "\n" + _PROACTIVE_PROMPT_ADDON.strip()
     if allow_modpack:
         system += "\n" + _MODPACK_PROMPT_ADDON.strip()
+    elif active_variant:
+        system += "\n" + _MODPACK_MISMATCH_PROMPT_ADDON.strip().format(modpack=active_variant)
     raw = await chat_completion(
         [
             {"role": "system", "content": system},
@@ -310,6 +324,18 @@ async def _modpack_corroboration_line(process: str) -> str:
     return ""
 
 
+def _build_modpack_mismatch_message(data: dict, allow_modpack: bool, active_variant: str | None) -> str | None:
+    """Builds the pending-divergence message for a modpack-tag mismatch (see
+    _MODPACK_MISMATCH_PROMPT_ADDON), or None when the field wasn't offered this pass (allow_modpack
+    True, or no variant active) or came back empty."""
+    if allow_modpack or not active_variant:
+        return None
+    mismatch = data.get("modpack_mismatch")
+    if isinstance(mismatch, str) and mismatch.strip():
+        return f"The session is tagged as the \"{active_variant}\" modpack, but {mismatch.strip()}"
+    return None
+
+
 async def extract_and_apply_game_state(
     process: str,
     frames: list[tuple[float, str]],
@@ -373,7 +399,7 @@ async def extract_and_apply_game_state(
     provider = settings.game_state_provider or settings.llm_provider
     allow_proactive = _proactive_allowed()
     try:
-        data = await _call_extraction(content, model, provider, allow_proactive, allow_modpack)
+        data = await _call_extraction(content, model, provider, allow_proactive, allow_modpack, active_variant)
     except Exception:
         if len(content) == 1:
             logger.exception("Game-state extraction failed")
@@ -387,7 +413,7 @@ async def extract_and_apply_game_state(
             exc_info=True,
         )
         try:
-            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider, allow_proactive, allow_modpack)
+            data = await _call_extraction([{"type": "text", "text": text_content}], model, provider, allow_proactive, allow_modpack, active_variant)
         except Exception:
             logger.exception("Game-state extraction failed")
             return
@@ -402,6 +428,18 @@ async def extract_and_apply_game_state(
         if refreshed and refreshed["process"].lower() == process.lower():
             active_session_id = refreshed.get("session_id")
             active_variant = refreshed.get("variant") or None
+
+    # Mirror image of the above (offered only when a variant IS already active - see
+    # _MODPACK_MISMATCH_PROMPT_ADDON): surfaces via the same pending-divergence mechanism as a
+    # stat rollback, so the player gets asked about it naturally in chat rather than either
+    # silently auto-switching on an OCR guess or nothing happening at all.
+    mismatch_message = _build_modpack_mismatch_message(data, allow_modpack, active_variant)
+    if mismatch_message:
+        logger.info(
+            "Game-state poll: modpack mismatch detected for process=%r variant=%r: %s",
+            process, active_variant, mismatch_message,
+        )
+        game_state.set_pending_divergence(process, mismatch_message)
 
     new_values = {}
     for tracker in trackers:
