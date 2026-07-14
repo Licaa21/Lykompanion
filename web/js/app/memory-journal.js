@@ -237,6 +237,7 @@ let journalSelectedProcess = null;
 let journalSelectedTab = "universal";
 let journalShowingCreateProfileForm = false;
 let journalShowingVariantForm = false;
+let journalShowingRenameForm = false;
 let journalTrainingVariant = null;  // null = base game's training document; else a variant name
 let journalUniversalFilter = "all";  // Universal Info tab filter: "all" | "universal" | a variant name
 
@@ -591,6 +592,7 @@ function openGameDetail(game) {
     card.addEventListener("click", () => {
       journalSelectedTab = session.session_id;
       journalShowingVariantForm = false;
+      journalShowingRenameForm = false;
       openGameDetail(game);
     });
     tabsRow.appendChild(card);
@@ -737,6 +739,17 @@ function openGameDetail(game) {
           },
         ));
       }
+      const renameBtn = buildJournalActionBtn(
+        "Rename",
+        "Rename this profile",
+        () => {
+          journalShowingRenameForm = !journalShowingRenameForm;
+          openGameDetail(game);
+        },
+      );
+      renameBtn.style.marginLeft = selectedSession.active ? "auto" : "6px";
+      memHeader.appendChild(renameBtn);
+
       const variantBtn = buildJournalActionBtn(
         selectedSession.variant ? "Edit modpack" : "Set modpack",
         "Tag this profile with the modpack/overhaul it plays (auto-detected when possible) — clear it for a vanilla playthrough",
@@ -745,10 +758,44 @@ function openGameDetail(game) {
           openGameDetail(game);
         },
       );
-      variantBtn.style.marginLeft = selectedSession.active ? "auto" : "6px";
+      variantBtn.style.marginLeft = "6px";
       memHeader.appendChild(variantBtn);
     }
     memoriesCard.appendChild(memHeader);
+
+    if (selectedSession && journalShowingRenameForm) {
+      const renameForm = document.createElement("form");
+      renameForm.className = "memory-add-form";
+      const renameInput = document.createElement("input");
+      renameInput.type = "text";
+      renameInput.placeholder = "Profile name…";
+      renameInput.autocomplete = "off";
+      renameInput.value = selectedSession.name;
+      const renameSaveBtn = document.createElement("button");
+      renameSaveBtn.type = "submit";
+      renameSaveBtn.className = "secondary-btn";
+      renameSaveBtn.textContent = "Save";
+      renameForm.appendChild(renameInput);
+      renameForm.appendChild(renameSaveBtn);
+      renameForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const name = renameInput.value.trim();
+        if (!name) return;
+        const response = await fetch(
+          `/api/game-state/sessions/${encodeURIComponent(game.process)}/${encodeURIComponent(selectedSession.session_id)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          },
+        );
+        if (response.ok) {
+          journalShowingRenameForm = false;
+          await refreshJournalDetail(game.process);
+        }
+      });
+      memoriesCard.appendChild(renameForm);
+    }
 
     if (selectedSession && journalShowingVariantForm) {
       const form = document.createElement("form");

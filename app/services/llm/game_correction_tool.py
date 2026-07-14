@@ -1,9 +1,9 @@
-"""Lets the chat model actually fix a wrong tracked-game title or modpack/variant tag when the
-user corrects it in conversation, instead of only saving the correction as a memory fact (which
-doesn't touch the title shown in the UI, the modpack tag, or the training-data notes/trackers
-seeded under the wrong name). Both tools force a training-data + tracker refresh under the
-corrected name/pack, since notes and trackers seeded under a wrong name are worse than none (see
-game_knowledge_bootstrap.md)."""
+"""Lets the chat model actually fix a wrong tracked-game title or modpack/variant tag, switch to a
+vanilla session, or rename the current profile - instead of only saving a correction as a memory
+fact (which doesn't touch the title shown in the UI, the modpack tag, or the training-data notes/
+trackers seeded under the wrong name). The title/modpack correction tools force a training-data +
+tracker refresh under the corrected name/pack, since notes and trackers seeded under a wrong name
+are worse than none (see game_knowledge_bootstrap.md)."""
 
 from app.core import game_art, game_state, memory
 from app.services.llm import game_knowledge_bootstrap, variant_detection
@@ -75,6 +75,24 @@ GAME_CORRECTION_TOOLS = [
                 "just changes which session new facts/trackers go to."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rename_current_session",
+            "description": (
+                "Rename the current playthrough's profile (e.g. \"first playthrough\", \"NG+\") - "
+                "use when the player asks to rename/relabel this session. Renaming has no effect "
+                "on the tracked title, modpack tag, memories, or trackers - it's just the label."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The new name for this session/profile."},
+                },
+                "required": ["name"],
+            },
         },
     },
 ]
@@ -165,3 +183,22 @@ async def execute_switch_to_vanilla_session(arguments: dict) -> str:
 
     variant_detection.switch_to_vanilla_session(process)
     return f"Switched to a vanilla session - the \"{current_variant}\" playthrough is untouched and can be returned to later."
+
+
+async def execute_rename_current_session(arguments: dict) -> str:
+    name = (arguments.get("name") or "").strip()
+    if not name:
+        return "No name given."
+    gs = game_state.get_game_state()
+    if not gs:
+        return "No game is currently being tracked - nothing to rename."
+    process = gs["process"]
+    session_id = gs.get("session_id")
+    if not session_id:
+        return "No active session to rename."
+
+    if (game_state.get_session_name(process, session_id) or "").strip().lower() == name.lower():
+        return f"This session is already named \"{name}\" - nothing to rename."
+
+    game_state.rename_session(process, session_id, name)
+    return f"Renamed this session to \"{name}\"."

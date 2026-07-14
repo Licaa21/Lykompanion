@@ -30,7 +30,14 @@ from app.services.llm.game_correction_tool import (
     GAME_CORRECTION_TOOLS,
     execute_correct_game_modpack,
     execute_correct_game_title,
+    execute_rename_current_session,
     execute_switch_to_vanilla_session,
+)
+from app.services.llm.game_tracker_tool import (
+    GAME_TRACKER_TOOLS,
+    execute_add_game_tracker,
+    execute_remove_game_tracker,
+    execute_update_game_tracker,
 )
 from app.services.llm.igdb_tool import IGDB_TOOLS, execute_lookup_game_info
 from app.services.llm.listening_tool import LISTENING_TOOLS, execute_stop_listening
@@ -80,6 +87,7 @@ ALL_TOOLS = (
     + MEDIA_TOOLS
     + YOUTUBE_PLAYLIST_TOOLS
     + GAME_CORRECTION_TOOLS
+    + GAME_TRACKER_TOOLS
 )
 
 REMINDER_TOOL_NAMES = {"add_reminder", "remove_reminder", "add_alarm", "cancel_alarm"}
@@ -531,6 +539,14 @@ async def _execute_tool_impl(name: str, arguments: dict) -> tuple[str, list[dict
         return await execute_correct_game_modpack(arguments), None, None
     if name == "switch_to_vanilla_session":
         return await execute_switch_to_vanilla_session(arguments), None, None
+    if name == "rename_current_session":
+        return await execute_rename_current_session(arguments), None, None
+    if name == "add_game_tracker":
+        return await execute_add_game_tracker(arguments), None, None
+    if name == "remove_game_tracker":
+        return await execute_remove_game_tracker(arguments), None, None
+    if name == "update_game_tracker":
+        return await execute_update_game_tracker(arguments), None, None
     return execute_tool_call(name, arguments), None, None
 
 

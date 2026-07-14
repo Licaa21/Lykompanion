@@ -211,3 +211,36 @@ def test_correct_game_title_no_active_game():
 def test_correct_game_modpack_no_active_game():
     result = asyncio.run(game_correction_tool.execute_correct_game_modpack({"modpack": "FTB StoneBlock 4"}))
     assert "no game" in result.lower()
+
+
+def test_rename_current_session_renames_the_active_session(isolated):
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+
+    result = asyncio.run(game_correction_tool.execute_rename_current_session({"name": "NG+ run"}))
+
+    assert "NG+ run" in result
+    assert game_state.get_session_name("javaw.exe", session_id) == "NG+ run"
+
+
+def test_rename_current_session_repeat_correction_is_a_noop(isolated):
+    game_state.start_tracking("javaw.exe")
+    session_id = game_state.get_active_session_id("javaw.exe")
+    game_state.rename_session("javaw.exe", session_id, "NG+ run")
+
+    result = asyncio.run(game_correction_tool.execute_rename_current_session({"name": "NG+ run"}))
+
+    assert "already named" in result.lower()
+
+
+def test_rename_current_session_no_name_given(isolated):
+    game_state.start_tracking("javaw.exe")
+
+    result = asyncio.run(game_correction_tool.execute_rename_current_session({"name": ""}))
+
+    assert "no name" in result.lower()
+
+
+def test_rename_current_session_no_active_game():
+    result = asyncio.run(game_correction_tool.execute_rename_current_session({"name": "NG+ run"}))
+    assert "no game" in result.lower()
