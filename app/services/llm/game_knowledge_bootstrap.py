@@ -308,7 +308,14 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
         return
     _attempted.add(key)
 
-    if not settings.game_state_training_enabled or game_state_training_data.has_own_training_data(process, modpack):
+    # Independent want-gates, mirroring bootstrap_game_knowledge - NOT a single early-exit on the
+    # training doc existing. That single gate silently made force_refresh_trackers a pure
+    # reset-to-defaults (observed live 2026-07-18: "regenerate trackers" left plain defaults) -
+    # it deliberately keeps the variant's good training doc while resetting trackers, exactly the
+    # state the old gate bailed out on, so the reseeding pass never ran at all.
+    want_trackers = _trackers_are_default(game_state_trackers.get_trackers(process, variant=modpack))
+    want_training = settings.game_state_training_enabled and not game_state_training_data.has_own_training_data(process, modpack)
+    if not want_trackers and not want_training:
         return
 
     logger.info("Variant bootstrap: gathering knowledge for %r (%s)", modpack, base_title)
@@ -365,7 +372,7 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
         logger.exception("Variant bootstrap: LLM pass failed for %r", modpack)
         return
 
-    if _trackers_are_default(game_state_trackers.get_trackers(process, variant=modpack)):
+    if want_trackers and _trackers_are_default(game_state_trackers.get_trackers(process, variant=modpack)):
         new_trackers = [
             {"label": t.get("label", ""), "description": t.get("description", "")}
             for t in data.get("trackers") or []
@@ -375,8 +382,11 @@ async def bootstrap_variant_knowledge(process: str, base_title: str, modpack: st
             game_state_trackers.set_trackers(process, new_trackers, variant=modpack)
             logger.info("Variant bootstrap: seeded %d tracker(s) for process=%r (%s)", len(new_trackers), process, modpack)
 
+    # Gated on want_training, not just on the reply containing a document - a trackers-only
+    # refresh (force_refresh_trackers) must never overwrite the variant's existing, possibly
+    # extraction-pass-enriched document with a fresh generic one.
     training = data.get("training_data")
-    if isinstance(training, str) and training.strip():
+    if want_training and isinstance(training, str) and training.strip():
         game_state_training_data.set_training_data(process, training.strip(), variant=modpack)
         logger.info("Variant bootstrap: seeded training data for process=%r variant=%r", process, modpack)
 

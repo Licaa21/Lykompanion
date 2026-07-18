@@ -108,6 +108,51 @@ def test_variant_bootstrap_seeds_trackers_scoped_to_the_variant_only(monkeypatch
     assert [t["label"] for t in variant_trackers if t["id"] != "activity"] == ["Vaults Cleared"]
 
 
+def test_variant_bootstrap_reseeds_trackers_even_when_training_data_already_exists(monkeypatch):
+    # Regression test (2026-07-18): bootstrap_variant_knowledge used to early-exit entirely
+    # whenever the variant already had its own training document - which is exactly the state
+    # force_refresh_trackers creates on purpose (reset trackers to defaults, keep the good doc).
+    # Net effect observed live: "regenerate trackers" was a pure reset-to-defaults, the reseeding
+    # pass never ran. The existing doc must also survive untouched (a trackers-only refresh must
+    # never replace a possibly extraction-pass-enriched document with a fresh generic one).
+    game_state_training_data.set_training_data(
+        "javaw.exe", "## Lore\nExisting enriched pack lore.", variant="FTB StoneBlock 4"
+    )
+    game_state_trackers.reset_trackers("javaw.exe", variant="FTB StoneBlock 4")
+
+    async def fake_web_search(_arguments):
+        return "No web search results for that query."
+
+    async def fake_chat_completion(*args, **kwargs):
+        return json.dumps({
+            "trackers": [{"label": "Vaults Cleared", "description": "Vaults completed this run."}],
+            "training_data": "## Lore\nFresh generic lore that must NOT overwrite the existing doc.",
+        })
+
+    monkeypatch.setattr(bootstrap, "execute_web_search", fake_web_search)
+    monkeypatch.setattr(bootstrap, "chat_completion", fake_chat_completion)
+
+    asyncio.run(bootstrap.bootstrap_variant_knowledge("javaw.exe", "Minecraft", "FTB StoneBlock 4"))
+
+    variant_trackers = game_state_trackers.get_trackers("javaw.exe", variant="FTB StoneBlock 4")
+    assert [t["label"] for t in variant_trackers if t["id"] != "activity"] == ["Vaults Cleared"]
+    assert game_state_training_data.get_training_data("javaw.exe", "FTB StoneBlock 4") == "## Lore\nExisting enriched pack lore."
+
+
+def test_variant_bootstrap_still_skips_when_nothing_is_wanted(monkeypatch):
+    # Customized trackers + an existing doc = nothing to do; the gather/LLM pass must not fire.
+    game_state_training_data.set_training_data("javaw.exe", "existing doc", variant="FTB StoneBlock 4")
+    game_state_trackers.set_trackers("javaw.exe", [{"label": "Custom"}], variant="FTB StoneBlock 4")
+
+    async def exploding_web_search(_arguments):
+        raise AssertionError("gather must not run when neither trackers nor training are wanted")
+
+    monkeypatch.setattr(bootstrap, "execute_web_search", exploding_web_search)
+    monkeypatch.setattr(bootstrap, "chat_completion", exploding_web_search)
+
+    asyncio.run(bootstrap.bootstrap_variant_knowledge("javaw.exe", "Minecraft", "FTB StoneBlock 4"))
+
+
 def test_force_refresh_trackers_regenerates_only_the_trackers_for_a_variant(monkeypatch):
     # force_refresh_trackers is the "just regenerate my trackers" action (2026-07-14) - unlike
     # force_refresh_variant, it must NOT touch the training-data document, since the user's
