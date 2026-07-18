@@ -250,6 +250,18 @@ def schedule_bootstrap(process: str) -> None:
     asyncio.get_running_loop().create_task(bootstrap_game_knowledge(process))
 
 
+def forget_process(process: str) -> None:
+    """Drops the once-per-app-run attempt markers for a process - the base one and every
+    `process::variant` one - so a deleted-then-re-approved game actually re-bootstraps. Without
+    this, delete_game wiped every data file but this in-memory cache silently swallowed both
+    re-scheduled bootstraps (observed live 2026-07-18: detection re-identified the pack at 0.95
+    right after a delete, yet trackers stayed at freshly-seeded defaults and the training doc
+    never got its Lore section - the same bug class the extraction module's
+    forget_tracked_process already fixed for ITS in-memory state on 2026-07-13)."""
+    prefix = process.lower()
+    _attempted.difference_update({k for k in _attempted if k == prefix or k.startswith(f"{prefix}::")})
+
+
 def force_refresh_base(process: str, *, reset_trackers: bool = True) -> None:
     """Wipes this process's base training-data document, resets its trackers to the untouched
     defaults, and clears the retry-attempt cache, then re-schedules the bootstrap under whatever

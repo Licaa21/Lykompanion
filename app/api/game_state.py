@@ -133,8 +133,13 @@ async def delete_game(process: str) -> dict:
     # re-approving it while it's never lost focus would silently poll under stale state forever,
     # never re-triggering start_tracking/variant detection/bootstrap for the now-wiped process.
     from app.services.llm.game_state_extraction import forget_tracked_process
+    from app.services.llm.game_knowledge_bootstrap import forget_process as forget_bootstrap_attempts
 
     forget_tracked_process(process)
+    # Same reasoning, different module's in-memory state: the bootstrap's once-per-run attempt
+    # cache would otherwise silently swallow the re-scheduled base/variant bootstraps after a
+    # delete, leaving the re-added game stuck on default trackers and a Lore-less doc.
+    forget_bootstrap_attempts(process)
     return {"ok": True}
 
 

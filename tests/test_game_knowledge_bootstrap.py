@@ -153,6 +153,17 @@ def test_variant_bootstrap_still_skips_when_nothing_is_wanted(monkeypatch):
     asyncio.run(bootstrap.bootstrap_variant_knowledge("javaw.exe", "Minecraft", "FTB StoneBlock 4"))
 
 
+def test_forget_process_drops_base_and_variant_attempt_markers():
+    # Regression test (2026-07-18): delete_game wiped every data file but not this in-memory
+    # once-per-run cache, so a deleted-then-re-approved game's re-scheduled bootstraps silently
+    # no-op'd - trackers stayed at freshly-seeded defaults and the variant doc never got its Lore.
+    bootstrap._attempted.update({"javaw.exe", "javaw.exe::ftb stoneblock 4", "otherqgame.exe"})
+
+    bootstrap.forget_process("javaw.exe")
+
+    assert bootstrap._attempted == {"otherqgame.exe"}
+
+
 def test_force_refresh_trackers_regenerates_only_the_trackers_for_a_variant(monkeypatch):
     # force_refresh_trackers is the "just regenerate my trackers" action (2026-07-14) - unlike
     # force_refresh_variant, it must NOT touch the training-data document, since the user's
