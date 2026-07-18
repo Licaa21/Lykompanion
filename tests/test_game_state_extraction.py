@@ -200,6 +200,59 @@ class TestModpackCorroborationLine:
         assert result == ""
 
 
+class TestRegisterWindowTitle:
+    """Coverage for the 2026-07-18 title-change re-detection: alt-tabbing between two instances of
+    the same exe (a modpack's javaw.exe and a vanilla one) is invisible to the poller's
+    process-name check, and prompt-level mismatch detection proved unreliable (a lite-tier model
+    returned modpack_mismatch: null for 17 consecutive passes while the window title plainly
+    contradicted the active pack). The deterministic fix: a changed-and-stable window title
+    re-runs launch-signal variant detection, which already auto-switches sessions."""
+
+    @pytest.fixture(autouse=True)
+    def reset_title_state(self, monkeypatch):
+        monkeypatch.setattr(game_state_extraction, "_last_window_title", None)
+        monkeypatch.setattr(game_state_extraction, "_title_change_streak", None)
+
+    def test_first_title_is_stored_without_firing(self):
+        assert game_state_extraction._register_window_title("FTB StoneBlock 4") is False
+        assert game_state_extraction._last_window_title == "FTB StoneBlock 4"
+
+    def test_changed_title_fires_only_after_holding_for_the_streak(self):
+        game_state_extraction._register_window_title("FTB StoneBlock 4")
+
+        results = [
+            game_state_extraction._register_window_title("Minecraft 26.2 - Singleplayer")
+            for _ in range(game_state_extraction._TITLE_CHANGE_STREAK_TICKS)
+        ]
+
+        assert results[:-1] == [False] * (game_state_extraction._TITLE_CHANGE_STREAK_TICKS - 1)
+        assert results[-1] is True
+        assert game_state_extraction._last_window_title == "Minecraft 26.2 - Singleplayer"
+        # Accepted - the same title again is no longer a change.
+        assert game_state_extraction._register_window_title("Minecraft 26.2 - Singleplayer") is False
+
+    def test_constantly_changing_title_never_fires(self):
+        # A game streaming FPS into its own title changes it every tick - the streak never
+        # stabilizes, so detection is never re-triggered (and must not be, or it'd fire an LLM
+        # call per tick).
+        game_state_extraction._register_window_title("Game - 60 FPS")
+        for fps in range(61, 61 + game_state_extraction._TITLE_CHANGE_STREAK_TICKS * 3):
+            assert game_state_extraction._register_window_title(f"Game - {fps} FPS") is False
+
+    def test_reverting_mid_streak_cancels_the_pending_change(self):
+        game_state_extraction._register_window_title("FTB StoneBlock 4")
+        game_state_extraction._register_window_title("Minecraft 26.2")  # streak 1
+        assert game_state_extraction._register_window_title("FTB StoneBlock 4") is False  # back - cancels
+        assert game_state_extraction._title_change_streak is None
+        # A fresh change starts its streak over from 1.
+        assert game_state_extraction._register_window_title("Minecraft 26.2") is False
+
+    def test_none_ticks_are_ignored(self):
+        game_state_extraction._register_window_title("FTB StoneBlock 4")
+        assert game_state_extraction._register_window_title(None) is False
+        assert game_state_extraction._last_window_title == "FTB StoneBlock 4"
+
+
 class TestBuildModpackMismatchMessage:
     """Regression coverage (2026-07-14): a session tagged with a modpack had no way to flag that
     the screen no longer looked consistent with it - the "modpack" field is only ever offered

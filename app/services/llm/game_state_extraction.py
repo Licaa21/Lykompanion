@@ -29,6 +29,7 @@ from app.services.system.processes import (
     get_foreground_process_details,
     get_foreground_process_name,
     get_foreground_window_if_windowed,
+    get_foreground_window_title,
     is_foreground_window_fullscreen,
     is_foreground_window_large,
     is_process_running,
@@ -38,6 +39,21 @@ logger = logging.getLogger(__name__)
 
 _last_process: str | None = None
 _last_kept_text: str | None = None
+
+# Last seen foreground window title while tracking (per tick). A changed title on the SAME
+# process name is the one os-level signal that survives alt-tabbing between two instances of the
+# same exe (a modpack's javaw.exe and a vanilla one) - the process-name check can't see that, and
+# prompt-level detection of the switch proved unreliable (a lite-tier model returned
+# modpack_mismatch: null 17 consecutive passes while the title plainly contradicted the active
+# pack, 2026-07-18). On change, launch-signal variant detection is simply re-run - it already
+# auto-switches sessions with confidence gates, and its per-signals result cache makes flapping
+# between two known titles free after the first call each. The new title must hold for a few
+# consecutive ticks first (same idiom as _large_window_streak): a game that streams live values
+# (FPS counters) into its own title changes it every tick and must never re-trigger detection -
+# such a title never stabilizes, so it never fires; an alt-tabbed window's stable title does.
+_last_window_title: str | None = None
+_title_change_streak: tuple[str, int] | None = None  # (candidate new title, consecutive ticks)
+_TITLE_CHANGE_STREAK_TICKS = 3
 
 # Last non-approved foreground process the poller already logged a "skipping" message for, so
 # _capture_tick (which ticks every game_state_capture_interval_seconds, default 1s) logs a
@@ -192,10 +208,35 @@ def forget_tracked_process(process: str) -> None:
     foreground process name is identical before and after the delete. The freshly-wiped process
     would otherwise keep polling under stale state forever, never re-seeding trackers/training
     data or re-detecting a modpack, even though its underlying data was just cleared."""
-    global _last_process
+    global _last_process, _last_window_title, _title_change_streak
     if _last_process and _last_process.lower() == process.lower():
         _last_process = None
+        _last_window_title = None
+        _title_change_streak = None
         _reset_window()
+
+
+def _register_window_title(title: str | None) -> bool:
+    """Feed one tick's foreground window title into the title-change tracker. Returns True
+    exactly once per genuine change: when a NEW title (different from the last accepted one) has
+    held steady for _TITLE_CHANGE_STREAK_TICKS consecutive ticks - the signal that the same-named
+    process is now a different window/instance and variant detection should re-run. A title that
+    keeps changing every tick (a game streaming FPS/stats into its own title bar) never
+    stabilizes, so it never fires. None ticks (transient lookup failures, borderless windows with
+    no title) are ignored entirely rather than treated as changes."""
+    global _last_window_title, _title_change_streak
+    if title and _last_window_title and title != _last_window_title:
+        streak = _title_change_streak[1] + 1 if _title_change_streak and _title_change_streak[0] == title else 1
+        _title_change_streak = (title, streak)
+        if streak >= _TITLE_CHANGE_STREAK_TICKS:
+            _last_window_title = title
+            _title_change_streak = None
+            return True
+        return False
+    if title and _last_window_title is None:
+        _last_window_title = title
+    _title_change_streak = None
+    return False
 
 
 def _frames_similar(a: str, b: str) -> tuple[bool, float]:
@@ -564,7 +605,7 @@ async def _capture_tick() -> None:
     this function's own capture/OCR work on later ticks."""
     global _last_process, _last_kept_text, _frames, _window_started_at, _empty_ocr_streak
     global _first_frame_b64, _last_frame_b64, _window_first_image, _window_last_image, _consecutive_skips
-    global _last_logged_skip, _large_window_streak, _last_tick_at
+    global _last_logged_skip, _large_window_streak, _last_tick_at, _last_window_title, _title_change_streak
 
     if not settings.game_state_ocr_enabled or sys.platform != "win32":
         return
@@ -613,6 +654,8 @@ async def _capture_tick() -> None:
                 _last_process,
             )
             _last_process = None
+            _last_window_title = None
+            _title_change_streak = None
             _reset_window()
             game_state.stop_tracking()
             overlay_process.stop()
@@ -621,6 +664,8 @@ async def _capture_tick() -> None:
     process = foreground
     if process != _last_process:
         _last_process = process
+        _last_window_title = get_foreground_window_title()
+        _title_change_streak = None
         _reset_window()
         # Flips tracking=True immediately (previous session's values for this process show up
         # right away if any exist, empty otherwise) instead of waiting a full poll window for the
@@ -644,20 +689,37 @@ async def _capture_tick() -> None:
         # nowhere more specific to land at save time and default to general scope.
         gs = game_state.get_game_state()
         schedule_retagging(process, gs["session_id"] if gs else None)
-    elif _last_tick_at is not None and time.time() - _last_tick_at > settings.game_state_poll_interval_seconds:
-        # Same process, but it's been longer than a full poll interval since the last tick that
-        # actually reached here - focus was elsewhere for a while (alt-tabbed away), not just
-        # normal capture-interval jitter, since ticks this function never even runs for an
-        # unfocused process. The buffered window spans that whole absence and would produce a
-        # meaningless diff against an ancient frame, or close instantly and chain into a second
-        # window right behind it - observed tripping a provider's own high-frequency abuse
-        # detection (2026-07-13). Start the window clean instead of closing a stale one.
-        logger.info(
-            "Game-state poll: process=%r regained focus after %.1fs away - resetting the poll "
-            "window instead of closing one that spans the whole absence",
-            process, time.time() - _last_tick_at,
-        )
-        _reset_window()
+    else:
+        if _last_tick_at is not None and time.time() - _last_tick_at > settings.game_state_poll_interval_seconds:
+            # Same process, but it's been longer than a full poll interval since the last tick that
+            # actually reached here - focus was elsewhere for a while (alt-tabbed away), not just
+            # normal capture-interval jitter, since ticks this function never even runs for an
+            # unfocused process. The buffered window spans that whole absence and would produce a
+            # meaningless diff against an ancient frame, or close instantly and chain into a second
+            # window right behind it - observed tripping a provider's own high-frequency abuse
+            # detection (2026-07-13). Start the window clean instead of closing a stale one.
+            logger.info(
+                "Game-state poll: process=%r regained focus after %.1fs away - resetting the poll "
+                "window instead of closing one that spans the whole absence",
+                process, time.time() - _last_tick_at,
+            )
+            _reset_window()
+
+        # Same process name, but the window's title changed and held steady - the one os-level
+        # signal that catches alt-tabbing between two instances of the same exe (a modpack's
+        # javaw.exe vs a vanilla one), which the process-name check above can't see. Re-run
+        # launch-signal variant detection: it auto-switches to the right session with its own
+        # confidence gates, and its per-signals result cache makes bouncing between two known
+        # windows free after the first call each. See _register_window_title for the
+        # streak/stability requirement (games that stream live values into their title).
+        previous_title = _last_window_title
+        if _register_window_title(get_foreground_window_title()):
+            logger.info(
+                "Game-state poll: window title for process=%r changed %r -> %r - re-running "
+                "variant detection in case this is a different instance/session",
+                process, previous_title, _last_window_title,
+            )
+            schedule_variant_detection(process)
 
     _last_tick_at = time.time()
 

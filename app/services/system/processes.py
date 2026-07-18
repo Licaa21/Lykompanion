@@ -28,6 +28,33 @@ def get_foreground_process_name() -> str | None:
         return None
 
 
+def get_foreground_window_title() -> str | None:
+    """Just the focused window's title bar text - a deliberately cheap subset of
+    get_foreground_process_details() (pure ctypes, no psutil process/cmdline reads), safe to call
+    every capture tick. Used by the game-state poller to notice the tracked window changing
+    identity (e.g. alt-tabbing between two javaw.exe instances - a modpack's and a vanilla one -
+    which is invisible to the process-name check). None on non-Windows, no focused window, or an
+    empty title."""
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return None
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        return buffer.value or None
+    except Exception:
+        return None
+
+
 def get_foreground_process_details() -> dict | None:
     """Identity signals about the focused window's process, for modpack/variant detection:
     window title, command line, exe path, working directory, and parent process name. Modded
