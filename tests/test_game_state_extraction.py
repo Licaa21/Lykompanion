@@ -253,6 +253,62 @@ class TestRegisterWindowTitle:
         assert game_state_extraction._last_window_title == "FTB StoneBlock 4"
 
 
+class TestSwitchSessionForTitleChange:
+    """Coverage for the 2026-07-18 deterministic title-based switch: the LLM detection re-run
+    proved decorative for its own target case (verdict `modded=True modpack=None confidence=0.70`
+    falls through both action gates), while the titles themselves plainly carried the answer -
+    "FTB StoneBlock 4" -> "Minecraft 26.2 - Singleplayer"."""
+
+    def test_switches_to_the_session_whose_variant_the_new_title_names(self, isolated):
+        game_state.start_tracking("javaw.exe")
+        plain_session = game_state.get_active_session_id("javaw.exe")
+        pack_session = game_state.create_session("javaw.exe", "FTB Stoneblock 4", variant="FTB Stoneblock 4")["session_id"]
+        game_state.switch_session("javaw.exe", plain_session)  # currently on vanilla
+
+        result = game_state_extraction._switch_session_for_title_change(
+            "javaw.exe", "Minecraft 26.2 - Singleplayer", "Minecraft* 1.20.1 - FTB StoneBlock 4",
+        )
+
+        assert result is True
+        assert game_state.get_active_session_id("javaw.exe") == pack_session
+        # The player is told about the automatic switch via the proactive pending queue.
+        pending = game_state_extraction.reminders_store.load_pending()
+        assert len(pending) == 1 and "FTB Stoneblock 4" in pending[0]["text"]
+
+    def test_switches_to_vanilla_when_active_packs_name_leaves_the_title(self, isolated):
+        # The exact live case: pack session active, title changed "FTB StoneBlock 4" ->
+        # "Minecraft 26.2 - Singleplayer" (no pack mention), LLM verdict was too mushy to act.
+        game_state.start_tracking("javaw.exe")
+        plain_session = game_state.get_active_session_id("javaw.exe")
+        game_state.create_session("javaw.exe", "FTB Stoneblock 4", variant="FTB Stoneblock 4")  # active now
+
+        result = game_state_extraction._switch_session_for_title_change(
+            "javaw.exe", "FTB StoneBlock 4", "Minecraft 26.2 - Singleplayer",
+        )
+
+        assert result is True
+        assert game_state.get_active_session_id("javaw.exe") == plain_session
+
+    def test_no_action_when_titles_decide_nothing(self, isolated):
+        # Active pack's name was never in the previous title (pack detected from cmdline, not
+        # title) - a title change proves nothing, leave it to the LLM re-run.
+        game_state.start_tracking("javaw.exe")
+        pack_session = game_state.create_session("javaw.exe", "Nolvus", variant="Nolvus")["session_id"]
+
+        result = game_state_extraction._switch_session_for_title_change(
+            "javaw.exe", "Skyrim Special Edition", "Skyrim Special Edition - Menu",
+        )
+
+        assert result is False
+        assert game_state.get_active_session_id("javaw.exe") == pack_session
+
+    def test_title_mentions_ignores_case_and_punctuation(self):
+        assert game_state_extraction._title_mentions("Minecraft* 1.20.1 - FTB StoneBlock 4", "FTB Stoneblock 4") is True
+        assert game_state_extraction._title_mentions("Minecraft 26.2 - Singleplayer", "FTB Stoneblock 4") is False
+        assert game_state_extraction._title_mentions(None, "FTB Stoneblock 4") is False
+        assert game_state_extraction._title_mentions("anything", "  ") is False
+
+
 class TestBuildModpackMismatchMessage:
     """Regression coverage (2026-07-14): a session tagged with a modpack had no way to flag that
     the screen no longer looked consistent with it - the "modpack" field is only ever offered

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import sys
 import time
 from difflib import SequenceMatcher
@@ -20,7 +21,11 @@ from app.core.prompts import load_prompt
 from app.services.llm.client import chat_completion, parse_json_reply
 from app.services.llm.memory_retagging import schedule_retagging
 from app.services.llm.observation_confirmation import maybe_schedule_confirmation
-from app.services.llm.variant_detection import apply_detected_variant, schedule_variant_detection
+from app.services.llm.variant_detection import (
+    apply_detected_variant,
+    schedule_variant_detection,
+    switch_to_vanilla_session,
+)
 from app.services import overlay_process
 from app.services.ocr import windows_ocr
 from app.services.screenshot.capture import image_to_b64
@@ -236,6 +241,75 @@ def _register_window_title(title: str | None) -> bool:
     if title and _last_window_title is None:
         _last_window_title = title
     _title_change_streak = None
+    return False
+
+
+def _title_mentions(title: str | None, name: str) -> bool:
+    """Whether `name` (a modpack/variant name) appears inside `title`, comparing only lowercase
+    alphanumerics so punctuation/spacing/case differences ("FTB StoneBlock 4" vs a session's
+    "FTB Stoneblock 4", a title like "Minecraft* 1.20.1 - FTB StoneBlock 4") never break the
+    match."""
+    if not title:
+        return False
+    normalized_name = re.sub(r"[^a-z0-9]", "", name.lower())
+    return bool(normalized_name) and normalized_name in re.sub(r"[^a-z0-9]", "", title.lower())
+
+
+def _switch_session_for_title_change(process: str, previous_title: str | None, new_title: str | None) -> bool:
+    """Deterministic session switching from the window title alone, tried BEFORE waiting on the
+    LLM variant-detection re-run - added 2026-07-18 after that re-run proved decorative for the
+    exact case it was built for: alt-tabbing off the pack instance produced the mushy verdict
+    `modded=True modpack=None confidence=0.70`, which falls through both of detection's action
+    gates (a named pack at >=0.6, or confidently-vanilla at >=0.85), so nothing switched - while
+    the titles themselves carried the answer plainly ("FTB StoneBlock 4" -> "Minecraft 26.2 -
+    Singleplayer"). Two code-checkable rules, same _titles_match-style philosophy as the other
+    guards in this area:
+
+    1. The new title names an existing session's variant -> switch straight to that session.
+    2. The active session's variant was in the previous title but isn't in the new one -> this
+       window moved off that pack's instance -> switch to the plain/vanilla session (the LLM
+       re-run still refines afterward: if it confidently names a different pack from cmdline
+       evidence the title didn't show, apply_detected_variant corrects the landing).
+
+    Returns True when a rule matched (even if already on the right session - the title situation
+    is accounted for either way), False when the titles alone can't decide."""
+    gs = game_state.get_game_state()
+    if not gs or gs["process"].lower() != process.lower():
+        return False
+
+    for session in game_state.get_sessions(process):
+        variant = (session.get("variant") or "").strip()
+        if variant and _title_mentions(new_title, variant):
+            if session["session_id"] != gs.get("session_id"):
+                logger.info(
+                    "Game-state poll: new window title names the %r pack - switching process=%r "
+                    "to its session directly",
+                    variant, process,
+                )
+                game_state.switch_session(process, session["session_id"])
+                # An automatic mid-session switch is surprising if silent - tell the player
+                # through the same pending queue proactive messages use (injected into chat as
+                # an unprompted companion message and narrated). Delivered verbatim, so keep it
+                # short and in the companion's casual voice.
+                reminders_store.add_pending(
+                    f"Looks like you hopped back into {variant} — I've switched over to that playthrough's session."
+                )
+            return True
+
+    active_variant = (gs.get("variant") or "").strip()
+    if active_variant and _title_mentions(previous_title, active_variant) and not _title_mentions(new_title, active_variant):
+        logger.info(
+            "Game-state poll: window title no longer mentions the active %r pack - switching "
+            "process=%r to a vanilla session",
+            active_variant, process,
+        )
+        switch_to_vanilla_session(process)
+        reminders_store.add_pending(
+            f"Noticed you're not in {active_variant} anymore — I've moved tracking over to your vanilla session. "
+            "Say the word if that's wrong and I'll switch back."
+        )
+        return True
+
     return False
 
 
@@ -719,6 +793,10 @@ async def _capture_tick() -> None:
                 "variant detection in case this is a different instance/session",
                 process, previous_title, _last_window_title,
             )
+            # Deterministic first (see _switch_session_for_title_change - the LLM re-run below
+            # proved decorative for the exact case this was built for), LLM re-run second as
+            # refinement for what the titles alone can't decide.
+            _switch_session_for_title_change(process, previous_title, _last_window_title)
             schedule_variant_detection(process)
 
     _last_tick_at = time.time()

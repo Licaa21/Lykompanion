@@ -4,7 +4,20 @@ from collections import deque
 
 import pytest
 
-from app.core import debug_log
+from app.core import debug_log, reminders
+
+
+@pytest.fixture(autouse=True)
+def _isolate_reminders(tmp_path, monkeypatch):
+    """Same lesson as _isolate_debug_log below: reminders_store.add_pending() persists to the
+    REAL data/reminders_pending.json, and production code paths tests exercise (e.g. the
+    deterministic session-switch notifying the player) call it as a side effect - isolate the
+    paths and their module-level caches for every test so no test can leave phantom pending
+    messages in the running app's queue."""
+    monkeypatch.setattr(reminders, "REMINDERS_PATH", tmp_path / "reminders.json")
+    monkeypatch.setattr(reminders, "PENDING_PATH", tmp_path / "reminders_pending.json")
+    monkeypatch.setattr(reminders, "_entries_cache", None)
+    monkeypatch.setattr(reminders, "_pending_cache", None)
 
 
 @pytest.fixture(autouse=True)
