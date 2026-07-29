@@ -42,25 +42,11 @@ function setupDesktopTitlebar() {
       api()?.window_save_bounds?.(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     const commit = (x, y, w, h) => { setBounds(x, y, w, h); saveBounds(x, y, w, h); };
     const curBounds = () => ({ x: window.screenX, y: window.screenY, w: window.innerWidth, h: window.innerHeight });
-    // Native OS work area, not Chromium's own screen.avail* - the browser's screen object can keep
-    // reporting a stale/wrong monitor's resolution after a display is disconnected or disabled (seen
-    // with a TV left connected-but-disabled: window blew up to the TV's resolution on launch and
-    // every subsequent snap/resize kept re-reading that same wrong value, so nothing the user did
-    // could size it back down). get_work_area() re-queries Windows fresh every call. Cached here
-    // since it's an async bridge call but workArea() is used synchronously in per-frame drag/resize
-    // math; refreshed at gesture start and on focus, so it's never more than one gesture stale.
-    let cachedWorkArea = null;
-    const refreshWorkArea = async () => {
-      try {
-        const a = await api()?.get_work_area?.();
-        if (a) cachedWorkArea = a;
-      } catch (_) {}
-    };
-    const workArea = () => cachedWorkArea || {
-      x: screen.availLeft || 0, y: screen.availTop || 0, w: screen.availWidth, h: screen.availHeight,
-    };
-    refreshWorkArea();
-    window.addEventListener('focus', refreshWorkArea);
+    // Chromium's screen.avail* correctly tracks whichever monitor the window/cursor is CURRENTLY on
+    // (needed live, every drag/resize frame, for cross-monitor moves and the snap-preview target) -
+    // do not replace this with a single cached native query, that breaks moving the window onto a
+    // second monitor entirely (tried 2026-07-29, reverted - see the startup-only fix below instead).
+    const workArea = () => ({ x: screen.availLeft || 0, y: screen.availTop || 0, w: screen.availWidth, h: screen.availHeight });
 
     // Lightweight Windows-Snap: snapZone tracks where the window is snapped; restoreBounds is the
     // floating rect to return to. No OS snap overlay/layouts — this is a pure JS reimplementation.
@@ -142,7 +128,6 @@ function setupDesktopTitlebar() {
       // into a screen edge snaps: top = maximize, left/right = half. Moving = one bridge call/frame.
       drag.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || !api()?.window_set_bounds) return;
-        refreshWorkArea();
         const sx = e.screenX, sy = e.screenY, downClientX = e.clientX;
         // Capture the snap state at press time but DON'T un-snap yet — un-snapping happens on the
         // first actual move. A press with no move (e.g. a double-click) must leave snapZone intact
@@ -203,7 +188,6 @@ function setupDesktopTitlebar() {
       grip.addEventListener('pointerdown', (e) => {
         if (!api()?.window_set_bounds) return;
         e.preventDefault();
-        refreshWorkArea();
         setSnapZone(null); restoreBounds = null;
         const dir = grip.dataset.dir;
         const sx = e.screenX, sy = e.screenY;
@@ -235,13 +219,23 @@ function setupDesktopTitlebar() {
     });
 
     // run_app.py launches the window hidden, at half work-area width. 100ms after the window is
-    // ready, drive it to full size through the same maximize path the titlebar's maximize button
-    // uses (so snapZone/restoreBounds end up correctly seeded - restoreBounds becomes this
-    // initial half-width window), then reveal it - the whole half->full transition happens while
-    // still hidden, so the window only ever appears already full-size.
+    // ready, drive it to full size (same seeding of snapZone/restoreBounds applySnap('max', ...)
+    // would do - restoreBounds becomes this initial half-width window), then reveal it - the whole
+    // half->full transition happens while still hidden, so the window only ever appears full-size.
+    // Uses the NATIVE work area (get_work_area(), same SystemParametersInfo call create_window
+    // already trusts) instead of workArea()/Chromium's screen.avail* just for this one startup call
+    // - screen.avail* can still be reporting a stale/wrong monitor's resolution this early (seen
+    // with a disconnected/disabled TV: window opened at the TV's resolution). Scoped to only this
+    // call, not workArea() itself - workArea() must stay Chromium-based for every interactive
+    // drag/resize/snap afterward, where it correctly tracks whichever monitor the window/cursor is
+    // actually on; a native query there broke moving the window onto a second monitor entirely
+    // (tried and reverted the same day).
     setTimeout(async () => {
-      await refreshWorkArea();
-      applySnap('max', curBounds());
+      let a = null;
+      try { a = await api()?.get_work_area?.(); } catch (_) {}
+      if (!a) a = workArea();
+      restoreBounds = curBounds(); setSnapZone('max');
+      commit(a.x, a.y, a.w, a.h);
       api()?.window_show?.();
     }, 100);
   };
