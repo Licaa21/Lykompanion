@@ -42,7 +42,25 @@ function setupDesktopTitlebar() {
       api()?.window_save_bounds?.(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     const commit = (x, y, w, h) => { setBounds(x, y, w, h); saveBounds(x, y, w, h); };
     const curBounds = () => ({ x: window.screenX, y: window.screenY, w: window.innerWidth, h: window.innerHeight });
-    const workArea = () => ({ x: screen.availLeft || 0, y: screen.availTop || 0, w: screen.availWidth, h: screen.availHeight });
+    // Native OS work area, not Chromium's own screen.avail* - the browser's screen object can keep
+    // reporting a stale/wrong monitor's resolution after a display is disconnected or disabled (seen
+    // with a TV left connected-but-disabled: window blew up to the TV's resolution on launch and
+    // every subsequent snap/resize kept re-reading that same wrong value, so nothing the user did
+    // could size it back down). get_work_area() re-queries Windows fresh every call. Cached here
+    // since it's an async bridge call but workArea() is used synchronously in per-frame drag/resize
+    // math; refreshed at gesture start and on focus, so it's never more than one gesture stale.
+    let cachedWorkArea = null;
+    const refreshWorkArea = async () => {
+      try {
+        const a = await api()?.get_work_area?.();
+        if (a) cachedWorkArea = a;
+      } catch (_) {}
+    };
+    const workArea = () => cachedWorkArea || {
+      x: screen.availLeft || 0, y: screen.availTop || 0, w: screen.availWidth, h: screen.availHeight,
+    };
+    refreshWorkArea();
+    window.addEventListener('focus', refreshWorkArea);
 
     // Lightweight Windows-Snap: snapZone tracks where the window is snapped; restoreBounds is the
     // floating rect to return to. No OS snap overlay/layouts — this is a pure JS reimplementation.
@@ -124,6 +142,7 @@ function setupDesktopTitlebar() {
       // into a screen edge snaps: top = maximize, left/right = half. Moving = one bridge call/frame.
       drag.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || !api()?.window_set_bounds) return;
+        refreshWorkArea();
         const sx = e.screenX, sy = e.screenY, downClientX = e.clientX;
         // Capture the snap state at press time but DON'T un-snap yet — un-snapping happens on the
         // first actual move. A press with no move (e.g. a double-click) must leave snapZone intact
@@ -184,6 +203,7 @@ function setupDesktopTitlebar() {
       grip.addEventListener('pointerdown', (e) => {
         if (!api()?.window_set_bounds) return;
         e.preventDefault();
+        refreshWorkArea();
         setSnapZone(null); restoreBounds = null;
         const dir = grip.dataset.dir;
         const sx = e.screenX, sy = e.screenY;
@@ -219,7 +239,8 @@ function setupDesktopTitlebar() {
     // uses (so snapZone/restoreBounds end up correctly seeded - restoreBounds becomes this
     // initial half-width window), then reveal it - the whole half->full transition happens while
     // still hidden, so the window only ever appears already full-size.
-    setTimeout(() => {
+    setTimeout(async () => {
+      await refreshWorkArea();
       applySnap('max', curBounds());
       api()?.window_show?.();
     }, 100);

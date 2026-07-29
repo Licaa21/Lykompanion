@@ -360,6 +360,16 @@ def main() -> None:
         except Exception:
             pass
 
+    # Native work area for the JS-driven maximize/snap logic (init.js's workArea()). Chromium's own
+    # screen.availWidth/availHeight can report a stale/wrong monitor's resolution when a display was
+    # recently disconnected or disabled (observed: window blown up to a since-disabled TV's
+    # resolution and un-resizable back to the real monitor, because every snap/resize kept re-reading
+    # the same wrong browser-side value) - SystemParametersInfo is queried fresh from Windows every
+    # call and isn't subject to that staleness, so JS should trust this over its own screen object.
+    def get_work_area() -> dict:
+        x, y, w, h = _primary_work_area_logical()
+        return {"x": x, "y": y, "w": w, "h": h}
+
     # Pop-out YouTube player: a real second OS window (so the OS gives dragging to another
     # monitor for free) but frameless like the main window, for visual consistency - it draws its
     # own header/controls (web/player.html) instead of a native Windows title bar. Playback state
@@ -445,6 +455,7 @@ def main() -> None:
     win.expose(
         _make_download_api(win), window_minimize, window_close, window_show,
         window_set_bounds, window_save_bounds, window_toggle_fullscreen, open_player_window,
+        get_work_area,
     )
 
     def _on_loaded() -> None:
